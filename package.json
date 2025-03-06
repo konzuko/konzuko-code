@@ -7,10 +7,10 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@preact/preset-vite": "^2.10.1",
-    "preact": "^10.17.1"
+    "preact": "^10.26.4"
   },
   "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
     "vite": "^4.4.9"
   },
   "vite": {

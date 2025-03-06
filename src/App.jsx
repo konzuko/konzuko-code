@@ -3,6 +3,18 @@ import ChatPane from './chatpane.jsx';
 import { callApiForText, callApiForImageDescription } from './api.js';
 import { useChats, useSettings } from './hooks.js';
 
+/**
+ * Helper function to read a File as a base64 data URL
+ */
+function readFileAsDataURL(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (evt) => resolve(evt.target.result);
+    reader.onerror = (err) => reject(err);
+    reader.readAsDataURL(file);
+  });
+}
+
 function App() {
   const {
     chats,
@@ -26,13 +38,15 @@ function App() {
     fixCode: '',
     fixErrors: '',
   });
+  const [droppedFiles, setDroppedFiles] = useState({});
   const [confirmRevert, setConfirmRevert] = useState(false);
   const fileInputRef = useRef();
   const [loading, setLoading] = useState(false);
-  const [uploadedImages, setUploadedImages] = useState([]);
-  const [imageDescriptionLoading, setImageDescriptionLoading] = useState(false);
 
-  // Ensure at least one chat is available
+  // Each item in uploadedImages => { dataUrl, name, size }
+  const [uploadedImages, setUploadedImages] = useState([]);
+
+  // Ensure at least one chat exists
   useEffect(() => {
     if (chats.length === 0) {
       handleNewChat();
@@ -41,7 +55,6 @@ function App() {
     }
   }, [chats]);
 
-  // Auto trigger memory management if token limit is exceeded
   useEffect(() => {
     if (isMemoryLimitExceeded && currentChatId) {
       handleMemoryRestriction();
@@ -52,7 +65,6 @@ function App() {
     if (!settings.apiKey || !currentChatId) return;
     setLoading(true);
     try {
-      // Show notification to the user
       const chat = chats.find(c => c.id === currentChatId);
       if (chat) {
         chat.messages.push({
@@ -62,18 +74,13 @@ function App() {
         });
         updateChat({ ...chat });
       }
-      
-      // Wait a moment for the user to see the notification
       await new Promise(resolve => setTimeout(resolve, 1500));
-      
       const newChatId = await handleMemoryManagement(currentChatId, settings.apiKey);
       if (newChatId) {
         setCurrentChatId(newChatId);
       }
     } catch (error) {
       console.error('Error in memory management:', error);
-      
-      // Show error notification
       const chat = chats.find(c => c.id === currentChatId);
       if (chat) {
         chat.messages.push({
@@ -114,30 +121,108 @@ function App() {
     setShowSettings(false);
   }
 
+  // ─── Drag & Drop Helpers ─────────────────────────────
+  function isTextFile(file) {
+    const allowedExtensions = ['.txt', '.js', '.jsx', '.ts', '.tsx', '.py', '.json', '.html', '.css', '.md'];
+    if (file.type.startsWith("text/")) return true;
+    const lowerName = file.name.toLowerCase();
+    return allowedExtensions.some(ext => lowerName.endsWith(ext));
+  }
+
+  function handleTextareaDrop(fieldName, event) {
+    event.preventDefault();
+    event.stopPropagation();
+    const files = event.dataTransfer.files;
+    for (const file of files) {
+      if (isTextFile(file)) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const textContent = e.target.result;
+          setFormData(prev => ({
+            ...prev,
+            [fieldName]: prev[fieldName] + "\n/* Content from " + file.name + " */\n" + textContent
+          }));
+          setDroppedFiles(prev => ({
+            ...prev,
+            [fieldName]: [...(prev[fieldName] || []), file.name]
+          }));
+        };
+        reader.readAsText(file);
+      }
+    }
+  }
+
+  // Make this async so we can read images as data URLs
+  async function handleTemplateDragOver(e) {
+    e.preventDefault();
+  }
+
+  async function handleTemplateDrop(e) {
+    e.preventDefault();
+    // If drop is not on a textarea, add image files as base64 data URLs
+    if (e.target.tagName !== 'TEXTAREA') {
+      const files = e.dataTransfer.files;
+      for (const file of files) {
+        if (file.type.startsWith('image/')) {
+          try {
+            const dataUrl = await readFileAsDataURL(file);
+            setUploadedImages(prev => [...prev, { dataUrl, name: file.name, size: file.size }]);
+          } catch (err) {
+            console.error('Error reading image file:', err);
+          }
+        }
+      }
+    }
+  }
+
+  async function handleFileSelection(e) {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      if (file.type.startsWith('image/')) {
+        try {
+          const dataUrl = await readFileAsDataURL(file);
+          setUploadedImages(prev => [...prev, { dataUrl, name: file.name, size: file.size }]);
+        } catch (err) {
+          console.error('Error reading image file:', err);
+        }
+      }
+    }
+  }
+
+  function removeUploadedImage(index) {
+    setUploadedImages(prev => {
+      const newImages = [...prev];
+      newImages.splice(index, 1);
+      return newImages;
+    });
+  }
+  // ─────────────────────────────────────────────────────
+
+  // Unified prompt sending function
   async function handleSendPrompt() {
     if (!currentChatId) return;
     const chat = chats.find(c => c.id === currentChatId);
     if (!chat) return;
 
     let imagesDescription = '';
-    const files = fileInputRef.current?.files;
-    if (files && files.length > 0) {
-      const urls = [];
-      for (let i = 0; i < files.length; i++) {
-        const url = URL.createObjectURL(files[i]);
-        urls.push(url);
-      }
+    if (uploadedImages.length > 0) {
+      const dataUrls = uploadedImages.map(img => img.dataUrl);
       setLoading(true);
       const descRes = await callApiForImageDescription({
-        imageUrls: urls,
+        imageUrls: dataUrls,
         apiKey: settings.apiKey,
-        model: settings.model,
+        model: settings.model  // use the selected model for both text & image calls
       });
       setLoading(false);
       if (!descRes.error && descRes.content) {
-        imagesDescription = '\\n[ IMAGES DESCRIBED AS ]:\\n' + descRes.content;
+        imagesDescription = '\n[ IMAGES DESCRIBED AS ]:\n' + descRes.content;
+      } else {
+        imagesDescription = '\n[ IMAGES DESCRIBED AS ]: Error describing images: ' + (descRes.error || 'unknown error');
       }
-      fileInputRef.current.value = '';
+      // Clear images after processing
+      setUploadedImages([]);
     }
 
     let userContent = '';
@@ -150,7 +235,7 @@ FEATURES: ${formData.developFeatures}
 RETURN FORMAT: ${formData.developReturnFormat}
 THINGS TO REMEMBER/WARNINGS: ${formData.developWarnings}
 CONTEXT: ${formData.developContext}
-${imagesDescription ? imagesDescription : ''}
+${imagesDescription}
 ${isFirstMessage ? 'PLAN: At the end, create a comprehensive plan.' : ''}
       `.trim();
       if (!formData.developGoal.trim()) {
@@ -162,7 +247,7 @@ ${isFirstMessage ? 'PLAN: At the end, create a comprehensive plan.' : ''}
 MODE: FIX
 FIX YOUR CODE: ${formData.fixCode}
 ANY ERRORS?: ${formData.fixErrors}
-${imagesDescription ? imagesDescription : ''}
+${imagesDescription}
       `.trim();
     } else if (mode === 'REVERT') {
       if (!confirmRevert) {
@@ -179,7 +264,7 @@ ${imagesDescription ? imagesDescription : ''}
     }
     if (!userContent.trim()) return;
 
-    // Add the user's message to the chat
+    // Append the user message and send API call
     chat.messages.push({
       role: 'user',
       content: userContent,
@@ -204,12 +289,12 @@ ${imagesDescription ? imagesDescription : ''}
       });
     }
     updateChat({ ...chat });
-    
-    // Check if memory limit is exceeded and handle it
+
     if (isMemoryLimitExceeded) {
       await handleMemoryRestriction();
     }
-    
+
+    // Clear form fields after sending
     if (mode === 'DEVELOP') {
       setFormData({
         ...formData,
@@ -229,167 +314,34 @@ ${imagesDescription ? imagesDescription : ''}
     setConfirmRevert(false);
   }
 
-  function handleCopyContent(text) {
-    navigator.clipboard.writeText(text).catch(() => {});
-  }
-
-  function handleDeleteMessage(index) {
-    const chat = chats.find(c => c.id === currentChatId);
-    if (!chat) return;
-    chat.messages.splice(index, 1);
-    updateChat({ ...chat });
-  }
-  
-  // Delete confirmation handling
-  const [deleteConfirmIndex, setDeleteConfirmIndex] = useState(null);
-  
-  function confirmDelete(index) {
-    setDeleteConfirmIndex(index);
-  }
-  
-  function handleConfirmDelete() {
-    if (deleteConfirmIndex !== null) {
-      handleDeleteMessage(deleteConfirmIndex);
-      setDeleteConfirmIndex(null);
-    }
-  }
-  
-  function cancelDelete() {
-    setDeleteConfirmIndex(null);
-  }
-  
-  // Image handling functions
-  function handleImageUpload(e) {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-    
-    const newImages = [];
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      if (!file.type.startsWith('image/')) continue;
-      
-      const imageUrl = URL.createObjectURL(file);
-      newImages.push({
-        url: imageUrl,
-        name: file.name,
-        size: file.size
-      });
-    }
-    
-    setUploadedImages([...uploadedImages, ...newImages]);
-  }
-  
-  function removeImage(index) {
-    const newImages = [...uploadedImages];
-    URL.revokeObjectURL(newImages[index].url); // Clean up object URL
-    newImages.splice(index, 1);
-    setUploadedImages(newImages);
-  }
-  
-  async function getImageDescriptions() {
-    if (uploadedImages.length === 0 || !settings.apiKey) return;
-    
-    setImageDescriptionLoading(true);
-    try {
-      const imageUrls = uploadedImages.map(img => img.url);
-      const result = await callApiForImageDescription({
-        imageUrls,
-        apiKey: settings.apiKey,
-        model: settings.model
-      });
-      
-      if (result.error) {
-        throw new Error(result.error);
-      }
-      
-      // Add the description to the chat
-      const chat = chats.find(c => c.id === currentChatId);
-      if (!chat) return;
-      
-      chat.messages.push({
-        role: 'system',
-        content: `Image Analysis:\n\n${result.content}`,
-        timestamp: Date.now()
-      });
-      
-      updateChat({ ...chat });
-      setUploadedImages([]);
-    } catch (error) {
-      console.error('Error getting image descriptions:', error);
-      
-      // Show error in chat
-      const chat = chats.find(c => c.id === currentChatId);
-      if (chat) {
-        chat.messages.push({
-          role: 'system',
-          content: `Error analyzing images: ${error.message}`,
-          timestamp: Date.now()
-        });
-        updateChat({ ...chat });
-      }
-    } finally {
-      setImageDescriptionLoading(false);
-    }
-  }
-  
-  // Handle form submission for the chat input
-  const [userInput, setUserInput] = useState('');
-  
-  function handleSubmit(e) {
-    e.preventDefault();
-    if (!userInput.trim()) return;
-    
-    // Add user message to chat
-    const chat = chats.find(c => c.id === currentChatId);
-    if (!chat) return;
-    
-    chat.messages.push({
-      role: 'user',
-      content: userInput
-    });
-    
-    updateChat({ ...chat });
-    setUserInput('');
-  }
-  
-  function handleKeyDown(e) {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSubmit(e);
-    }
-  }
-
   const currentChat = chats.find(c => c.id === currentChatId);
   if (!currentChat) {
     return <h1 style={{ textAlign: 'center', marginTop: '20vh' }}>Loading Chat...</h1>;
   }
 
-return (
-  <div className="app-container">
-      {/* Delete Confirmation Dialog */}
-      {deleteConfirmIndex !== null && (
+  return (
+    <div className="app-container">
+      {/* Revert confirmation modal */}
+      {confirmRevert && (
         <div className="modal-overlay">
           <div className="confirm-dialog">
-            <h3>Confirm Delete</h3>
-            <p>Are you sure you want to delete this message?</p>
+            <h3>Confirm Revert</h3>
+            <p>Click SEND again to revert the last message.</p>
             <div className="dialog-buttons">
-              <button className="button" onClick={cancelDelete}>Cancel</button>
-              <button className="button danger" onClick={handleConfirmDelete}>Delete</button>
+              <button className="button" onClick={() => setConfirmRevert(false)}>Cancel</button>
             </div>
           </div>
         </div>
       )}
       
-      {/* Left Chat Pane */}
       <ChatPane
         chats={chats}
         currentChatId={currentChatId}
         onSelectChat={handleSelectChat}
         onNewChat={handleNewChat}
       />
-      {/* Main Chat Area */}
+      
       <div className="main-content">
-        {/* Top bar with settings */}
         <div className="top-bar">
           <button className="button" onClick={() => setShowSettings(!showSettings)}>
             {showSettings ? 'Close Settings' : 'Open Settings'}
@@ -402,7 +354,7 @@ return (
             </span>
           </div>
         </div>
-        {/* Settings Panel */}
+  
         {showSettings && (
           <div style={{ border: '1px solid var(--border)', margin: 'var(--space-md)', padding: 'var(--space-md)', borderRadius: 'var(--radius)' }}>
             <form onSubmit={handleSettingsSave}>
@@ -431,19 +383,21 @@ return (
             </form>
           </div>
         )}
-        {/* Main content with 50/50 split */}
+  
         <div className="content-container">
-          {/* Chat Messages - 50% */}
           <div className="chat-container">
             {currentChat.messages.map((m, idx) => (
               <div key={idx} className={`message ${m.role === 'user' ? 'message-user' : 'message-assistant'}`}>
                 <div className="message-header">
                   <div className="message-role">{m.role}</div>
                   <div className="message-actions">
-                    <button className="button icon-button" onClick={() => handleCopyContent(m.content)}>Copy</button>
+                    <button className="button icon-button" onClick={() => navigator.clipboard.writeText(m.content)}>Copy</button>
                     <button 
                       className="button icon-button" 
-                      onClick={() => confirmDelete(idx)}
+                      onClick={() => {
+                        currentChat.messages.splice(idx, 1);
+                        updateChat({ ...currentChat });
+                      }}
                     >
                       Delete
                     </button>
@@ -458,9 +412,12 @@ return (
               </div>
             ))}
           </div>
-          
-          {/* Template Section - 50% */}
-          <div className="template-container">
+  
+          <div 
+            className="template-container"
+            onDragOver={handleTemplateDragOver}
+            onDrop={handleTemplateDrop}
+          >
             <div className="template-content">
               <div className="flex gap-sm mb-md">
                 <button 
@@ -484,179 +441,183 @@ return (
               </div>
               
               <div className="template-grid">
-          {mode === 'DEVELOP' && (
-            <div className="flex flex-column" style={{ overflow: 'auto' }}>
-              <div className="form-group">
-                <label className="form-label">GOAL:</label>
-                <textarea 
-                  className="form-textarea" 
-                  rows={2} 
-                  value={formData.developGoal} 
-                  onInput={(e) => setFormData({ ...formData, developGoal: e.target.value })} 
-                />
-              </div>
-              <div className="form-group">
-                <label className="form-label">List every FEATURE of the program:</label>
-                <textarea 
-                  className="form-textarea" 
-                  rows={2} 
-                  value={formData.developFeatures} 
-                  onInput={(e) => setFormData({ ...formData, developFeatures: e.target.value })} 
-                />
-              </div>
-              <div className="form-group">
-                <label className="form-label">RETURN FORMAT:</label>
-                <textarea 
-                  className="form-textarea" 
-                  rows={2} 
-                  placeholder="(Optional) e.g. JSON, etc." 
-                  value={formData.developReturnFormat} 
-                  onInput={(e) => setFormData({ ...formData, developReturnFormat: e.target.value })} 
-                />
-              </div>
-              <div className="form-group">
-                <label className="form-label">THINGS TO REMEMBER/WARNINGS:</label>
-                <textarea 
-                  className="form-textarea" 
-                  rows={2} 
-                  value={formData.developWarnings} 
-                  onInput={(e) => setFormData({ ...formData, developWarnings: e.target.value })} 
-                />
-              </div>
-              <div className="form-group">
-                <label className="form-label">CONTEXT:</label>
-                <textarea 
-                  className="form-textarea" 
-                  rows={2} 
-                  placeholder="(Optional) additional info" 
-                  value={formData.developContext} 
-                  onInput={(e) => setFormData({ ...formData, developContext: e.target.value })} 
-                />
-              </div>
-            </div>
-          )}
-          {mode === 'FIX' && (
-            <div className="flex flex-column" style={{ overflow: 'auto' }}>
-              <div className="form-group">
-                <label className="form-label">FIX YOUR CODE:</label>
-                <textarea 
-                  className="form-textarea" 
-                  rows={2} 
-                  value={formData.fixCode} 
-                  onInput={(e) => setFormData({ ...formData, fixCode: e.target.value })} 
-                />
-              </div>
-              <div className="form-group">
-                <label className="form-label">ANY ERRORS?</label>
-                <textarea 
-                  className="form-textarea" 
-                  rows={2} 
-                  value={formData.fixErrors} 
-                  onInput={(e) => setFormData({ ...formData, fixErrors: e.target.value })} 
-                />
-              </div>
-            </div>
-          )}
-          {mode === 'REVERT' && (
-            <div className="mb-md">
-              {confirmRevert
-                ? <div style={{ color: 'var(--error)' }}>Are you sure? Clicking SEND again will revert the last message.</div>
-                : <div>Click SEND to confirm revert. This will delete the last message from this chat.</div>}
-            </div>
-          )}
-              </div>
-              
-              <div className="form-group">
-                <label className="form-label">Drag/Drop Images:</label>
-                <input className="form-input" type="file" ref={fileInputRef} multiple accept="image/*" />
-              </div>
-              <button className="button mt-sm" onClick={handleSendPrompt}>
-                {mode === 'REVERT' ? 'SEND' : 'Send Prompt'}
-              </button>
-              {loading && (
-                <div className="loading">
-                  <div className="loading-dots">
-                    <div className="dot"></div>
-                    <div className="dot"></div>
-                    <div className="dot"></div>
+                {mode === 'DEVELOP' && (
+                  <div className="flex flex-column" style={{ overflow: 'auto' }}>
+                    <div className="form-group">
+                      <label className="form-label">GOAL:</label>
+                      <textarea 
+                        className="form-textarea" 
+                        rows={2} 
+                        value={formData.developGoal} 
+                        onInput={(e) => setFormData({ ...formData, developGoal: e.target.value })} 
+                        onDragOver={(e) => e.preventDefault()}
+                        onDrop={(e) => handleTextareaDrop('developGoal', e)}
+                      />
+                      {droppedFiles.developGoal && droppedFiles.developGoal.length > 0 && (
+                        <div className="dropped-file-labels">
+                          <small>Files added: {droppedFiles.developGoal.join(', ')}</small>
+                        </div>
+                      )}
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">List every FEATURE of the program:</label>
+                      <textarea 
+                        className="form-textarea" 
+                        rows={2} 
+                        value={formData.developFeatures} 
+                        onInput={(e) => setFormData({ ...formData, developFeatures: e.target.value })} 
+                        onDragOver={(e) => e.preventDefault()}
+                        onDrop={(e) => handleTextareaDrop('developFeatures', e)}
+                      />
+                      {droppedFiles.developFeatures && droppedFiles.developFeatures.length > 0 && (
+                        <div className="dropped-file-labels">
+                          <small>Files added: {droppedFiles.developFeatures.join(', ')}</small>
+                        </div>
+                      )}
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">RETURN FORMAT:</label>
+                      <textarea 
+                        className="form-textarea" 
+                        rows={2} 
+                        placeholder="(Optional) e.g. JSON, etc." 
+                        value={formData.developReturnFormat} 
+                        onInput={(e) => setFormData({ ...formData, developReturnFormat: e.target.value })} 
+                        onDragOver={(e) => e.preventDefault()}
+                        onDrop={(e) => handleTextareaDrop('developReturnFormat', e)}
+                      />
+                      {droppedFiles.developReturnFormat && droppedFiles.developReturnFormat.length > 0 && (
+                        <div className="dropped-file-labels">
+                          <small>Files added: {droppedFiles.developReturnFormat.join(', ')}</small>
+                        </div>
+                      )}
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">THINGS TO REMEMBER/WARNINGS:</label>
+                      <textarea 
+                        className="form-textarea" 
+                        rows={2} 
+                        value={formData.developWarnings} 
+                        onInput={(e) => setFormData({ ...formData, developWarnings: e.target.value })} 
+                        onDragOver={(e) => e.preventDefault()}
+                        onDrop={(e) => handleTextareaDrop('developWarnings', e)}
+                      />
+                      {droppedFiles.developWarnings && droppedFiles.developWarnings.length > 0 && (
+                        <div className="dropped-file-labels">
+                          <small>Files added: {droppedFiles.developWarnings.join(', ')}</small>
+                        </div>
+                      )}
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">CONTEXT:</label>
+                      <textarea 
+                        className="form-textarea" 
+                        rows={2} 
+                        placeholder="(Optional) additional info" 
+                        value={formData.developContext} 
+                        onInput={(e) => setFormData({ ...formData, developContext: e.target.value })} 
+                        onDragOver={(e) => e.preventDefault()}
+                        onDrop={(e) => handleTextareaDrop('developContext', e)}
+                      />
+                      {droppedFiles.developContext && droppedFiles.developContext.length > 0 && (
+                        <div className="dropped-file-labels">
+                          <small>Files added: {droppedFiles.developContext.join(', ')}</small>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                  <span>Loading...</span>
+                )}
+                {mode === 'FIX' && (
+                  <div className="flex flex-column" style={{ overflow: 'auto' }}>
+                    <div className="form-group">
+                      <label className="form-label">FIX YOUR CODE:</label>
+                      <textarea 
+                        className="form-textarea" 
+                        rows={2} 
+                        value={formData.fixCode} 
+                        onInput={(e) => setFormData({ ...formData, fixCode: e.target.value })} 
+                        onDragOver={(e) => e.preventDefault()}
+                        onDrop={(e) => handleTextareaDrop('fixCode', e)}
+                      />
+                      {droppedFiles.fixCode && droppedFiles.fixCode.length > 0 && (
+                        <div className="dropped-file-labels">
+                          <small>Files added: {droppedFiles.fixCode.join(', ')}</small>
+                        </div>
+                      )}
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">ANY ERRORS?</label>
+                      <textarea 
+                        className="form-textarea" 
+                        rows={2} 
+                        value={formData.fixErrors} 
+                        onInput={(e) => setFormData({ ...formData, fixErrors: e.target.value })} 
+                        onDragOver={(e) => e.preventDefault()}
+                        onDrop={(e) => handleTextareaDrop('fixErrors', e)}
+                      />
+                      {droppedFiles.fixErrors && droppedFiles.fixErrors.length > 0 && (
+                        <div className="dropped-file-labels">
+                          <small>Files added: {droppedFiles.fixErrors.join(', ')}</small>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+                {mode === 'REVERT' && (
+                  <div className="mb-md">
+                    {confirmRevert
+                      ? <div style={{ color: 'var(--error)' }}>Are you sure? Clicking SEND again will revert the last message.</div>
+                      : <div>Click SEND to confirm revert. This will delete the last message from this chat.</div>}
+                  </div>
+                )}
+              </div>
+  
+              {/* Show selected images before sending */}
+              {uploadedImages.length > 0 && (
+                <div className="image-preview-container mb-md">
+                  <div className="image-preview-header">
+                    <span>Images to upload:</span>
+                  </div>
+                  <div className="image-preview-grid">
+                    {uploadedImages.map((img, idx) => (
+                      <div key={idx} className="image-preview-item">
+                        <img src={img.dataUrl} alt={img.name} />
+                        <button 
+                          className="image-remove-button" 
+                          onClick={() => removeUploadedImage(idx)}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
+
+              <div className="form-group">
+                <label className="form-label">Select or Drag/Drop Images:</label>
+                <input
+                  className="form-input"
+                  type="file"
+                  ref={fileInputRef}
+                  multiple
+                  accept="image/*"
+                  onChange={handleFileSelection}
+                />
+              </div>
+              <button className="button mt-sm" onClick={handleSendPrompt} disabled={loading}>
+                {loading ? 'Sending...' : 'Send Prompt'}
+              </button>
             </div>
+  
             <div className="expand-handle" title="Resize template section">
               <div className="handle-line"></div>
               <span className="handle-text">Resize</span>
             </div>
+  
           </div>
         </div>
-        
-        {/* Input container at the bottom */}
-        <div className="input-container">
-          {/* Image upload preview */}
-          {uploadedImages.length > 0 && (
-            <div className="image-preview-container">
-              <div className="image-preview-header">
-                <h4>Uploaded Images ({uploadedImages.length})</h4>
-                <button 
-                  className="button" 
-                  onClick={getImageDescriptions} 
-                  disabled={imageDescriptionLoading}
-                >
-                  {imageDescriptionLoading ? 'Analyzing...' : 'Analyze Images'}
-                </button>
-              </div>
-              <div className="image-preview-grid">
-                {uploadedImages.map((img, index) => (
-                  <div key={index} className="image-preview-item">
-                    <img src={img.url} alt={img.name} />
-                    <button 
-                      className="image-remove-button" 
-                      onClick={() => removeImage(index)}
-                      title="Remove image"
-                    >
-                      ×
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-          
-          <form onSubmit={handleSubmit}>
-            <div className="form-group">
-              <textarea
-                className="form-textarea"
-                value={userInput}
-                onChange={(e) => setUserInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="Enter your message..."
-                rows="3"
-              />
-            </div>
-            <div className="input-actions">
-              <input
-                type="file"
-                ref={fileInputRef}
-                onChange={handleImageUpload}
-                accept="image/*"
-                multiple
-                style={{ display: 'none' }}
-              />
-              <button 
-                type="button" 
-                className="button icon-button" 
-                onClick={() => fileInputRef.current?.click()}
-                title="Upload images"
-              >
-                📷
-              </button>
-              <button type="submit" className="button" disabled={loading}>
-                {loading ? 'Sending...' : 'Send'}
-              </button>
-            </div>
-          </form>
-        </div>
+  
       </div>
     </div>
   );

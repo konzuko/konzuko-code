@@ -1,18 +1,18 @@
 import { defineConfig } from 'vite';
-import preact from '@vitejs/plugin-react';
+import react from '@vitejs/plugin-react';
 
 export default defineConfig({
+  plugins: [react()],
+
   resolve: {
     alias: {
-      react: 'preact/compat',
-      'react-dom': 'preact/compat',
-      'react/jsx-dev-runtime': 'preact/jsx-dev-runtime',
-      'react/jsx-runtime': 'preact/jsx-runtime'
+      // Redirect React imports to Preact's compatibility layer
+      'react': 'preact/compat',
+      'react-dom': 'preact/compat'
     }
   },
-  plugins: [preact()],
+
   server: {
-    port: 3000,
-    open: false
+    port: 3001
   }
 });

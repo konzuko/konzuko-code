@@ -4,17 +4,13 @@ export async function callApiForText({ messages, apiKey, model = 'o3-mini-high',
     
     // Format messages based on whether they're in the new format or not
     const formattedMessages = messages.map(m => {
-      // If content is already an array, it's in the new format
       if (Array.isArray(m.content)) return m;
-      
-      // Otherwise, convert to the new format
       return {
         role: m.role === 'system' ? 'developer' : m.role,
         content: [{ type: 'text', text: m.content }]
       };
     });
     
-    // Add reasoning_effort parameter for o3-mini-high model
     const requestBody = {
       model,
       messages: formattedMessages,
@@ -22,7 +18,7 @@ export async function callApiForText({ messages, apiKey, model = 'o3-mini-high',
       response_format: { type: 'text' }
     };
     
-    // Add reasoning_effort for o3-mini models
+    // Example usage: override reasoning effort if model is "o3-mini-..."
     if (model.includes('o3-mini')) {
       requestBody.reasoning_effort = 'high';
     }
@@ -41,7 +37,6 @@ export async function callApiForText({ messages, apiKey, model = 'o3-mini-high',
       const errorText = await response.text();
       let errorDetails;
       try {
-        // Try to parse the error as JSON for more details
         const errorJson = JSON.parse(errorText);
         errorDetails = errorJson.error?.message || errorText;
       } catch (e) {
@@ -77,7 +72,7 @@ export async function callApiForImageDescription({ imageUrls = [], apiKey, model
         },
         ...imageUrls.map(url => ({
           type: 'image_url',
-          image_url: { url }
+          image_url: { url }  // These MUST be valid data URLs or a real remote URL
         }))
       ]
     }
@@ -103,7 +98,6 @@ export async function callApiForImageDescription({ imageUrls = [], apiKey, model
       const errorText = await response.text();
       let errorDetails;
       try {
-        // Try to parse the error as JSON for more details
         const errorJson = JSON.parse(errorText);
         errorDetails = errorJson.error?.message || errorText;
       } catch (e) {
@@ -137,17 +131,13 @@ export async function summarizeConversation(messages, apiKey, model = 'o3-mini-h
     }]
   };
 
-  // Convert messages to the new format
   const formattedMessages = messages.map(m => {
-    // If content is already an array, it's in the new format
     if (Array.isArray(m.content)) {
       return {
         role: m.role === 'system' ? 'developer' : m.role,
         content: m.content
       };
     }
-    
-    // Otherwise, convert to the new format
     return {
       role: m.role === 'system' ? 'developer' : m.role,
       content: [{ type: 'text', text: m.content }]

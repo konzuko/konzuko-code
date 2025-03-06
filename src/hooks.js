@@ -77,7 +77,6 @@ export function useChats() {
     const chat = chats.find(c => c.id === chatId);
     if (!chat) return null;
     try {
-      // Use the summarizeConversation function from api.js
       const summary = await summarizeConversation(chat.messages, apiKey, chat.model);
       const newChat = {
         id: Date.now() + '-' + Math.random().toString(36).substring(2, 9),
@@ -106,7 +105,7 @@ export function useChats() {
       });
       return newChat.id;
     } catch (error) {
-      console.error('Error during memory management:', error);
+      console.error('Error in memory management:', error);
       return null;
     }
   }

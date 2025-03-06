@@ -1,5 +1,3 @@
-/* Simple, clean dark mode styles for Konzuko Code */
-
 :root {
   /* Core colors */
   --bg-primary: #121212;
@@ -294,6 +292,7 @@ html, body {
   background-color: var(--bg-secondary);
   width: 80%;
   position: relative;
+  animation: fadeIn 0.3s ease-out;
 }
 
 .message-user {
@@ -405,10 +404,6 @@ html, body {
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(10px); }
   to { opacity: 1; transform: translateY(0); }
-}
-
-.message {
-  animation: fadeIn 0.3s ease-out;
 }
 
 /* Forms */
