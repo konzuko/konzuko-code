@@ -1,7 +1,8 @@
+/* App.jsx */
 import { useState, useEffect, useRef } from 'preact/hooks';
 import ChatPane from './chatpane.jsx';
 import { callApiForText, callApiForImageDescription } from './api.js';
-import { useChats, useSettings } from './hooks.js';
+import { useChats, useSettings, approximateTokenCount } from './hooks.js';
 
 /**
  * Helper function to read a File as a base64 data URL
@@ -16,15 +17,7 @@ function readFileAsDataURL(file) {
 }
 
 function App() {
-  const {
-    chats,
-    addChat,
-    updateChat,
-    totalTokens,
-    handleMemoryManagement,
-    isMemoryLimitExceeded,
-  } = useChats();
-
+  const { chats, addChat, updateChat, deleteChat } = useChats();
   const [settings, setSettings] = useSettings();
   const [currentChatId, setCurrentChatId] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
@@ -40,10 +33,9 @@ function App() {
   });
   const [droppedFiles, setDroppedFiles] = useState({});
   const [confirmRevert, setConfirmRevert] = useState(false);
+  const [chatToDelete, setChatToDelete] = useState(null);
   const fileInputRef = useRef();
   const [loading, setLoading] = useState(false);
-
-  // Each item in uploadedImages => { dataUrl, name, size }
   const [uploadedImages, setUploadedImages] = useState([]);
 
   // Ensure at least one chat exists
@@ -54,72 +46,6 @@ function App() {
       setCurrentChatId(chats[0].id);
     }
   }, [chats]);
-
-  useEffect(() => {
-    if (isMemoryLimitExceeded && currentChatId) {
-      handleMemoryRestriction();
-    }
-  }, [isMemoryLimitExceeded, currentChatId]);
-
-  async function handleMemoryRestriction() {
-    if (!settings.apiKey || !currentChatId) return;
-    setLoading(true);
-    try {
-      const chat = chats.find(c => c.id === currentChatId);
-      if (chat) {
-        chat.messages.push({
-          role: 'system',
-          content: 'Memory limit reached (50,000 tokens). Creating a new chat with a summary of this conversation...',
-          timestamp: Date.now()
-        });
-        updateChat({ ...chat });
-      }
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      const newChatId = await handleMemoryManagement(currentChatId, settings.apiKey);
-      if (newChatId) {
-        setCurrentChatId(newChatId);
-      }
-    } catch (error) {
-      console.error('Error in memory management:', error);
-      const chat = chats.find(c => c.id === currentChatId);
-      if (chat) {
-        chat.messages.push({
-          role: 'system',
-          content: `Error creating summary: ${error.message}. Please try again or manually create a new chat.`,
-          timestamp: Date.now()
-        });
-        updateChat({ ...chat });
-      }
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  function handleNewChat() {
-    const newChat = {
-      id: Date.now() + '-' + Math.random().toString(36).substring(2, 9),
-      title: 'New Chat',
-      started: new Date().toISOString(),
-      messages: [
-        {
-          role: 'assistant',
-          content: 'Hello! Welcome to Konzuko Code. How may I assist you today?',
-        },
-      ],
-      model: settings.model,
-    };
-    addChat(newChat);
-    setCurrentChatId(newChat.id);
-  }
-
-  function handleSelectChat(id) {
-    setCurrentChatId(id);
-  }
-
-  function handleSettingsSave(e) {
-    e.preventDefault();
-    setShowSettings(false);
-  }
 
   // ─── Drag & Drop Helpers ─────────────────────────────
   function isTextFile(file) {
@@ -152,14 +78,12 @@ function App() {
     }
   }
 
-  // Make this async so we can read images as data URLs
   async function handleTemplateDragOver(e) {
     e.preventDefault();
   }
 
   async function handleTemplateDrop(e) {
     e.preventDefault();
-    // If drop is not on a textarea, add image files as base64 data URLs
     if (e.target.tagName !== 'TEXTAREA') {
       const files = e.dataTransfer.files;
       for (const file of files) {
@@ -198,9 +122,66 @@ function App() {
       return newImages;
     });
   }
-  // ─────────────────────────────────────────────────────
 
-  // Unified prompt sending function
+  // ─── Chat Title Handlers (now just manual) ─────────────────────────────
+  function handleTitleUpdate(chatId, newTitle) {
+    const chat = chats.find(c => c.id === chatId);
+    if (!chat) return;
+    chat.title = newTitle;
+    updateChat({ ...chat });
+  }
+
+  // ─── New Chat Handler ─────────────────────────────
+  function handleNewChat() {
+    const newChat = {
+      id: Date.now() + '-' + Math.random().toString(36).substring(2, 9),
+      title: 'New Chat',
+      started: new Date().toISOString(),
+      messages: [
+        {
+          role: 'assistant',
+          content: 'Hello! Welcome to Konzuko Code. How may I assist you today?'
+        },
+      ],
+      model: settings.model,
+    };
+    addChat(newChat);
+    setCurrentChatId(newChat.id);
+  }
+
+  function handleSelectChat(id) {
+    setCurrentChatId(id);
+  }
+
+  function handleSettingsSave(e) {
+    e.preventDefault();
+    setShowSettings(false);
+  }
+
+  // ─── Chat Deletion Confirmation ─────────────────────────────
+  function requestDeleteChat(chatId) {
+    setChatToDelete(chatId);
+  }
+
+  function confirmDeleteChat() {
+    if (!chatToDelete) return;
+    deleteChat(chatToDelete);
+    setChatToDelete(null);
+    if (currentChatId === chatToDelete && chats.length > 1) {
+      // After deleting, set currentChatId to the first remaining chat, if any
+      const remainingChats = chats.filter(c => c.id !== chatToDelete);
+      if (remainingChats.length > 0) {
+        setCurrentChatId(remainingChats[0].id);
+      } else {
+        setCurrentChatId(null);
+      }
+    } else if (chats.length === 1) {
+      // If we just deleted the last chat, create a new one
+      handleNewChat();
+    }
+  }
+
+  // ─── Prompt Sending Function ─────────────────────────────
   async function handleSendPrompt() {
     if (!currentChatId) return;
     const chat = chats.find(c => c.id === currentChatId);
@@ -213,7 +194,8 @@ function App() {
       const descRes = await callApiForImageDescription({
         imageUrls: dataUrls,
         apiKey: settings.apiKey,
-        model: settings.model  // use the selected model for both text & image calls
+        openRouterApiKey: settings.openRouterApiKey
+        // model defaults to mistralai/mistral-small-24b-instruct-2501
       });
       setLoading(false);
       if (!descRes.error && descRes.content) {
@@ -221,7 +203,6 @@ function App() {
       } else {
         imagesDescription = '\n[ IMAGES DESCRIBED AS ]: Error describing images: ' + (descRes.error || 'unknown error');
       }
-      // Clear images after processing
       setUploadedImages([]);
     }
 
@@ -264,7 +245,6 @@ ${imagesDescription}
     }
     if (!userContent.trim()) return;
 
-    // Append the user message and send API call
     chat.messages.push({
       role: 'user',
       content: userContent,
@@ -274,7 +254,7 @@ ${imagesDescription}
     const result = await callApiForText({
       messages: chat.messages,
       apiKey: settings.apiKey,
-      model: settings.model,
+      model: settings.model
     });
     setLoading(false);
     if (result.error) {
@@ -289,10 +269,6 @@ ${imagesDescription}
       });
     }
     updateChat({ ...chat });
-
-    if (isMemoryLimitExceeded) {
-      await handleMemoryRestriction();
-    }
 
     // Clear form fields after sending
     if (mode === 'DEVELOP') {
@@ -315,13 +291,19 @@ ${imagesDescription}
   }
 
   const currentChat = chats.find(c => c.id === currentChatId);
+
+  // Compute token count for the current chat.
+  const currentChatTokenCount = currentChat ? currentChat.messages.reduce((acc, msg) => {
+    return acc + (typeof msg.content === 'string' ? approximateTokenCount(msg.content) : 0);
+  }, 0) : 0;
+
   if (!currentChat) {
     return <h1 style={{ textAlign: 'center', marginTop: '20vh' }}>Loading Chat...</h1>;
   }
 
   return (
     <div className="app-container">
-      {/* Revert confirmation modal */}
+      {/* Confirm revert last message */}
       {confirmRevert && (
         <div className="modal-overlay">
           <div className="confirm-dialog">
@@ -333,12 +315,28 @@ ${imagesDescription}
           </div>
         </div>
       )}
+
+      {/* Confirm delete chat */}
+      {chatToDelete && (
+        <div className="modal-overlay">
+          <div className="confirm-dialog">
+            <h3>Delete Chat?</h3>
+            <p>This will remove the chat and all messages. Are you sure?</p>
+            <div className="dialog-buttons">
+              <button className="button" onClick={() => setChatToDelete(null)}>Cancel</button>
+              <button className="button danger" onClick={confirmDeleteChat}>Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
       
       <ChatPane
         chats={chats}
         currentChatId={currentChatId}
         onSelectChat={handleSelectChat}
         onNewChat={handleNewChat}
+        onTitleUpdate={handleTitleUpdate}
+        onDeleteChat={requestDeleteChat}
       />
       
       <div className="main-content">
@@ -348,9 +346,8 @@ ${imagesDescription}
           </button>
           <span className="ml-md" style={{ fontWeight: 'bold', marginLeft: 'var(--space-md)' }}>konzuko-code</span>
           <div className="token-usage">
-            <span className={isMemoryLimitExceeded ? 'token-limit-exceeded' : ''}>
-              Tokens: {totalTokens.toLocaleString()} / 50,000
-              {isMemoryLimitExceeded && ' (limit reached)'}
+            <span>
+              Tokens (this chat): {currentChatTokenCount.toLocaleString()}
             </span>
           </div>
         </div>
@@ -359,12 +356,21 @@ ${imagesDescription}
           <div style={{ border: '1px solid var(--border)', margin: 'var(--space-md)', padding: 'var(--space-md)', borderRadius: 'var(--radius)' }}>
             <form onSubmit={handleSettingsSave}>
               <div className="form-group">
-                <label className="form-label">API Key:</label>
+                <label className="form-label">OpenAI API Key:</label>
                 <input
                   className="form-input"
                   type="text"
                   value={settings.apiKey}
                   onInput={(e) => setSettings({ ...settings, apiKey: e.target.value })}
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label">OpenRouter API Key:</label>
+                <input
+                  className="form-input"
+                  type="text"
+                  value={settings.openRouterApiKey || ''}
+                  onInput={(e) => setSettings({ ...settings, openRouterApiKey: e.target.value })}
                 />
               </div>
               <div className="form-group">
@@ -404,11 +410,6 @@ ${imagesDescription}
                   </div>
                 </div>
                 <div className="message-content">{m.content}</div>
-                {m.role === 'system' && m.content.includes('Memory limit reached') && (
-                  <div className="memory-limit-alert">
-                    Memory limit reached. A new chat was created with a summary.
-                  </div>
-                )}
               </div>
             ))}
           </div>
@@ -515,7 +516,7 @@ ${imagesDescription}
                         rows={2} 
                         placeholder="(Optional) additional info" 
                         value={formData.developContext} 
-                        onInput={(e) => setFormData({ ...formData, developContext: e.target.value })} 
+                        onInput={(e) => setFormData({ ...formData, developContext: e.target.value })}
                         onDragOver={(e) => e.preventDefault()}
                         onDrop={(e) => handleTextareaDrop('developContext', e)}
                       />
@@ -535,7 +536,7 @@ ${imagesDescription}
                         className="form-textarea" 
                         rows={2} 
                         value={formData.fixCode} 
-                        onInput={(e) => setFormData({ ...formData, fixCode: e.target.value })} 
+                        onInput={(e) => setFormData({ ...formData, fixCode: e.target.value })}
                         onDragOver={(e) => e.preventDefault()}
                         onDrop={(e) => handleTextareaDrop('fixCode', e)}
                       />
@@ -551,7 +552,7 @@ ${imagesDescription}
                         className="form-textarea" 
                         rows={2} 
                         value={formData.fixErrors} 
-                        onInput={(e) => setFormData({ ...formData, fixErrors: e.target.value })} 
+                        onInput={(e) => setFormData({ ...formData, fixErrors: e.target.value })}
                         onDragOver={(e) => e.preventDefault()}
                         onDrop={(e) => handleTextareaDrop('fixErrors', e)}
                       />
@@ -572,7 +573,6 @@ ${imagesDescription}
                 )}
               </div>
   
-              {/* Show selected images before sending */}
               {uploadedImages.length > 0 && (
                 <div className="image-preview-container mb-md">
                   <div className="image-preview-header">
@@ -593,7 +593,7 @@ ${imagesDescription}
                   </div>
                 </div>
               )}
-
+  
               <div className="form-group">
                 <label className="form-label">Select or Drag/Drop Images:</label>
                 <input

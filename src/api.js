@@ -1,8 +1,8 @@
-export async function callApiForText({ messages, apiKey, model = 'o3-mini-high', maxTokens }) {
+/* api.js */
+export async function callApiForText({ messages, apiKey, model = 'o3-mini-high' }) {
   try {
     console.log('Sending API request with model:', model);
-    
-    // Format messages based on whether they're in the new format or not
+    // Format messages so that each message has an array of content objects.
     const formattedMessages = messages.map(m => {
       if (Array.isArray(m.content)) return m;
       return {
@@ -10,19 +10,15 @@ export async function callApiForText({ messages, apiKey, model = 'o3-mini-high',
         content: [{ type: 'text', text: m.content }]
       };
     });
-    
     const requestBody = {
       model,
       messages: formattedMessages,
-      ...(maxTokens ? { max_tokens: maxTokens } : {}),
       response_format: { type: 'text' }
     };
-    
-    // Example usage: override reasoning effort if model is "o3-mini-..."
+    // Example: override reasoning_effort if model includes "o3-mini"
     if (model.includes('o3-mini')) {
       requestBody.reasoning_effort = 'high';
     }
-    
     console.log('Request body:', JSON.stringify(requestBody, null, 2));
     
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -42,9 +38,7 @@ export async function callApiForText({ messages, apiKey, model = 'o3-mini-high',
       } catch (e) {
         errorDetails = errorText;
       }
-      
       console.error(`API Error (${response.status}):`, errorDetails);
-      console.error('Full response:', errorText);
       return { 
         error: `HTTP Error ${response.status}: ${errorDetails}`,
         status: response.status,
@@ -61,36 +55,37 @@ export async function callApiForText({ messages, apiKey, model = 'o3-mini-high',
   }
 }
 
-export async function callApiForImageDescription({ imageUrls = [], apiKey, model = 'o3-mini-high' }) {
+export async function callApiForImageDescription({ imageUrls = [], apiKey, openRouterApiKey, model = 'mistralai/mistral-small-24b-instruct-2501' }) {
   const messages = [
     {
       role: 'user',
       content: [
         {
           type: 'text',
-          text: 'Please describe these images in detail. Focus on the content that would be relevant for coding or technical context.'
+          text: 'Please describe these images in detail. Focus on content relevant for coding or technical context.'
         },
         ...imageUrls.map(url => ({
           type: 'image_url',
-          image_url: { url }  // These MUST be valid data URLs or a real remote URL
+          image_url: { url }
         }))
       ]
     }
   ];
 
   try {
-    console.log('Sending image API request with model:', model);
+    console.log('Sending image API request via OpenRouter with model:', model);
     console.log('Image messages format:', JSON.stringify(messages, null, 2));
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
+        Authorization: `Bearer ${openRouterApiKey || apiKey}`,
+        'HTTP-Referer': 'https://konzuko-code.local', 
+        'X-Title': 'Konzuko Code',
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        model,
-        messages,
-        max_tokens: 300,
+        model: model,
+        messages: messages,
         response_format: { type: 'text' }
       })
     });
@@ -103,9 +98,7 @@ export async function callApiForImageDescription({ imageUrls = [], apiKey, model
       } catch (e) {
         errorDetails = errorText;
       }
-      
-      console.error(`API Error (${response.status}):`, errorDetails);
-      console.error('Full response:', errorText);
+      console.error(`Image API Error (${response.status}):`, errorDetails);
       return { 
         error: `HTTP Error ${response.status}: ${errorDetails}`,
         status: response.status,
@@ -122,37 +115,7 @@ export async function callApiForImageDescription({ imageUrls = [], apiKey, model
   }
 }
 
-export async function summarizeConversation(messages, apiKey, model = 'o3-mini-high') {
-  const systemMessage = {
-    role: 'developer',
-    content: [{
-      type: 'text',
-      text: `Please provide a detailed step-by-step summary including all user instructions, code attempts, responses, and any pending tasks. This will continue your conversation.`
-    }]
-  };
-
-  const formattedMessages = messages.map(m => {
-    if (Array.isArray(m.content)) {
-      return {
-        role: m.role === 'system' ? 'developer' : m.role,
-        content: m.content
-      };
-    }
-    return {
-      role: m.role === 'system' ? 'developer' : m.role,
-      content: [{ type: 'text', text: m.content }]
-    };
-  });
-
-  const result = await callApiForText({
-    messages: [systemMessage, ...formattedMessages],
-    apiKey,
-    model,
-    maxTokens: 1024
-  });
-
-  if (result.error) {
-    throw new Error(result.error);
-  }
-  return result.content;
-}
+/**
+ * Summaries that might have existed for chat titles or conversation
+ * have been removed to comply with the "no AI-based title" request.
+ */
