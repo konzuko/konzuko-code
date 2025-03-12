@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef } from 'preact/hooks';
 import ChatPane from './chatpane.jsx';
 import { callApiForText, callApiForImageDescription } from './api.js';
-import { useChats, useSettings, approximateTokenCount } from './hooks.js';
+import { useChats, useSettings, useFormData, useDroppedFiles, useMode, approximateTokenCount } from './hooks.js';
 
 /**
  * Helper function to read a File as a base64 data URL
@@ -21,19 +21,12 @@ function App() {
   const [settings, setSettings] = useSettings();
   const [currentChatId, setCurrentChatId] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
-  const [mode, setMode] = useState('DEVELOP');
-  const [formData, setFormData] = useState({
-    developGoal: '',
-    developFeatures: '',
-    developReturnFormat: '',
-    developWarnings: '',
-    developContext: '',
-    fixCode: '',
-    fixErrors: '',
-  });
-  const [droppedFiles, setDroppedFiles] = useState({});
+  const [mode, setMode] = useMode();
+  const [formData, setFormData] = useFormData();
+  const [droppedFiles, setDroppedFiles] = useDroppedFiles();
   const [confirmRevert, setConfirmRevert] = useState(false);
   const [chatToDelete, setChatToDelete] = useState(null);
+  const [messageToDelete, setMessageToDelete] = useState(null);
   const fileInputRef = useRef();
   const [loading, setLoading] = useState(false);
   const [uploadedImages, setUploadedImages] = useState([]);
@@ -161,6 +154,21 @@ function App() {
   // ─── Chat Deletion Confirmation ─────────────────────────────
   function requestDeleteChat(chatId) {
     setChatToDelete(chatId);
+  }
+
+  function requestDeleteMessage(chatId, messageIndex) {
+    setMessageToDelete({ chatId, messageIndex });
+  }
+
+  function confirmDeleteMessage() {
+    if (!messageToDelete) return;
+    
+    const chat = chats.find(c => c.id === messageToDelete.chatId);
+    if (chat) {
+      chat.messages.splice(messageToDelete.messageIndex, 1);
+      updateChat({ ...chat });
+    }
+    setMessageToDelete(null);
   }
 
   function confirmDeleteChat() {
@@ -329,6 +337,20 @@ ${imagesDescription}
           </div>
         </div>
       )}
+
+      {/* Confirm delete message */}
+      {messageToDelete && (
+        <div className="modal-overlay">
+          <div className="confirm-dialog">
+            <h3>Delete Message?</h3>
+            <p>Are you sure you want to delete this message?</p>
+            <div className="dialog-buttons">
+              <button className="button" onClick={() => setMessageToDelete(null)}>Cancel</button>
+              <button className="button danger" onClick={confirmDeleteMessage}>Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
       
       <ChatPane
         chats={chats}
@@ -400,16 +422,22 @@ ${imagesDescription}
                     <button className="button icon-button" onClick={() => navigator.clipboard.writeText(m.content)}>Copy</button>
                     <button 
                       className="button icon-button" 
-                      onClick={() => {
-                        currentChat.messages.splice(idx, 1);
-                        updateChat({ ...currentChat });
-                      }}
+                      onClick={() => requestDeleteMessage(currentChat.id, idx)}
                     >
                       Delete
                     </button>
                   </div>
                 </div>
                 <div className="message-content">{m.content}</div>
+                <div className="message-actions-bottom">
+                  <button className="button icon-button" onClick={() => navigator.clipboard.writeText(m.content)}>Copy</button>
+                  <button 
+                    className="button icon-button" 
+                    onClick={() => requestDeleteMessage(currentChat.id, idx)}
+                  >
+                    Delete
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -605,8 +633,8 @@ ${imagesDescription}
                   onChange={handleFileSelection}
                 />
               </div>
-              <button className="button mt-sm" onClick={handleSendPrompt} disabled={loading}>
-                {loading ? 'Sending...' : 'Send Prompt'}
+              <button className="button send-button mt-sm" onClick={handleSendPrompt} disabled={loading}>
+                {loading ? <span className="loading-dots">Sending</span> : 'Send Prompt'}
               </button>
             </div>
   

@@ -27,6 +27,54 @@
   --token-normal: var(--text-secondary);
   --token-warning: var(--warning);
   --token-error: var(--error);
+  
+  /* Loading animation */
+  --loading-dot-size: 6px;
+  --loading-dot-color: var(--text-primary);
+}
+
+/* Loading Dots Animation */
+.loading-dots {
+  display: inline-flex;
+  align-items: center;
+}
+
+.loading-dots::after {
+  content: '.';
+  width: 1em;
+  animation: loading-dots 1.5s infinite;
+  overflow: hidden;
+}
+
+@keyframes loading-dots {
+  0% { content: '.'; }
+  33% { content: '..'; }
+  66% { content: '...'; }
+}
+
+/* Message actions styling */
+.message-actions, .message-actions-bottom {
+  display: flex;
+  gap: var(--space-xs);
+  opacity: 0.7;
+  transition: opacity var(--transition);
+}
+
+.message-actions-bottom {
+  justify-content: flex-end;
+  margin-top: var(--space-sm);
+}
+
+.message:hover .message-actions,
+.message:hover .message-actions-bottom {
+  opacity: 1;
+}
+
+.message-actions .button,
+.message-actions-bottom .button {
+  font-size: 0.8rem;
+  padding: 2px 6px;
+  min-width: 50px;
 }
 
 /* Reset & Base */
@@ -256,6 +304,15 @@ html, body {
   color: white;
 }
 
+.send-button {
+  background-color: #000000;
+  color: white;
+}
+
+.send-button:hover {
+  background-color: #333333;
+}
+
 .button.active {
   background-color: var(--accent);
   color: white;
@@ -292,21 +349,20 @@ html, body {
   width: 80%;
   position: relative;
   animation: fadeIn 0.3s ease-out;
-  
-  /* Overwrite static BG to highlight differences */
-  background-color: #2e2e2e;
 }
 
 .message-user {
-  background-color: #333333; /* noticeably different from assistant */
+  background-color: #333333;
   margin-left: auto;
   border-top-right-radius: 0;
+  border-left: 3px solid #555555;
 }
 
 .message-assistant {
-  background-color: #2a2a2a; /* another distinct color for the assistant */
+  background-color: #0f2540; /* Darker blue-tinted background for assistant */
   margin-right: auto;
   border-top-left-radius: 0;
+  border-right: 3px solid #1a3a5a;
 }
 
 .message-header {
@@ -322,10 +378,11 @@ html, body {
   text-transform: uppercase;
 }
 
-.message-actions {
-  display: flex;
-  gap: var(--space-xs);
+.message-user .message-role {
+  color: #ff4444; /* Red color for user role header */
 }
+
+/* Message actions already defined above */
 
 .message-content {
   white-space: pre-wrap;
@@ -496,8 +553,8 @@ html, body {
 }
 
 .loading-dots .dot {
-  width: 8px;
-  height: 8px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
   background-color: var(--accent);
   animation: pulse 1.4s infinite ease-in-out both;
