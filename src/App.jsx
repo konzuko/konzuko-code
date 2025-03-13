@@ -170,6 +170,43 @@ function App() {
     }
     setMessageToDelete(null);
   }
+  
+  async function handleResendMessage(messageIndex) {
+    if (!currentChatId) return;
+    const chat = chats.find(c => c.id === currentChatId);
+    if (!chat || messageIndex >= chat.messages.length) return;
+    
+    // Only resend user messages
+    if (chat.messages[messageIndex].role !== 'user') return;
+    
+    // Check if there are messages after this one
+    if (messageIndex < chat.messages.length - 1) return;
+    
+    // Get the user message content - we don't need to add it again since we're reusing it
+    const userContent = chat.messages[messageIndex].content;
+    
+    // Send to API - use all messages up to and including this one
+    setLoading(true);
+    const result = await callApiForText({
+      messages: chat.messages.slice(0, messageIndex + 1),
+      apiKey: settings.apiKey,
+      model: settings.model
+    });
+    setLoading(false);
+    
+    if (result.error) {
+      chat.messages.push({
+        role: 'assistant',
+        content: `Error: ${result.error}`,
+      });
+    } else {
+      chat.messages.push({
+        role: 'assistant',
+        content: result.content || '',
+      });
+    }
+    updateChat({ ...chat });
+  }
 
   function confirmDeleteChat() {
     if (!chatToDelete) return;
@@ -405,6 +442,7 @@ ${imagesDescription}
                   <option value="o3-mini-2025-01-31">o3-mini-2025-01-31 (default)</option>
                   <option value="o1">o1 (slower, more reasoning)</option>
                   <option value="gpt-4o">gpt-4o (bigger model)</option>
+                  <option value="gpt-4.5-preview-2025-02-27">gpt-4.5-preview-2025-02-27 (newest)</option>
                 </select>
               </div>
               <button className="button" type="submit">Save</button>
@@ -420,6 +458,16 @@ ${imagesDescription}
                   <div className="message-role">{m.role}</div>
                   <div className="message-actions">
                     <button className="button icon-button" onClick={() => navigator.clipboard.writeText(m.content)}>Copy</button>
+                    {m.role === 'user' && (
+                      <button 
+                        className="button icon-button" 
+                        onClick={() => handleResendMessage(idx)}
+                        disabled={loading || idx < currentChat.messages.length - 1}
+                        title={idx < currentChat.messages.length - 1 ? "Can only resend the last message" : "Resend this prompt"}
+                      >
+                        Resend
+                      </button>
+                    )}
                     <button 
                       className="button icon-button" 
                       onClick={() => requestDeleteMessage(currentChat.id, idx)}
@@ -431,6 +479,16 @@ ${imagesDescription}
                 <div className="message-content">{m.content}</div>
                 <div className="message-actions-bottom">
                   <button className="button icon-button" onClick={() => navigator.clipboard.writeText(m.content)}>Copy</button>
+                  {m.role === 'user' && (
+                    <button 
+                      className="button icon-button" 
+                      onClick={() => handleResendMessage(idx)}
+                      disabled={loading || idx < currentChat.messages.length - 1}
+                      title={idx < currentChat.messages.length - 1 ? "Can only resend the last message" : "Resend this prompt"}
+                    >
+                      Resend
+                    </button>
+                  )}
                   <button 
                     className="button icon-button" 
                     onClick={() => requestDeleteMessage(currentChat.id, idx)}
