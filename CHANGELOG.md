@@ -12,5 +12,7 @@ versus if we refactor
 - ability to specify and save to one particular file per chat - a kind of @list.html for example - should eb able to select it from the system file menu
 the idea being that you're generally working on a per file basis
 
+- a small llm that check if your prompt makes sense before it's sent - under the hood
+
 CHANGES
 ---
