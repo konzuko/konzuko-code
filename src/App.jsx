@@ -400,13 +400,13 @@ ${imagesDescription}
       
       <div className="main-content">
         <div className="top-bar">
-          <button className="button" onClick={() => setShowSettings(!showSettings)}>
+          <button className="button" onClick={() => setShowSettings(!showSettings)} style={{ backgroundColor: '#000000', color: 'white', padding: 'var(--space-xs) var(--space-md)', borderRadius: 'var(--radius)', fontSize: '1em', fontWeight: 'normal' }}>
             {showSettings ? 'Close Settings' : 'Open Settings'}
           </button>
           <span className="ml-md" style={{ fontWeight: 'bold', marginLeft: 'var(--space-md)' }}>konzuko-code</span>
-          <div className="token-usage">
+          <div className="token-usage" style={{ marginLeft: 'var(--space-md)', backgroundColor: '#000000', color: 'white', padding: 'var(--space-xs) var(--space-md)', borderRadius: 'var(--radius)' }}>
             <span>
-              Tokens (this chat): {currentChatTokenCount.toLocaleString()}
+              Tokens Used in Current Chat: {currentChatTokenCount.toLocaleString()}
             </span>
           </div>
         </div>
@@ -567,8 +567,8 @@ ${imagesDescription}
                       <textarea 
                         className="form-textarea" 
                         rows={2} 
-                        placeholder="(Optional) e.g. JSON, etc." 
-                        value={formData.developReturnFormat} 
+                        placeholder="return complete refactored code in FULL so that i can paste it into my ide" 
+                        value={formData.developReturnFormat || "return complete refactored code in FULL so that i can paste it into my ide"} 
                         onInput={(e) => setFormData({ ...formData, developReturnFormat: e.target.value })} 
                         onDragOver={(e) => e.preventDefault()}
                         onDrop={(e) => handleTextareaDrop('developReturnFormat', e)}
