@@ -9,5 +9,8 @@ versus if we refactor
 (will need to figure out how this will fit in with the current Develop button)
 
 
+- ability to specify and save to one particular file per chat - a kind of @list.html for example - should eb able to select it from the system file menu
+the idea being that you're generally working on a per file basis
+
 CHANGES
 ---
