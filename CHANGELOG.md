@@ -1,6 +1,8 @@
 TODO
 ---
 
+- FIX prompts 
+
 - debugging button - which only returns solutions to fixes but not code
 also explores how the error may have occured and future problems and fixes if we go on
 versus if we refactor

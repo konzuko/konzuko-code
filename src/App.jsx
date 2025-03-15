@@ -254,16 +254,22 @@ function App() {
     let userContent = '';
     if (mode === 'DEVELOP') {
       const isFirstMessage = chat.messages.length === 0;
+      // Use the default RETURN FORMAT when the field is empty or only whitespace
+      const returnFormat = formData.developReturnFormat && formData.developReturnFormat.trim() 
+        ? formData.developReturnFormat 
+        : "return complete refactored code in FULL so that i can paste it into my ide";
+
       userContent = `
 MODE: DEVELOP
 GOAL: ${formData.developGoal}
 FEATURES: ${formData.developFeatures}
-RETURN FORMAT: ${formData.developReturnFormat}
+RETURN FORMAT: ${returnFormat}
 THINGS TO REMEMBER/WARNINGS: ${formData.developWarnings}
 CONTEXT: ${formData.developContext}
 ${imagesDescription}
 ${isFirstMessage ? 'PLAN: At the end, create a comprehensive plan.' : ''}
       `.trim();
+
       if (!formData.developGoal.trim()) {
         alert('The GOAL field is required for DEVELOP.');
         return;
