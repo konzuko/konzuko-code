@@ -559,7 +559,7 @@ return (
                     className="form-textarea" 
                     rows={2} 
                     placeholder="return complete refactored code in FULL so that i can paste it into my ide" 
-                    value={formData.developReturnFormat || "return complete refactored code in FULL so that i can paste it into my ide"} 
+                    value={formData.developReturnFormat || "{return complete refactored code in FULL so that i can paste it into my ide}"} 
                     onInput={(e) => setFormData({ ...formData, developReturnFormat: e.target.value })} 
                     onDragOver={(e) => e.preventDefault()}
                     onDrop={(e) => handleTextareaDrop('developReturnFormat', e)}

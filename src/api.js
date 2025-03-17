@@ -61,14 +61,14 @@ export async function callApiForText({ messages, apiKey, model = 'o3-mini-high' 
   }
   }
   
-  export async function callApiForImageDescription({ imageUrls = [], apiKey, openRouterApiKey, model = 'mistralai/mistral-small-24b-instruct-2501' }) {
+  export async function callApiForImageDescription({ imageUrls = [], apiKey, openRouterApiKey, model = 'qwen/qwen2.5-vl-72b-instruct' }) {
   const messages = [
   {
   role: 'user',
   content: [
   {
   type: 'text',
-  text: 'Please describe these images in detail. Focus on content relevant for coding or technical context.'
+  text: 'Please describe these images in detail. {ONLY RETURN THE DESCRIPTION OF THE IMAGES AND ITS ENTIRE CONTENT IN COMPREHENSIVE AND DETAILED LANGUAGE. DO NOT RETURN ANYTHING ELSE.}'
   },
   ...imageUrls.map(url => ({
   type: 'image_url',

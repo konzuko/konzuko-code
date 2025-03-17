@@ -97,3 +97,5 @@ return (
 </div>
 );
 }
+
+export default ChatPane;
