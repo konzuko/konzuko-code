@@ -250,11 +250,16 @@ function App() {
       const isFirstMessage = chat.messages.length === 0;
       // Use default if the user has not edited the RETURN FORMAT field
       const returnFormat = hasEditedReturnFormat ? formData.developReturnFormat : DEFAULT_RETURN_FORMAT;
+      // Inject the high reasoning modifier if the model is 'o1'
+      const highReasoningModifier = settings.model === 'o1'
+        ? 'HIGH REASONING: Integrate advanced problem-solving and deep analytical reasoning as implemented in o3-mini.'
+        : '';
       userContent = `
       
 MODE: DEVELOP
 GOAL: ${formData.developGoal}
 FEATURES: ${formData.developFeatures}
+${highReasoningModifier}
 RETURN FORMAT: ${returnFormat}
 THINGS TO REMEMBER/WARNINGS: ${formData.developWarnings}
 CONTEXT: ${formData.developContext}
