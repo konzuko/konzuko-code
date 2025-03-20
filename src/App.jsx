@@ -437,6 +437,7 @@ ${imagesDescription}
                 >
                   <option value="o3-mini-2025-01-31">o3-mini-2025-01-31 (default)</option>
                   <option value="o1">o1 (slower, more reasoning)</option>
+                  <option value="o1-pro-2025-03-19">o1-pro-2025-03-19 (high-end reasoning)</option>
                   <option value="gpt-4o">gpt-4o (bigger model)</option>
                   <option value="gpt-4.5-preview-2025-02-27">gpt-4.5-preview-2025-02-27 (newest)</option>
                 </select>
