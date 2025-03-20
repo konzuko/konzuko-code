@@ -61,7 +61,7 @@ function App() {
         const reader = new FileReader();
         reader.onload = (e) => {
           const textContent = e.target.result;
-          // Use the file’s absolute path if available, else fallback to file.name
+          // Use the file's absolute path if available, else fallback to file.name
           const filePath = file.path || file.name;
           setFormData(prev => ({
             ...prev,
@@ -250,16 +250,11 @@ function App() {
       const isFirstMessage = chat.messages.length === 0;
       // Use default if the user has not edited the RETURN FORMAT field
       const returnFormat = hasEditedReturnFormat ? formData.developReturnFormat : DEFAULT_RETURN_FORMAT;
-      // Inject the high reasoning modifier if the model is 'o1'
-      const highReasoningModifier = settings.model === 'o1'
-        ? 'HIGH REASONING: Integrate advanced problem-solving and deep analytical reasoning as implemented in o3-mini.'
-        : '';
       userContent = `
       
 MODE: DEVELOP
 GOAL: ${formData.developGoal}
 FEATURES: ${formData.developFeatures}
-${highReasoningModifier}
 RETURN FORMAT: ${returnFormat}
 THINGS TO REMEMBER/WARNINGS: ${formData.developWarnings}
 CONTEXT: ${formData.developContext}
@@ -319,7 +314,7 @@ ${imagesDescription}
         ...formData,
         developGoal: '',
         developFeatures: '',
-        developReturnFormat: '',  // When cleared, user’s deliberate deletion will be saved.
+        developReturnFormat: '',  // When cleared, user's deliberate deletion will be saved.
         developWarnings: '',
         developContext: '',
       });
