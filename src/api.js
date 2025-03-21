@@ -20,7 +20,7 @@ export async function callApiForText({ messages, apiKey, model = 'o3-mini-high' 
     console.log('Request body:', JSON.stringify(requestBody, null, 2));
     
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5 * 60 * 1000); // 5 minutes
+    const timeoutId = setTimeout(() => controller.abort(), 11 * 60 * 1000); // 11 minutes
     
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
