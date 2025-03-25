@@ -3,6 +3,14 @@ TODO
 
 - FIX prompts 
 
+- edit button
+- commit button
+- token warning signal
+- continue chat button
+{ summary needs to identify fixes done so far, struggles user has had, and latest full code file}
+- fix grid
+
+
 - debugging button - which only returns solutions to fixes but not code
 also explores how the error may have occured and future problems and fixes if we go on
 versus if we refactor
