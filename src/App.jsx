@@ -10,9 +10,7 @@ import {
   approximateTokenCount
 } from './hooks.js';
 
-/*
-   Helper function to read a File as a base64 data URL 
-*/
+// Helper function to read a File as a base64 data URL
 function readFileAsDataURL(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -23,7 +21,8 @@ function readFileAsDataURL(file) {
 }
 
 // Define the default return format value.
-const DEFAULT_RETURN_FORMAT = "return complete refactored code in FULL, and comment out anything that is not code, so that i can paste it directly into my ide";
+const DEFAULT_RETURN_FORMAT =
+  "return complete refactored code in FULL so that i can paste it directly into my ide";
 
 function App() {
   const { chats, addChat, updateChat, deleteChat } = useChats();
@@ -41,6 +40,69 @@ function App() {
   const [uploadedImages, setUploadedImages] = useState([]);
   const [hasEditedReturnFormat, setHasEditedReturnFormat] = useState(false);
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Utility functions to render or copy message content in a user-friendly way
+  // ─────────────────────────────────────────────────────────────────────────────
+  function renderMessageContent(content) {
+    // If there's no array of objects, just display as text.
+    if (typeof content === 'string') {
+      return <div>{content}</div>;
+    }
+    // If there's an array of content parts (e.g. text and images), render each appropriately
+    if (Array.isArray(content)) {
+      return content.map((item, idx) => {
+        if (item.type === 'text') {
+          return (
+            <div key={idx} style={{ whiteSpace: 'pre-wrap' }}>
+              {item.text}
+            </div>
+          );
+        } else if (item.type === 'image_url') {
+          return (
+            <div key={idx} style={{ marginTop: '0.5em', marginBottom: '0.5em' }}>
+              <img
+                src={item.image_url.url}
+                alt="User Uploaded"
+                style={{ maxWidth: '300px', maxHeight: '300px' }}
+              />
+            </div>
+          );
+        } else {
+          // fallback if there's some other type
+          return (
+            <div key={idx} style={{ whiteSpace: 'pre-wrap' }}>
+              {JSON.stringify(item, null, 2)}
+            </div>
+          );
+        }
+      });
+    }
+    // fallback if it's an object or something else
+    return <div>{JSON.stringify(content, null, 2)}</div>;
+  }
+
+  function getMessagePlainText(content) {
+    if (typeof content === 'string') {
+      return content;
+    }
+    if (Array.isArray(content)) {
+      // For copying to clipboard, we'll just show text for text parts,
+      // and a placeholder for images, so we don't expose base64 data
+      return content
+        .map((item) => {
+          if (item.type === 'text') {
+            return item.text;
+          } else if (item.type === 'image_url') {
+            return '[Image]';
+          } else {
+            return JSON.stringify(item);
+          }
+        })
+        .join('\n');
+    }
+    return JSON.stringify(content, null, 2);
+  }
+
   // Ensure at least one chat exists
   useEffect(() => {
     if (chats.length === 0) {
@@ -53,7 +115,7 @@ function App() {
   // ─── Drag & Drop Helpers ─────────────────────────────
   function isTextFile(file) {
     const allowedExtensions = ['.txt', '.js', '.jsx', '.ts', '.tsx', '.py', '.json', '.html', '.css', '.md'];
-    if (file.type.startsWith("text/")) return true;
+    if (file.type.startsWith('text/')) return true;
     const lowerName = file.name.toLowerCase();
     return allowedExtensions.some(ext => lowerName.endsWith(ext));
   }
@@ -144,7 +206,7 @@ function App() {
         {
           role: 'assistant',
           content: 'Hello! Welcome to Konzuko Code. How may I assist you today?'
-        },
+        }
       ],
       model: settings.model,
     };
@@ -333,9 +395,11 @@ ANY ERRORS?: ${formData.fixErrors}
   }
 
   const currentChat = chats.find(c => c.id === currentChatId);
-  const currentChatTokenCount = currentChat ? currentChat.messages.reduce((acc, msg) => {
-    return acc + (typeof msg.content === 'string' ? approximateTokenCount(msg.content) : 0);
-  }, 0) : 0;
+  const currentChatTokenCount = currentChat
+    ? currentChat.messages.reduce((acc, msg) => {
+        return acc + (typeof msg.content === 'string' ? approximateTokenCount(msg.content) : 0);
+      }, 0)
+    : 0;
 
   if (!currentChat) {
     return <h1 style={{ textAlign: 'center', marginTop: '20vh' }}>Loading Chat...</h1>;
@@ -349,7 +413,9 @@ ANY ERRORS?: ${formData.fixErrors}
             <h3>Confirm Revert</h3>
             <p>Click SEND again to revert the last message.</p>
             <div className="dialog-buttons">
-              <button className="button" onClick={() => setConfirmRevert(false)}>Cancel</button>
+              <button className="button" onClick={() => setConfirmRevert(false)}>
+                Cancel
+              </button>
             </div>
           </div>
         </div>
@@ -361,8 +427,12 @@ ANY ERRORS?: ${formData.fixErrors}
             <h3>Delete Chat?</h3>
             <p>This will remove the chat and all messages. Are you sure?</p>
             <div className="dialog-buttons">
-              <button className="button" onClick={() => setChatToDelete(null)}>Cancel</button>
-              <button className="button danger" onClick={confirmDeleteChat}>Delete</button>
+              <button className="button" onClick={() => setChatToDelete(null)}>
+                Cancel
+              </button>
+              <button className="button danger" onClick={confirmDeleteChat}>
+                Delete
+              </button>
             </div>
           </div>
         </div>
@@ -374,8 +444,12 @@ ANY ERRORS?: ${formData.fixErrors}
             <h3>Delete Message?</h3>
             <p>Are you sure you want to delete this message?</p>
             <div className="dialog-buttons">
-              <button className="button" onClick={() => setMessageToDelete(null)}>Cancel</button>
-              <button className="button danger" onClick={confirmDeleteMessage}>Delete</button>
+              <button className="button" onClick={() => setMessageToDelete(null)}>
+                Cancel
+              </button>
+              <button className="button danger" onClick={confirmDeleteMessage}>
+                Delete
+              </button>
             </div>
           </div>
         </div>
@@ -406,7 +480,9 @@ ANY ERRORS?: ${formData.fixErrors}
           >
             {showSettings ? 'Close Settings' : 'Open Settings'}
           </button>
-          <span className="ml-md" style={{ fontWeight: 'bold', marginLeft: 'var(--space-md)' }}>konzuko-code</span>
+          <span className="ml-md" style={{ fontWeight: 'bold', marginLeft: 'var(--space-md)' }}>
+            konzuko-code
+          </span>
           <div
             className="token-usage"
             style={{
@@ -417,14 +493,19 @@ ANY ERRORS?: ${formData.fixErrors}
               borderRadius: 'var(--radius)'
             }}
           >
-            <span>
-              Tokens Used in Current Chat: {currentChatTokenCount.toLocaleString()}
-            </span>
+            <span>Tokens Used in Current Chat: {currentChatTokenCount.toLocaleString()}</span>
           </div>
         </div>
 
         {showSettings && (
-          <div style={{ border: '1px solid var(--border)', margin: 'var(--space-md)', padding: 'var(--space-md)', borderRadius: 'var(--radius)' }}>
+          <div
+            style={{
+              border: '1px solid var(--border)',
+              margin: 'var(--space-md)',
+              padding: 'var(--space-md)',
+              borderRadius: 'var(--radius)'
+            }}
+          >
             <form onSubmit={handleSettingsSave}>
               <div className="form-group">
                 <label className="form-label">OpenAI API Key:</label>
@@ -458,7 +539,9 @@ ANY ERRORS?: ${formData.fixErrors}
                   <option value="gpt-4.5-preview-2025-02-27">gpt-4.5-preview-2025-02-27 (newest)</option>
                 </select>
               </div>
-              <button className="button" type="submit">Save</button>
+              <button className="button" type="submit">
+                Save
+              </button>
             </form>
           </div>
         )}
@@ -466,20 +549,13 @@ ANY ERRORS?: ${formData.fixErrors}
         <div className="content-container">
           <div className="chat-container">
             {currentChat.messages.map((m, idx) => (
-              <div
-                key={idx}
-                className={`message ${m.role === 'user' ? 'message-user' : 'message-assistant'}`}
-              >
+              <div key={idx} className={`message ${m.role === 'user' ? 'message-user' : 'message-assistant'}`}>
                 <div className="message-header">
                   <div className="message-role">{m.role}</div>
                   <div className="message-actions">
                     <button
                       className="button icon-button"
-                      onClick={() => navigator.clipboard.writeText(
-                        typeof m.content === 'string'
-                          ? m.content
-                          : JSON.stringify(m.content, null, 2)
-                      )}
+                      onClick={() => navigator.clipboard.writeText(getMessagePlainText(m.content))}
                     >
                       Copy
                     </button>
@@ -488,32 +564,25 @@ ANY ERRORS?: ${formData.fixErrors}
                         className="button icon-button"
                         onClick={() => handleResendMessage(idx)}
                         disabled={loading || idx < currentChat.messages.length - 1}
-                        title={idx < currentChat.messages.length - 1 ? "Can only resend the last message" : "Resend this prompt"}
+                        title={
+                          idx < currentChat.messages.length - 1
+                            ? "Can only resend the last message"
+                            : "Resend this prompt"
+                        }
                       >
                         Resend
                       </button>
                     )}
-                    <button
-                      className="button icon-button"
-                      onClick={() => requestDeleteMessage(currentChat.id, idx)}
-                    >
+                    <button className="button icon-button" onClick={() => requestDeleteMessage(currentChat.id, idx)}>
                       Delete
                     </button>
                   </div>
                 </div>
-                <div className="message-content">
-                  {typeof m.content === 'string'
-                    ? m.content
-                    : JSON.stringify(m.content, null, 2)}
-                </div>
+                <div className="message-content">{renderMessageContent(m.content)}</div>
                 <div className="message-actions-bottom">
                   <button
                     className="button icon-button"
-                    onClick={() => navigator.clipboard.writeText(
-                      typeof m.content === 'string'
-                        ? m.content
-                        : JSON.stringify(m.content, null, 2)
-                    )}
+                    onClick={() => navigator.clipboard.writeText(getMessagePlainText(m.content))}
                   >
                     Copy
                   </button>
@@ -522,15 +591,16 @@ ANY ERRORS?: ${formData.fixErrors}
                       className="button icon-button"
                       onClick={() => handleResendMessage(idx)}
                       disabled={loading || idx < currentChat.messages.length - 1}
-                      title={idx < currentChat.messages.length - 1 ? "Can only resend the last message" : "Resend this prompt"}
+                      title={
+                        idx < currentChat.messages.length - 1
+                          ? "Can only resend the last message"
+                          : "Resend this prompt"
+                      }
                     >
                       Resend
                     </button>
                   )}
-                  <button
-                    className="button icon-button"
-                    onClick={() => requestDeleteMessage(currentChat.id, idx)}
-                  >
+                  <button className="button icon-button" onClick={() => requestDeleteMessage(currentChat.id, idx)}>
                     Delete
                   </button>
                 </div>
@@ -538,29 +608,28 @@ ANY ERRORS?: ${formData.fixErrors}
             ))}
           </div>
 
-          <div
-            className="template-container"
-            onDragOver={handleTemplateDragOver}
-            onDrop={handleTemplateDrop}
-          >
+          <div className="template-container" onDragOver={handleTemplateDragOver} onDrop={handleTemplateDrop}>
             <div className="template-content">
               <div className="flex gap-sm mb-md">
                 <button
                   className={`button ${mode === 'DEVELOP' ? 'active' : ''}`}
-                  onClick={() => { setMode('DEVELOP'); setConfirmRevert(false); }}
+                  onClick={() => {
+                    setMode('DEVELOP');
+                    setConfirmRevert(false);
+                  }}
                 >
                   DEVELOP
                 </button>
                 <button
                   className={`button ${mode === 'FIX' ? 'active' : ''}`}
-                  onClick={() => { setMode('FIX'); setConfirmRevert(false); }}
+                  onClick={() => {
+                    setMode('FIX');
+                    setConfirmRevert(false);
+                  }}
                 >
                   FIX
                 </button>
-                <button
-                  className={`button ${mode === 'REVERT' ? 'active' : ''}`}
-                  onClick={() => { setMode('REVERT'); }}
-                >
+                <button className={`button ${mode === 'REVERT' ? 'active' : ''}`} onClick={() => setMode('REVERT')}>
                   REVERT
                 </button>
               </div>
@@ -693,9 +762,13 @@ ANY ERRORS?: ${formData.fixErrors}
                 )}
                 {mode === 'REVERT' && (
                   <div className="mb-md">
-                    {confirmRevert
-                      ? <div style={{ color: 'var(--error)' }}>Are you sure? Clicking SEND again will revert the last message.</div>
-                      : <div>Click SEND to confirm revert. This will delete the last message from this chat.</div>}
+                    {confirmRevert ? (
+                      <div style={{ color: 'var(--error)' }}>
+                        Are you sure? Clicking SEND again will revert the last message.
+                      </div>
+                    ) : (
+                      <div>Click SEND to confirm revert. This will delete the last message from this chat.</div>
+                    )}
                   </div>
                 )}
               </div>
@@ -709,10 +782,7 @@ ANY ERRORS?: ${formData.fixErrors}
                     {uploadedImages.map((img, idx) => (
                       <div key={idx} className="image-preview-item">
                         <img src={img.dataUrl} alt={img.name} />
-                        <button
-                          className="image-remove-button"
-                          onClick={() => removeUploadedImage(idx)}
-                        >
+                        <button className="image-remove-button" onClick={() => removeUploadedImage(idx)}>
                           ×
                         </button>
                       </div>
@@ -732,11 +802,7 @@ ANY ERRORS?: ${formData.fixErrors}
                   onChange={handleFileSelection}
                 />
               </div>
-              <button
-                className="button send-button mt-sm"
-                onClick={handleSendPrompt}
-                disabled={loading}
-              >
+              <button className="button send-button mt-sm" onClick={handleSendPrompt} disabled={loading}>
                 {loading ? <span className="loading-dots">Sending</span> : 'Send Prompt'}
               </button>
             </div>
@@ -745,10 +811,8 @@ ANY ERRORS?: ${formData.fixErrors}
               <div className="handle-line"></div>
               <span className="handle-text">Resize</span>
             </div>
-
           </div>
         </div>
-
       </div>
     </div>
   );
