@@ -5,6 +5,7 @@ TODO
 
 - edit button
 - commit button
+- specift kind of codebase
 - token warning signal
 - continue chat button
 { summary needs to identify fixes done so far, struggles user has had, and latest full code file}

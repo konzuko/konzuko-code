@@ -1,22 +1,29 @@
 import { useState, useEffect, useRef } from 'preact/hooks';
 import ChatPane from './chatpane.jsx';
-import { callApiForText, callApiForImageDescription } from './api.js';
-import { useChats, useSettings, useFormData, useDroppedFiles, useMode, approximateTokenCount } from './hooks.js';
+import { callApiForText /*, callApiForImageDescription*/ } from './api.js';
+import {
+  useChats,
+  useSettings,
+  useFormData,
+  useDroppedFiles,
+  useMode,
+  approximateTokenCount
+} from './hooks.js';
 
-/**
-    Helper function to read a File as a base64 data URL 
+/*
+   Helper function to read a File as a base64 data URL 
 */
-function readFileAsDataURL(file) { 
-  return new Promise((resolve, reject) => { 
-    const reader = new FileReader(); 
-    reader.onload = (evt) => resolve(evt.target.result); 
-    reader.onerror = (err) => reject(err); 
-    reader.readAsDataURL(file); 
-  }); 
+function readFileAsDataURL(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (evt) => resolve(evt.target.result);
+    reader.onerror = (err) => reject(err);
+    reader.readAsDataURL(file);
+  });
 }
 
 // Define the default return format value.
-const DEFAULT_RETURN_FORMAT = "return complete refactored code in FULL so that i can paste it into my ide";
+const DEFAULT_RETURN_FORMAT = "return complete refactored code in FULL, and comment out anything that is not code, so that i can paste it directly into my ide";
 
 function App() {
   const { chats, addChat, updateChat, deleteChat } = useChats();
@@ -32,7 +39,6 @@ function App() {
   const fileInputRef = useRef();
   const [loading, setLoading] = useState(false);
   const [uploadedImages, setUploadedImages] = useState([]);
-  // Track if the user has actively edited the RETURN FORMAT field.
   const [hasEditedReturnFormat, setHasEditedReturnFormat] = useState(false);
 
   // Ensure at least one chat exists
@@ -61,7 +67,6 @@ function App() {
         const reader = new FileReader();
         reader.onload = (e) => {
           const textContent = e.target.result;
-          // Use the file's absolute path if available, else fallback to file.name
           const filePath = file.path || file.name;
           setFormData(prev => ({
             ...prev,
@@ -179,7 +184,6 @@ function App() {
     if (!currentChatId) return;
     const chat = chats.find(c => c.id === currentChatId);
     if (!chat || messageIndex >= chat.messages.length) return;
-    // Only resend user messages; and only if this is the last message
     if (chat.messages[messageIndex].role !== 'user') return;
     if (messageIndex < chat.messages.length - 1) return;
 
@@ -224,57 +228,8 @@ function App() {
     const chat = chats.find(c => c.id === currentChatId);
     if (!chat) return;
 
-    let imagesDescription = '';
-    if (uploadedImages.length > 0) {
-      const dataUrls = uploadedImages.map(img => img.dataUrl);
-      setLoading(true);
-      try {
-        const descRes = await callApiForImageDescription({
-          imageUrls: dataUrls,
-          apiKey: settings.apiKey,
-          openRouterApiKey: settings.openRouterApiKey
-        });
-        if (!descRes.error && descRes.content) {
-          imagesDescription = '\n[ IMAGES DESCRIBED AS ]:\n' + descRes.content;
-        } else {
-          imagesDescription = '\n[ IMAGES DESCRIBED AS ]: Error describing images: ' + (descRes.error || 'unknown error');
-        }
-      } finally {
-        setLoading(false);
-        setUploadedImages([]);
-      }
-    }
-
-    let userContent = '';
-    if (mode === 'DEVELOP') {
-      const isFirstMessage = chat.messages.length === 0;
-      // Use default if the user has not edited the RETURN FORMAT field
-      const returnFormat = hasEditedReturnFormat ? formData.developReturnFormat : DEFAULT_RETURN_FORMAT;
-      userContent = `
-      
-MODE: DEVELOP
-GOAL: ${formData.developGoal}
-FEATURES: ${formData.developFeatures}
-RETURN FORMAT: ${returnFormat}
-THINGS TO REMEMBER/WARNINGS: ${formData.developWarnings}
-CONTEXT: ${formData.developContext}
-${imagesDescription}
-${isFirstMessage ? 'PLAN: At the end, create a comprehensive plan.' : ''}
-      `.trim();
-
-      if (!formData.developGoal.trim()) {
-        alert('The GOAL field is required for DEVELOP.');
-        return;
-      }
-    } else if (mode === 'FIX') {
-      userContent = `
-      
-MODE: FIX
-FIX YOUR CODE: ${formData.fixCode}
-ANY ERRORS?: ${formData.fixErrors}
-${imagesDescription}
-      `.trim();
-    } else if (mode === 'REVERT') {
+    // If in REVERT mode, we handle revert logic first
+    if (mode === 'REVERT') {
       if (!confirmRevert) {
         setConfirmRevert(true);
         return;
@@ -285,11 +240,58 @@ ${imagesDescription}
         return;
       }
     }
-    if (!userContent.trim()) return;
 
-    // Add the user's message immutably
-    const newUserMessages = [...chat.messages, { role: 'user', content: userContent }];
+    // Build the text portion of the user's message
+    let userContent = '';
+
+    if (mode === 'DEVELOP') {
+      const isFirstMessage = chat.messages.length === 0;
+      const returnFormat = hasEditedReturnFormat ? formData.developReturnFormat : DEFAULT_RETURN_FORMAT;
+      userContent = `
+MODE: DEVELOP
+GOAL: ${formData.developGoal}
+FEATURES: ${formData.developFeatures}
+RETURN FORMAT: ${returnFormat}
+THINGS TO REMEMBER/WARNINGS: ${formData.developWarnings}
+CONTEXT: ${formData.developContext}
+${isFirstMessage ? 'PLAN: At the end, create a comprehensive plan.' : ''}
+      `.trim();
+
+      if (!formData.developGoal.trim()) {
+        alert('The GOAL field is required for DEVELOP.');
+        return;
+      }
+    } else if (mode === 'FIX') {
+      userContent = `
+MODE: FIX
+FIX YOUR CODE: ${formData.fixCode}
+ANY ERRORS?: ${formData.fixErrors}
+      `.trim();
+    }
+
+    if (!userContent.trim() && uploadedImages.length === 0) {
+      // If there's no text AND no images, abort
+      return;
+    }
+
+    // Combine user text + images into one user message
+    const messageContent = [];
+    if (userContent.trim()) {
+      messageContent.push({ type: 'text', text: userContent });
+    }
+    if (uploadedImages.length > 0) {
+      for (const img of uploadedImages) {
+        messageContent.push({
+          type: 'image_url',
+          image_url: { url: img.dataUrl }
+        });
+      }
+      setUploadedImages([]);
+    }
+
+    const newUserMessages = [...chat.messages, { role: 'user', content: messageContent }];
     updateChat({ ...chat, messages: newUserMessages });
+
     setLoading(true);
     try {
       const result = await callApiForText({
@@ -308,17 +310,16 @@ ${imagesDescription}
       setLoading(false);
     }
 
-    // Clear form fields after sending.
+    // Clear form fields after sending
     if (mode === 'DEVELOP') {
       setFormData({
         ...formData,
         developGoal: '',
         developFeatures: '',
-        developReturnFormat: '',  // When cleared, user's deliberate deletion will be saved.
+        developReturnFormat: '',
         developWarnings: '',
         developContext: '',
       });
-      // Reset the flag so next time the default value appears.
       setHasEditedReturnFormat(false);
     } else if (mode === 'FIX') {
       setFormData({
@@ -332,8 +333,6 @@ ${imagesDescription}
   }
 
   const currentChat = chats.find(c => c.id === currentChatId);
-
-  // Compute token count for the current chat.
   const currentChatTokenCount = currentChat ? currentChat.messages.reduce((acc, msg) => {
     return acc + (typeof msg.content === 'string' ? approximateTokenCount(msg.content) : 0);
   }, 0) : 0;
@@ -344,7 +343,6 @@ ${imagesDescription}
 
   return (
     <div className="app-container">
-      {/* Confirm revert last message */}
       {confirmRevert && (
         <div className="modal-overlay">
           <div className="confirm-dialog">
@@ -357,7 +355,6 @@ ${imagesDescription}
         </div>
       )}
 
-      {/* Confirm delete chat */}
       {chatToDelete && (
         <div className="modal-overlay">
           <div className="confirm-dialog">
@@ -371,7 +368,6 @@ ${imagesDescription}
         </div>
       )}
 
-      {/* Confirm delete message */}
       {messageToDelete && (
         <div className="modal-overlay">
           <div className="confirm-dialog">
@@ -384,7 +380,7 @@ ${imagesDescription}
           </div>
         </div>
       )}
-      
+
       <ChatPane
         chats={chats}
         currentChatId={currentChatId}
@@ -393,14 +389,34 @@ ${imagesDescription}
         onTitleUpdate={handleTitleUpdate}
         onDeleteChat={requestDeleteChat}
       />
-      
+
       <div className="main-content">
         <div className="top-bar">
-          <button className="button" onClick={() => setShowSettings(!showSettings)} style={{ backgroundColor: '#000000', color: 'white', padding: 'var(--space-xs) var(--space-md)', borderRadius: 'var(--radius)', fontSize: '1em', fontWeight: 'normal' }}>
+          <button
+            className="button"
+            onClick={() => setShowSettings(!showSettings)}
+            style={{
+              backgroundColor: '#000000',
+              color: 'white',
+              padding: 'var(--space-xs) var(--space-md)',
+              borderRadius: 'var(--radius)',
+              fontSize: '1em',
+              fontWeight: 'normal'
+            }}
+          >
             {showSettings ? 'Close Settings' : 'Open Settings'}
           </button>
           <span className="ml-md" style={{ fontWeight: 'bold', marginLeft: 'var(--space-md)' }}>konzuko-code</span>
-          <div className="token-usage" style={{ marginLeft: 'var(--space-md)', backgroundColor: '#000000', color: 'white', padding: 'var(--space-xs) var(--space-md)', borderRadius: 'var(--radius)' }}>
+          <div
+            className="token-usage"
+            style={{
+              marginLeft: 'var(--space-md)',
+              backgroundColor: '#000000',
+              color: 'white',
+              padding: 'var(--space-xs) var(--space-md)',
+              borderRadius: 'var(--radius)'
+            }}
+          >
             <span>
               Tokens Used in Current Chat: {currentChatTokenCount.toLocaleString()}
             </span>
@@ -450,14 +466,26 @@ ${imagesDescription}
         <div className="content-container">
           <div className="chat-container">
             {currentChat.messages.map((m, idx) => (
-              <div key={idx} className={`message ${m.role === 'user' ? 'message-user' : 'message-assistant'}`}>
+              <div
+                key={idx}
+                className={`message ${m.role === 'user' ? 'message-user' : 'message-assistant'}`}
+              >
                 <div className="message-header">
                   <div className="message-role">{m.role}</div>
                   <div className="message-actions">
-                    <button className="button icon-button" onClick={() => navigator.clipboard.writeText(m.content)}>Copy</button>
+                    <button
+                      className="button icon-button"
+                      onClick={() => navigator.clipboard.writeText(
+                        typeof m.content === 'string'
+                          ? m.content
+                          : JSON.stringify(m.content, null, 2)
+                      )}
+                    >
+                      Copy
+                    </button>
                     {m.role === 'user' && (
-                      <button 
-                        className="button icon-button" 
+                      <button
+                        className="button icon-button"
                         onClick={() => handleResendMessage(idx)}
                         disabled={loading || idx < currentChat.messages.length - 1}
                         title={idx < currentChat.messages.length - 1 ? "Can only resend the last message" : "Resend this prompt"}
@@ -465,20 +493,33 @@ ${imagesDescription}
                         Resend
                       </button>
                     )}
-                    <button 
-                      className="button icon-button" 
+                    <button
+                      className="button icon-button"
                       onClick={() => requestDeleteMessage(currentChat.id, idx)}
                     >
                       Delete
                     </button>
                   </div>
                 </div>
-                <div className="message-content">{m.content}</div>
+                <div className="message-content">
+                  {typeof m.content === 'string'
+                    ? m.content
+                    : JSON.stringify(m.content, null, 2)}
+                </div>
                 <div className="message-actions-bottom">
-                  <button className="button icon-button" onClick={() => navigator.clipboard.writeText(m.content)}>Copy</button>
+                  <button
+                    className="button icon-button"
+                    onClick={() => navigator.clipboard.writeText(
+                      typeof m.content === 'string'
+                        ? m.content
+                        : JSON.stringify(m.content, null, 2)
+                    )}
+                  >
+                    Copy
+                  </button>
                   {m.role === 'user' && (
-                    <button 
-                      className="button icon-button" 
+                    <button
+                      className="button icon-button"
                       onClick={() => handleResendMessage(idx)}
                       disabled={loading || idx < currentChat.messages.length - 1}
                       title={idx < currentChat.messages.length - 1 ? "Can only resend the last message" : "Resend this prompt"}
@@ -486,8 +527,8 @@ ${imagesDescription}
                       Resend
                     </button>
                   )}
-                  <button 
-                    className="button icon-button" 
+                  <button
+                    className="button icon-button"
                     onClick={() => requestDeleteMessage(currentChat.id, idx)}
                   >
                     Delete
@@ -497,43 +538,43 @@ ${imagesDescription}
             ))}
           </div>
 
-          <div 
+          <div
             className="template-container"
             onDragOver={handleTemplateDragOver}
             onDrop={handleTemplateDrop}
           >
             <div className="template-content">
               <div className="flex gap-sm mb-md">
-                <button 
-                  className={`button ${mode === 'DEVELOP' ? 'active' : ''}`} 
+                <button
+                  className={`button ${mode === 'DEVELOP' ? 'active' : ''}`}
                   onClick={() => { setMode('DEVELOP'); setConfirmRevert(false); }}
                 >
                   DEVELOP
                 </button>
-                <button 
-                  className={`button ${mode === 'FIX' ? 'active' : ''}`} 
+                <button
+                  className={`button ${mode === 'FIX' ? 'active' : ''}`}
                   onClick={() => { setMode('FIX'); setConfirmRevert(false); }}
                 >
                   FIX
                 </button>
-                <button 
-                  className={`button ${mode === 'REVERT' ? 'active' : ''}`} 
+                <button
+                  className={`button ${mode === 'REVERT' ? 'active' : ''}`}
                   onClick={() => { setMode('REVERT'); }}
                 >
                   REVERT
                 </button>
               </div>
-              
+
               <div className="template-grid">
                 {mode === 'DEVELOP' && (
                   <div className="flex flex-column" style={{ overflow: 'auto' }}>
                     <div className="form-group">
                       <label className="form-label">GOAL:</label>
-                      <textarea 
-                        className="form-textarea" 
-                        rows={2} 
-                        value={formData.developGoal} 
-                        onInput={(e) => setFormData({ ...formData, developGoal: e.target.value })} 
+                      <textarea
+                        className="form-textarea"
+                        rows={2}
+                        value={formData.developGoal}
+                        onInput={(e) => setFormData({ ...formData, developGoal: e.target.value })}
                         onDragOver={(e) => e.preventDefault()}
                         onDrop={(e) => handleTextareaDrop('developGoal', e)}
                       />
@@ -545,11 +586,11 @@ ${imagesDescription}
                     </div>
                     <div className="form-group">
                       <label className="form-label">List every FEATURE of the program:</label>
-                      <textarea 
-                        className="form-textarea" 
-                        rows={2} 
-                        value={formData.developFeatures} 
-                        onInput={(e) => setFormData({ ...formData, developFeatures: e.target.value })} 
+                      <textarea
+                        className="form-textarea"
+                        rows={2}
+                        value={formData.developFeatures}
+                        onInput={(e) => setFormData({ ...formData, developFeatures: e.target.value })}
                         onDragOver={(e) => e.preventDefault()}
                         onDrop={(e) => handleTextareaDrop('developFeatures', e)}
                       />
@@ -561,10 +602,10 @@ ${imagesDescription}
                     </div>
                     <div className="form-group">
                       <label className="form-label">RETURN FORMAT:</label>
-                      <textarea 
-                        className="form-textarea" 
-                        rows={2} 
-                        placeholder="return complete refactored code in FULL so that i can paste it into my ide" 
+                      <textarea
+                        className="form-textarea"
+                        rows={2}
+                        placeholder="return complete refactored code in FULL so that i can paste it into my ide"
                         value={hasEditedReturnFormat ? formData.developReturnFormat : DEFAULT_RETURN_FORMAT}
                         onInput={(e) => {
                           setFormData({ ...formData, developReturnFormat: e.target.value });
@@ -581,11 +622,11 @@ ${imagesDescription}
                     </div>
                     <div className="form-group">
                       <label className="form-label">THINGS TO REMEMBER/WARNINGS:</label>
-                      <textarea 
-                        className="form-textarea" 
-                        rows={2} 
-                        value={formData.developWarnings} 
-                        onInput={(e) => setFormData({ ...formData, developWarnings: e.target.value })} 
+                      <textarea
+                        className="form-textarea"
+                        rows={2}
+                        value={formData.developWarnings}
+                        onInput={(e) => setFormData({ ...formData, developWarnings: e.target.value })}
                         onDragOver={(e) => e.preventDefault()}
                         onDrop={(e) => handleTextareaDrop('developWarnings', e)}
                       />
@@ -597,11 +638,11 @@ ${imagesDescription}
                     </div>
                     <div className="form-group">
                       <label className="form-label">CONTEXT:</label>
-                      <textarea 
-                        className="form-textarea" 
-                        rows={2} 
-                        placeholder="(Optional) additional info" 
-                        value={formData.developContext} 
+                      <textarea
+                        className="form-textarea"
+                        rows={2}
+                        placeholder="(Optional) additional info"
+                        value={formData.developContext}
                         onInput={(e) => setFormData({ ...formData, developContext: e.target.value })}
                         onDragOver={(e) => e.preventDefault()}
                         onDrop={(e) => handleTextareaDrop('developContext', e)}
@@ -618,10 +659,10 @@ ${imagesDescription}
                   <div className="flex flex-column" style={{ overflow: 'auto' }}>
                     <div className="form-group">
                       <label className="form-label">FIX YOUR CODE:</label>
-                      <textarea 
-                        className="form-textarea" 
-                        rows={2} 
-                        value={formData.fixCode} 
+                      <textarea
+                        className="form-textarea"
+                        rows={2}
+                        value={formData.fixCode}
                         onInput={(e) => setFormData({ ...formData, fixCode: e.target.value })}
                         onDragOver={(e) => e.preventDefault()}
                         onDrop={(e) => handleTextareaDrop('fixCode', e)}
@@ -634,10 +675,10 @@ ${imagesDescription}
                     </div>
                     <div className="form-group">
                       <label className="form-label">ANY ERRORS?</label>
-                      <textarea 
-                        className="form-textarea" 
-                        rows={2} 
-                        value={formData.fixErrors} 
+                      <textarea
+                        className="form-textarea"
+                        rows={2}
+                        value={formData.fixErrors}
                         onInput={(e) => setFormData({ ...formData, fixErrors: e.target.value })}
                         onDragOver={(e) => e.preventDefault()}
                         onDrop={(e) => handleTextareaDrop('fixErrors', e)}
@@ -668,8 +709,8 @@ ${imagesDescription}
                     {uploadedImages.map((img, idx) => (
                       <div key={idx} className="image-preview-item">
                         <img src={img.dataUrl} alt={img.name} />
-                        <button 
-                          className="image-remove-button" 
+                        <button
+                          className="image-remove-button"
                           onClick={() => removeUploadedImage(idx)}
                         >
                           ×
@@ -691,7 +732,11 @@ ${imagesDescription}
                   onChange={handleFileSelection}
                 />
               </div>
-              <button className="button send-button mt-sm" onClick={handleSendPrompt} disabled={loading}>
+              <button
+                className="button send-button mt-sm"
+                onClick={handleSendPrompt}
+                disabled={loading}
+              >
                 {loading ? <span className="loading-dots">Sending</span> : 'Send Prompt'}
               </button>
             </div>
