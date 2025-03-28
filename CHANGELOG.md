@@ -8,9 +8,16 @@ TODO
 - specift kind of codebase
 - token warning signal
 - continue chat button
+{e.g.  the controls buttons dont work - we've made an error in this latest code generation, or the essential files, or both 
+
+i like where we are with the incorporation of the new music player but these last few things needs to be sorted out 
+
+BUT for now, provide a comprehensive detailing of what we've done so far, our main goal, and things we've tried, and where we are at right now. you dont need to provide any code from the files - i'll provide it in the new chat i start - i need to start a new chat because we're running out of context window
+}
+
 { summary needs to identify fixes done so far, struggles user has had, and latest full code file}
 - fix grid
-- TOKEN COUNTER IS FUCKED - FIX IT
+- TOKEN COUNTER IS FUCKED - FIX IT - seems we were getting incoherent with openai models at 70,000 tokens, so we can likely go al the way up to 50,000
 
 
 - debugging button - which only returns solutions to fixes but not code
