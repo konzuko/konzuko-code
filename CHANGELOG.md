@@ -10,6 +10,7 @@ TODO
 - continue chat button
 { summary needs to identify fixes done so far, struggles user has had, and latest full code file}
 - fix grid
+- TOKEN COUNTER IS FUCKED - FIX IT
 
 
 - debugging button - which only returns solutions to fixes but not code
