@@ -5,7 +5,7 @@ TODO
 
 - edit button
 - commit button
-- specift kind of codebase
+- specif kind of codebase
 - token warning signal
 - continue chat button
 {e.g.  the controls buttons dont work - we've made an error in this latest code generation, or the essential files, or both 

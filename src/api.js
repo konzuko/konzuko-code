@@ -14,7 +14,7 @@ export async function callApiForText({ messages, apiKey, model = 'o3-mini-high' 
       messages: formattedMessages,
       response_format: { type: 'text' }
     };
-    if (model.includes('o3-mini') || model.includes('o1') || model.includes('o1-pro')) {
+    if (model.includes('o3-mini') || model.includes('o1') || model.includes('o3')) {
       requestBody.reasoning_effort = 'high';
     }
     console.log('Request body:', JSON.stringify(requestBody, null, 2));
