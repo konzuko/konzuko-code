@@ -1,136 +1,96 @@
-import { useState, useEffect } from 'preact/hooks';
+// src/hooks.js
+import { useState, useEffect } from 'preact/hooks'
 
-const LOCAL_STORAGE_KEY = 'konzuko-chats';
-const LOCAL_STORAGE_SETTINGS_KEY = 'konzuko-settings';
-const LOCAL_STORAGE_FORM_DATA_KEY = 'konzuko-form-data';
-// Removed LOCAL_STORAGE_DROPPED_FILES_KEY to fix per‐chat dropped files
-const LOCAL_STORAGE_MODE_KEY = 'konzuko-mode';
-
-export function approximateTokenCount(text) {
-  if (!text) return 0;
-  return Math.ceil(text.length / 4);
-}
-
-function loadChats() {
-  try {
-    const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch (e) { }
-  return [];
-}
-
-function saveChats(chats) {
-  localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(chats));
-}
-
+// 1) Persisted settings
+const KEY_SETTINGS = 'konzuko-settings'
 function loadSettings() {
-  try {
-    const raw = localStorage.getItem(LOCAL_STORAGE_SETTINGS_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch (e) { }
-  return { apiKey: '', openRouterApiKey: '', model: 'qwen/qwen2.5-vl-72b-instruct' };
+  try { return JSON.parse(localStorage.getItem(KEY_SETTINGS)) }
+  catch { }
+  return { apiKey:'', model:'gpt-4o', codeType:'javascript', showSettings:false }
 }
-
-function saveSettings(settings) {
-  localStorage.setItem(LOCAL_STORAGE_SETTINGS_KEY, JSON.stringify(settings));
-}
-
 export function useSettings() {
-  const [settings, setSettings] = useState(loadSettings());
+  const [settings, setSettings] = useState(loadSettings())
   useEffect(() => {
-    const timeoutId = setTimeout(() => {
-      saveSettings(settings);
-    }, 500);
-    return () => clearTimeout(timeoutId);
-  }, [settings]);
-  return [settings, setSettings];
+    localStorage.setItem(KEY_SETTINGS, JSON.stringify(settings))
+  }, [settings])
+  return [settings, setSettings]
 }
 
-function loadFormData() {
-  try {
-    const raw = localStorage.getItem(LOCAL_STORAGE_FORM_DATA_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch (e) { }
+// 2) Persisted form data
+const KEY_FORM = 'konzuko-form-data'
+function loadForm() {
+  try { return JSON.parse(localStorage.getItem(KEY_FORM)) }
+  catch { }
   return {
-    developGoal: '',
-    developFeatures: '',
-    developReturnFormat: '',
-    developWarnings: '',
-    developContext: '',
-    fixCode: '',
-    fixErrors: '',
-  };
+    developGoal:'',
+    developFeatures:'',
+    developReturnFormat:
+      'return complete refactored code in FULL so that i can paste it directly into my ide',
+    developWarnings:'',
+    developContext:'',
+    fixCode:'',
+    fixErrors:''
+  }
 }
-
-function saveFormData(formData) {
-  localStorage.setItem(LOCAL_STORAGE_FORM_DATA_KEY, JSON.stringify(formData));
-}
-
 export function useFormData() {
-  const [formData, setFormData] = useState(loadFormData());
+  const [form, setForm] = useState(loadForm())
   useEffect(() => {
-    const timeoutId = setTimeout(() => {
-      saveFormData(formData);
-    }, 500);
-    return () => clearTimeout(timeoutId);
-  }, [formData]);
-  return [formData, setFormData];
+    localStorage.setItem(KEY_FORM, JSON.stringify(form))
+  }, [form])
+  return [form, setForm]
 }
 
-// Changed useDroppedFiles to keep state in memory only (per-chat) rather than persist globally.
-export function useDroppedFiles() {
-  const [droppedFiles, setDroppedFiles] = useState({});
-  return [droppedFiles, setDroppedFiles];
-}
+// 3) Misc per‐chat state hooks
+export function useDroppedFiles() { return useState({}) }
 
-function loadMode() {
-  try {
-    const raw = localStorage.getItem(LOCAL_STORAGE_MODE_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch (e) { }
-  return 'DEVELOP';
-}
-
-function saveMode(mode) {
-  localStorage.setItem(LOCAL_STORAGE_MODE_KEY, JSON.stringify(mode));
-}
-
+const KEY_MODE = 'konzuko-mode'
+function loadMode() { return localStorage.getItem(KEY_MODE) || 'DEVELOP' }
 export function useMode() {
-  const [mode, setMode] = useState(loadMode());
-  useEffect(() => {
-    const timeoutId = setTimeout(() => {
-      saveMode(mode);
-    }, 500);
-    return () => clearTimeout(timeoutId);
-  }, [mode]);
-  return [mode, setMode];
+  const [mode, setMode] = useState(loadMode())
+  useEffect(() => localStorage.setItem(KEY_MODE, mode), [mode])
+  return [mode, setMode]
 }
 
-export function useChats() {
-  const [chats, setChats] = useState(loadChats());
-  useEffect(() => {
-    const debounceTimeout = setTimeout(() => {
-      saveChats(chats);
-    }, 500);
-    return () => clearTimeout(debounceTimeout);
-  }, [chats]);
+// 4) Exact token counter via tiktoken + WASM
+//    We import the wasm initializer and pump it through top-level await:
+import wasmInit from '@dqbd/tiktoken/wasm?init'
+import { encoding_for_model } from '@dqbd/tiktoken'
 
-  function addChat(chat) {
-    setChats(prevChats => [...prevChats, chat]);
+let encoder = null
+async function ensureEncoder() {
+  if (!encoder) {
+    // initialize the wasm module
+    await wasmInit()
+    // choose your model’s encoding (gpt-3.5-turbo uses cl100k_base under the hood)
+    encoder = encoding_for_model('gpt-3.5-turbo')
   }
+  return encoder
+}
+// kick off download immediately (no blocking)
+ensureEncoder().catch(console.error)
 
-  function updateChat(updatedChat) {
-    setChats(prevChats => prevChats.map(c => c.id === updatedChat.id ? updatedChat : c));
+// fallback heuristic until encoder is ready
+function approxCount(str = '') {
+  return Math.ceil(str.length / 4)
+}
+
+export function useTokenCounter() {
+  return (messages = []) => {
+    // if encoder not yet ready, use heuristic
+    if (!encoder) {
+      return messages.reduce((sum, m) => {
+        const txt = Array.isArray(m.content)
+          ? m.content.map(c => c.type === 'text' ? c.text : '').join('')
+          : String(m.content)
+        return sum + approxCount(txt)
+      }, 0)
+    }
+    // exact count
+    return messages.reduce((sum, m) => {
+      const txt = Array.isArray(m.content)
+        ? m.content.map(c => c.type === 'text' ? c.text : '').join('')
+        : String(m.content)
+      return sum + encoder.encode(txt).length
+    }, 0)
   }
-
-  function deleteChat(chatId) {
-    setChats(prevChats => prevChats.filter(c => c.id !== chatId));
-  }
-
-  return {
-    chats,
-    addChat,
-    updateChat,
-    deleteChat
-  };
 }
