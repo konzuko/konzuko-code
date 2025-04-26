@@ -1,15 +1,17 @@
-import { useState, useEffect }      from 'preact/hooks'
-import ChatPane                     from './chatpane.jsx'
+/* -------------------------------------------------------------------------
+   src/App.jsx
+   Main UI container – adds numbered assistant headers, per-snippet copy
+   buttons, floating tool-rail & Delete action.
+---------------------------------------------------------------------------*/
+import { useState, useEffect } from 'preact/hooks'
+import ChatPane                from './chatpane.jsx'
 import {
   callApiForText,
-  fetchChats,
-  fetchMessages,
-  createChat,
-  createMessage,
-  updateMessage,
-  archiveMessagesAfter
+  fetchChats,          fetchMessages,
+  createChat,          createMessage,
+  updateMessage,       archiveMessagesAfter,
+  deleteMessage
 } from './api.js'
-
 import {
   useSettings,
   useFormData,
@@ -17,41 +19,71 @@ import {
   useTokenCount
 } from './hooks.js'
 
-function App () {
-  /*────────────────────────── State */
+/*──────────────────────────────────────────────────────────────────────────
+  Helper → render markdown-like ``` fences with copy-button per snippet
+──────────────────────────────────────────────────────────────────────────*/
+function renderRichText (text) {
+  if (!text.includes('```')) {
+    return <div style={{ whiteSpace: 'pre-wrap' }}>{text}</div>
+  }
+
+  const parts = text.split(/```/g)  // even idx = plain, odd idx = code
+  return parts.map((chunk, i) =>
+    i % 2 === 1
+      ? (
+        <div key={i} className="code-wrapper">
+          <button
+            className="copy-snippet"
+            title="Copy code"
+            onClick={() => navigator.clipboard.writeText(chunk)}
+          >
+            Copy
+          </button>
+          <pre className="code-block"><code>{chunk}</code></pre>
+        </div>
+      )
+      : <span key={i}>{chunk}</span>
+  )
+}
+
+/*──────────────────────────────────────────────────────────────────────────
+  Top-level component
+──────────────────────────────────────────────────────────────────────────*/
+export default function App () {
+  /* ── state ───────────────────────────────────────────────────────────*/
   const [chats, setChats]           = useState([])
   const [currentChatId, setCurrent] = useState(null)
   const [loadingChats, setLC]       = useState(true)
   const [loadingSend, setLS]        = useState(false)
-  const [editingId,  setEditing]    = useState(null)
+  const [editingId,    setEditing]  = useState(null)
 
-  const [settings, setSettings]     = useSettings()
-  const [form,     setForm]         = useFormData()
-  const [mode,     setMode]         = useMode()
+  const [settings, setSettings] = useSettings()
+  const [form,     setForm]     = useFormData()
+  const [mode,     setMode]     = useMode()
 
   const tokenCount = useTokenCount(
     chats.find(c => c.id === currentChatId)?.messages ?? [],
     settings.model
   )
 
-  /*────────────────────────── Initial load */
+  /* ── fetch chat list on mount / codeType change ──────────────────────*/
   useEffect(() => {
     let alive = true
     ;(async () => {
       setLC(true)
       try {
-        let rows   = await fetchChats()
+        const rows = await fetchChats()
         let shaped = rows.map(r => ({
-          id      : r.id,
-          title   : r.title,
-          started : r.created_at,
-          model   : r.code_type,
-          messages: []
+          id: r.id, title: r.title, started: r.created_at,
+          model: r.code_type, messages: []
         }))
 
         if (!shaped.length) {
           const c = await createChat({ title: 'New Chat', model: settings.codeType })
-          shaped  = [{ id: c.id, title: c.title, started: c.created_at, model: c.code_type, messages: [] }]
+          shaped  = [{
+            id: c.id, title: c.title, started: c.created_at,
+            model: c.code_type, messages: []
+          }]
         }
 
         if (alive) {
@@ -60,29 +92,26 @@ function App () {
         }
       } catch (err) {
         alert('Failed to load chats: ' + err.message)
-      } finally {
-        alive && setLC(false)
-      }
+      } finally { alive && setLC(false) }
     })()
     return () => { alive = false }
   }, [settings.codeType])
 
-  /*────────────────────────── Get messages on chat-switch */
+  /* ── fetch messages whenever active chat changes ─────────────────────*/
   useEffect(() => {
     if (!currentChatId) return
     let alive = true
     fetchMessages(currentChatId)
-      .then(msgs => {
-        if (!alive) return
-        setChats(cs => cs.map(c => c.id === currentChatId ? { ...c, messages: msgs } : c))
-      })
+      .then(msgs => alive && setChats(cs => cs.map(c =>
+        c.id === currentChatId ? { ...c, messages: msgs } : c
+      )))
       .catch(err => alert('Failed to fetch messages: ' + err.message))
     return () => { alive = false }
   }, [currentChatId])
 
   const currentChat = chats.find(c => c.id === currentChatId) ?? { messages: [] }
 
-  /*────────────────────────── Utilities */
+  /* ── helpers ─────────────────────────────────────────────────────────*/
   const buildUserPrompt = () => {
     if (mode === 'DEVELOP') {
       return `
@@ -98,35 +127,39 @@ CONTEXT: ${form.developContext}`.trim()
     return ''
   }
 
-  /*────────────────────────── Handlers */
+  const scrollTo = idx =>
+    document.getElementById(`msg-${idx}`)?.scrollIntoView({ behavior:'smooth', block:'center' })
+
+  /* ── CRUD handlers ──────────────────────────────────────────────────*/
   async function handleNewChat () {
     setLS(true)
     try {
       const c = await createChat({ title: 'New Chat', model: settings.codeType })
-      setChats(cs => [{ id: c.id, title: c.title, started: c.created_at, model: c.code_type, messages: [] }, ...cs])
+      setChats(cs => [
+        { id: c.id, title: c.title, started: c.created_at, model: c.code_type, messages: [] },
+        ...cs
+      ])
       setCurrent(c.id)
-    } catch (err) {
-      alert('Failed to create chat: ' + err.message)
-    } finally { setLS(false) }
+    } catch (err) { alert('Failed to create chat: ' + err.message) }
+    finally      { setLS(false) }
   }
 
   async function handleSend () {
     if (!currentChatId) return
     if (mode === 'DEVELOP' && !form.developGoal.trim()) {
-      alert('GOAL is required for DEVELOP mode.')
-      return
+      alert('GOAL is required for DEVELOP mode.'); return
     }
 
     setLS(true)
     try {
       const prompt = buildUserPrompt()
-      let   msgs   = currentChat.messages
+      let msgs     = currentChat.messages
 
       if (editingId) {
         await updateMessage(editingId, prompt)
         await archiveMessagesAfter(currentChatId, editingId)
         setEditing(null)
-        msgs = await fetchMessages(currentChatId)      // only ONE re-fetch
+        msgs = await fetchMessages(currentChatId)         /* single re-fetch */
       } else {
         const newMsg = await createMessage({
           chat_id: currentChatId,
@@ -142,14 +175,14 @@ CONTEXT: ${form.developContext}`.trim()
         messages: msgs
       })
 
-      const assistant = await createMessage({
+      const assistantMsg = await createMessage({
         chat_id: currentChatId,
         role   : 'assistant',
         content: error ? `Error: ${error}` : content
       })
 
       setChats(cs => cs.map(c => c.id === currentChatId
-        ? { ...c, messages: [...msgs, assistant] }
+        ? { ...c, messages: [...msgs, assistantMsg] }
         : c
       ))
 
@@ -159,17 +192,19 @@ CONTEXT: ${form.developContext}`.trim()
           developWarnings: '', developContext: '', fixCode: '', fixErrors: ''
         })
       }
-    } catch (err) {
-      alert('Send failed: ' + err.message)
-    } finally { setLS(false) }
+    } catch (err) { alert('Send failed: ' + err.message) }
+    finally      { setLS(false) }
   }
 
-  function handleEdit (msg) {
-    setEditing(msg.id)
-    const txt = Array.isArray(msg.content)
-      ? msg.content.map(c => c.type === 'text' ? c.text : '').join('')
-      : String(msg.content)
-    setForm(f => ({ ...f, developGoal: txt }))
+  async function handleDelete (id) {
+    if (!confirm('Delete this message?')) return
+    try {
+      await deleteMessage(id)
+      setChats(cs => cs.map(c => c.id === currentChatId
+        ? { ...c, messages: c.messages.filter(m => m.id !== id) }
+        : c
+      ))
+    } catch (err) { alert('Delete failed: ' + err.message) }
   }
 
   function handleCopyAll () {
@@ -182,14 +217,14 @@ CONTEXT: ${form.developContext}`.trim()
     navigator.clipboard.writeText(txt)
   }
 
-  /*────────────────────────── Render */
+  /* ── render ──────────────────────────────────────────────────────────*/
   if (loadingChats) {
-    return <h2 style={{ textAlign: 'center', marginTop: '20vh' }}>Loading…</h2>
+    return <h2 style={{ textAlign:'center', marginTop:'20vh' }}>Loading…</h2>
   }
 
   return (
     <div className="app-container">
-      {/* Sidebar */}
+      {/* ── sidebar ───────────────────────────────────────────────*/}
       <ChatPane
         chats={chats}
         currentChatId={currentChatId}
@@ -198,31 +233,39 @@ CONTEXT: ${form.developContext}`.trim()
         onDeleteChat={id => setChats(cs => cs.filter(c => c.id !== id))}
       />
 
-      {/* Main column */}
+      {/* ── main column ───────────────────────────────────────────*/}
       <div className="main-content">
-        {/* Top bar */}
+        {/* top-bar */}
         <div className="top-bar">
-          <button className="button" onClick={() => setSettings(s => ({ ...s, showSettings: !s.showSettings }))}>
+          <button
+            className="button"
+            onClick={() => setSettings(s => ({ ...s, showSettings: !s.showSettings }))}
+          >
             {settings.showSettings ? 'Close Settings' : 'Open Settings'}
           </button>
-          <span style={{ margin: '0 1em', fontWeight: 'bold' }}>konzuko-code</span>
+
+          <span style={{ margin:'0 1em', fontWeight:'bold' }}>konzuko-code</span>
+
           <select
             value={settings.codeType}
             onChange={e => setSettings({ ...settings, codeType: e.target.value })}
-            style={{ marginRight: '1em' }}
+            style={{ marginRight:'1em' }}
           >
             <option value="javascript">JavaScript</option>
             <option value="python">Python</option>
             <option value="hugo">Hugo</option>
             <option value="go">Go</option>
           </select>
-          <div style={{ marginLeft: 'auto', padding: '4px 12px',
-                        background: '#4f8eff', borderRadius: 4 }}>
+
+          <div style={{
+            marginLeft:'auto', padding:'4px 12px',
+            background:'#4f8eff', borderRadius:4
+          }}>
             Tokens: {tokenCount.toLocaleString()}
           </div>
         </div>
 
-        {/* Settings drawer */}
+        {/* settings drawer */}
         {settings.showSettings && (
           <div className="settings-panel">
             <div className="form-group">
@@ -248,97 +291,144 @@ CONTEXT: ${form.developContext}`.trim()
           </div>
         )}
 
-        {/* Split view – messages | template */}
+        {/* split: left chat / right prompt builder */}
         <div className="content-container">
-          {/* Conversation */}
+          {/* ───────── conversation ─────────────────────────────*/}
           <div className="chat-container">
-            {currentChat.messages.map((m, i) => (
-              <div key={i} className={`message message-${m.role}`}>
-                <div className="message-header">
-                  <span className="message-role">{m.role}</span>
-                  <div className="message-actions">
-                    <button
-                      className="button icon-button"
-                      onClick={() => navigator.clipboard.writeText(
-                        Array.isArray(m.content)
-                          ? m.content.map(c => c.type === 'text' ? c.text : '').join('')
-                          : m.content
-                      )}
-                    >Copy</button>
-                    {m.role === 'user' && (
-                      <button
-                        className="button icon-button"
-                        onClick={() => handleEdit(m)}
-                      >Edit</button>
+            {(() => {
+              let assistantCounter = 0
+              return currentChat.messages.map((m, idx) => {
+                const isAssistant = m.role === 'assistant'
+                const num         = isAssistant ? ++assistantCounter : null
+
+                const upIdx   = idx > 0 ? idx - 1 : null
+                const downIdx = idx < currentChat.messages.length - 1 ? idx + 1 : null
+
+                const copyFull = () => navigator.clipboard.writeText(
+                  Array.isArray(m.content)
+                    ? m.content.map(c => c.type === 'text' ? c.text : '').join('')
+                    : m.content
+                )
+
+                return (
+                  <div key={idx} id={`msg-${idx}`} className={`message message-${m.role}`}>
+                    {isAssistant && (
+                      <div className="floating-controls">
+                        <button className="button icon-button" onClick={copyFull}                 title="Copy message">📋</button>
+                        <button className="button icon-button" onClick={() => scrollTo(upIdx)}    disabled={upIdx==null}>▲</button>
+                        <button className="button icon-button" onClick={() => scrollTo(downIdx)}  disabled={downIdx==null}>▼</button>
+                      </div>
                     )}
+
+                    <div className="message-header">
+                      <span className="message-role">
+                        {isAssistant ? `${num} assistant` : m.role}
+                      </span>
+
+                      <div className="message-actions">
+                        <button className="button icon-button" onClick={copyFull}>Copy</button>
+                        {m.role === 'user' && (
+                          <button
+                            className="button icon-button"
+                            onClick={() => {
+                              setEditing(m.id)
+                              const txt = Array.isArray(m.content)
+                                ? m.content.map(c => c.type==='text'?c.text:'').join('')
+                                : String(m.content)
+                              setForm(f => ({ ...f, developGoal: txt }))
+                            }}
+                          >Edit</button>
+                        )}
+                        <button
+                          className="button icon-button"
+                          onClick={() => handleDelete(m.id)}
+                        >Del</button>
+                      </div>
+                    </div>
+
+                    <div className="message-content">
+                      {Array.isArray(m.content)
+                        ? m.content.map((c, j) =>
+                            c.type === 'text'
+                              ? <div key={j}>{renderRichText(c.text)}</div>
+                              : <img key={j} src={c.image_url.url} style={{ maxWidth:200 }}/>)
+                        : renderRichText(m.content)}
+                    </div>
                   </div>
-                </div>
-                <div className="message-content">
-                  {Array.isArray(m.content)
-                    ? m.content.map((c, j) => c.type === 'text'
-                        ? <div key={j} style={{ whiteSpace: 'pre-wrap' }}>{c.text}</div>
-                        : <img key={j} src={c.image_url.url} style={{ maxWidth: 200 }} />)
-                    : <div>{m.content}</div>}
-                </div>
-              </div>
-            ))}
+                )
+              })
+            })()}
           </div>
 
-          {/* Prompt builder */}
-          <div className="template-container">
-            {/* Mode buttons */}
-            <div className="template-buttons">
-              {['DEVELOP','COMMIT','DIAGNOSE'].map(m => (
-                <button
-                  key={m}
-                  className={`button ${mode === m ? 'active' : ''}`}
-                  onClick={() => { setMode(m); setEditing(null) }}
-                >{m}</button>
-              ))}
-            </div>
-
-            {/* DEVELOP fields */}
-            {mode === 'DEVELOP' && (
-              <>
-                {[
-                  ['GOAL',   'developGoal',        2],
-                  ['FEATURES','developFeatures',   2],
-                  ['RETURN FORMAT','developReturnFormat',2],
-                  ['WARNINGS','developWarnings',   2],
-                  ['CONTEXT','developContext',     3]
-                ].map(([label, key, rows]) => (
-                  <div key={key} className="form-group">
-                    <label>{label}:</label>
-                    <textarea
-                      rows={rows}
-                      className="form-textarea"
-                      value={form[key]}
-                      onInput={e => setForm(f => ({ ...f, [key]: e.target.value }))}
-                    />
-                  </div>
-                ))}
-              </>
-            )}
-
-            {/* Send */}
-            <button
-              className="button send-button"
-              disabled={loadingSend}
-              onClick={handleSend}
-            >
-              {loadingSend
-                ? 'Working…'
-                : editingId ? 'Update & Resend' : 'Send Prompt'}
-            </button>
-
-            <div className="action-row">
-              <button className="button" onClick={handleCopyAll}>Copy Everything</button>
-            </div>
-          </div>
+          {/* ───────── prompt builder ───────────────────────────*/}
+          <PromptBuilder
+            mode={mode}           setMode={setMode}
+            form={form}           setForm={setForm}
+            loadingSend={loadingSend} editingId={editingId}
+            handleSend={handleSend} handleCopyAll={handleCopyAll}
+          />
         </div>
       </div>
     </div>
   )
 }
 
-export default App
+/*──────────────────────────────────────────────────────────────────────────
+  PromptBuilder (minor component for clarity)
+──────────────────────────────────────────────────────────────────────────*/
+function PromptBuilder ({
+  mode, setMode,
+  form, setForm,
+  loadingSend, editingId,
+  handleSend, handleCopyAll
+}) {
+  const fields = [
+    ['GOAL',          'developGoal',         2],
+    ['FEATURES',      'developFeatures',     2],
+    ['RETURN FORMAT', 'developReturnFormat', 2],
+    ['WARNINGS',      'developWarnings',     2],
+    ['CONTEXT',       'developContext',      3]
+  ]
+
+  return (
+    <div className="template-container">
+      <div className="template-buttons">
+        {['DEVELOP','COMMIT','DIAGNOSE'].map(m => (
+          <button
+            key={m}
+            className={`button ${mode === m ? 'active' : ''}`}
+            onClick={() => setMode(m)}
+          >
+            {m}
+          </button>
+        ))}
+      </div>
+
+      {mode === 'DEVELOP' && fields.map(([label, key, rows]) => (
+        <div key={key} className="form-group">
+          <label>{label}:</label>
+          <textarea
+            rows={rows}
+            className="form-textarea"
+            value={form[key]}
+            onInput={e => setForm(f => ({ ...f, [key]: e.target.value }))}
+          />
+        </div>
+      ))}
+
+      <button
+        className="button send-button"
+        disabled={loadingSend}
+        onClick={handleSend}
+      >
+        {loadingSend
+          ? 'Working…'
+          : editingId ? 'Update & Resend' : 'Send Prompt'}
+      </button>
+
+      <div className="action-row">
+        <button className="button" onClick={handleCopyAll}>Copy Everything</button>
+      </div>
+    </div>
+  )
+}

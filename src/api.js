@@ -1,36 +1,43 @@
+/* -------------------------------------------------------------------------
+   src/api.js
+   Centralised Supabase + OpenAI helpers (now includes deleteMessage)
+---------------------------------------------------------------------------*/
 import { supabase }          from './lib/supabase.js'
 import { OPENAI_TIMEOUT_MS } from './config.js'
 
-/*────────────────────────────
-  Cached session ⸺ avoids
-  hitting IndexedDB & network
-─────────────────────────────*/
+/*──────────────────────────────────────────────────────────────────────────
+  Cached session so we don’t hit IndexedDB / network on every call
+──────────────────────────────────────────────────────────────────────────*/
 let _cachedUser = null
 export async function getCurrentUser ({ forceRefresh = false } = {}) {
   if (_cachedUser && !forceRefresh) return _cachedUser
+
   const { data: { session }, error } = await supabase.auth.getSession()
-  if (error)   throw error
+  if (error)          throw error
   if (!session?.user) throw new Error('Not authenticated')
+
   _cachedUser = session.user
   return _cachedUser
 }
 
-/*────────────────────────────
-  OpenAI chat completion
-─────────────────────────────*/
+/*──────────────────────────────────────────────────────────────────────────
+  OpenAI Chat Completion
+──────────────────────────────────────────────────────────────────────────*/
 export async function callApiForText ({
   messages,
   apiKey,
-  model = 'o3-mini-high',
-  signal
+  model  = 'o3-mini-high',
+  signal = undefined
 }) {
   try {
-    const formatted = messages.map(m => Array.isArray(m.content)
-      ? m
-      : {
-          role   : m.role === 'system' ? 'developer' : m.role,
-          content: [{ type: 'text', text: m.content }]
-        })
+    const formatted = messages.map(m =>
+      Array.isArray(m.content)
+        ? m
+        : {
+            role   : m.role === 'system' ? 'developer' : m.role,
+            content: [{ type: 'text', text: m.content }]
+          }
+    )
 
     const body = {
       model,
@@ -39,14 +46,14 @@ export async function callApiForText ({
       ...( /o[13]/.test(model) ? { reasoning_effort: 'high' } : {} )
     }
 
-    const ctrl = new AbortController()
+    const ctrl  = new AbortController()
     const timer = setTimeout(() => ctrl.abort(), OPENAI_TIMEOUT_MS)
 
     const res = await fetch('https://api.openai.com/v1/chat/completions', {
       method : 'POST',
       headers: {
-        'Content-Type' : 'application/json',
-        Authorization  : `Bearer ${apiKey}`
+        'Content-Type': 'application/json',
+        Authorization : `Bearer ${apiKey}`
       },
       body  : JSON.stringify(body),
       signal: signal ?? ctrl.signal
@@ -59,6 +66,7 @@ export async function callApiForText ({
       try { txt = JSON.parse(txt).error?.message || txt } catch {}
       return { error: `HTTP ${res.status}: ${txt}` }
     }
+
     const data = await res.json()
     return data.error
       ? { error: data.error.message }
@@ -69,10 +77,9 @@ export async function callApiForText ({
   }
 }
 
-/*────────────────────────────
-  Supabase helpers – unchanged
-  except for getCurrentUser()
-─────────────────────────────*/
+/*──────────────────────────────────────────────────────────────────────────
+  Supabase CRUD
+──────────────────────────────────────────────────────────────────────────*/
 export async function fetchChats () {
   const user = await getCurrentUser()
   const { data, error } = await supabase
@@ -128,11 +135,20 @@ export async function updateMessage (id, newContent) {
 }
 
 export async function archiveMessagesAfter (chat_id, message_id) {
-  const { data, error } = await supabase
+  const { error } = await supabase
     .from('messages')
     .update({ archived: true })
     .eq('chat_id', chat_id)
     .gt('id', message_id)
   if (error) throw error
-  return data
+  return { success: true }
+}
+
+export async function deleteMessage (id) {
+  const { error } = await supabase
+    .from('messages')
+    .delete()
+    .eq('id', id)
+  if (error) throw error
+  return { success: true }
 }
