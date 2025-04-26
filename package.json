@@ -7,10 +7,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@dqbd/tiktoken": "^1.0.21",
     "@supabase/supabase-js": "^2.49.4",
-    "preact": "^10.26.4",
-    "vite-plugin-wasm": "^3.4.1"
+    "js-tiktoken": "^1.0.20",
+    "preact": "^10.26.4"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.4",

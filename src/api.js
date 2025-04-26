@@ -1,4 +1,3 @@
-// src/api.js
 import { supabase } from './lib/supabase.js'
 
 /* ──────────────────────────────
