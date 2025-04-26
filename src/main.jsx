@@ -1,6 +1,11 @@
-import { render } from 'preact';
-import AuthGate from './components/AuthGate.jsx';
-import App from './App.jsx';
+import { render }          from 'preact'
+import AuthGate            from './components/AuthGate.jsx'
+import ErrorBoundary       from './components/ErrorBoundary.jsx'
+import App                 from './App.jsx'
 
-const root = document.getElementById('app');
-render(<AuthGate><App /></AuthGate>, root);
+render(
+  <ErrorBoundary>
+    <AuthGate><App /></AuthGate>
+  </ErrorBoundary>,
+  document.getElementById('app')
+)

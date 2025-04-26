@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from 'preact/hooks'
-import ChatPane from './chatpane.jsx'
+import { useState, useEffect }      from 'preact/hooks'
+import ChatPane                     from './chatpane.jsx'
 import {
   callApiForText,
   fetchChats,
@@ -9,216 +9,228 @@ import {
   updateMessage,
   archiveMessagesAfter
 } from './api.js'
+
 import {
   useSettings,
   useFormData,
-  useDroppedFiles,
   useMode,
-  useTokenCounter
+  useTokenCount
 } from './hooks.js'
 
-function App() {
-  // --- State & hooks ---
-  const [chats, setChats]             = useState([])
-  const [currentChatId, setCurrent]   = useState(null)
-  const [loadingChats, setLoadingChats] = useState(true)
-  const [loadingSend, setLoadingSend]   = useState(false)
-  const [editingMessageId, setEditing]  = useState(null)
+function App () {
+  /*────────────────────────── State */
+  const [chats, setChats]           = useState([])
+  const [currentChatId, setCurrent] = useState(null)
+  const [loadingChats, setLC]       = useState(true)
+  const [loadingSend, setLS]        = useState(false)
+  const [editingId,  setEditing]    = useState(null)
 
-  const [settings, setSettings] = useSettings()
-  const [formData, setFormData] = useFormData()
-  const [droppedFiles, setDroppedFiles] = useDroppedFiles()
-  const [mode, setMode] = useMode()
-  const tokenCounter = useTokenCounter()
+  const [settings, setSettings]     = useSettings()
+  const [form,     setForm]         = useFormData()
+  const [mode,     setMode]         = useMode()
 
-  const [tokenCount, setTokenCount] = useState(0)
-  const fileInput = useRef()
+  const tokenCount = useTokenCount(
+    chats.find(c => c.id === currentChatId)?.messages ?? [],
+    settings.model
+  )
 
-  // --- Load chats on mount ---
+  /*────────────────────────── Initial load */
   useEffect(() => {
-    (async () => {
-      setLoadingChats(true)
-      const rows = await fetchChats()
-      const shaped = rows.map(r => ({
-        id: r.id,
-        title: r.title,
-        started: r.created_at,
-        model: r.code_type,
-        messages: []
-      }))
-      if (!shaped.length) {
-        const c = await createChat({ title:'New Chat', model:settings.codeType })
-        shaped.push({
-          id: c.id, title: c.title,
-          started: c.created_at,
-          model: c.code_type,
+    let alive = true
+    ;(async () => {
+      setLC(true)
+      try {
+        let rows   = await fetchChats()
+        let shaped = rows.map(r => ({
+          id      : r.id,
+          title   : r.title,
+          started : r.created_at,
+          model   : r.code_type,
           messages: []
-        })
+        }))
+
+        if (!shaped.length) {
+          const c = await createChat({ title: 'New Chat', model: settings.codeType })
+          shaped  = [{ id: c.id, title: c.title, started: c.created_at, model: c.code_type, messages: [] }]
+        }
+
+        if (alive) {
+          setChats(shaped)
+          setCurrent(shaped[0].id)
+        }
+      } catch (err) {
+        alert('Failed to load chats: ' + err.message)
+      } finally {
+        alive && setLC(false)
       }
-      setChats(shaped)
-      setCurrent(shaped[0].id)
-      setLoadingChats(false)
     })()
+    return () => { alive = false }
   }, [settings.codeType])
 
-  // --- Fetch messages on chat change ---
+  /*────────────────────────── Get messages on chat-switch */
   useEffect(() => {
     if (!currentChatId) return
-    fetchMessages(currentChatId).then(msgs =>
-      setChats(cs => cs.map(c =>
-        c.id === currentChatId ? { ...c, messages: msgs } : c
-      ))
-    )
+    let alive = true
+    fetchMessages(currentChatId)
+      .then(msgs => {
+        if (!alive) return
+        setChats(cs => cs.map(c => c.id === currentChatId ? { ...c, messages: msgs } : c))
+      })
+      .catch(err => alert('Failed to fetch messages: ' + err.message))
+    return () => { alive = false }
   }, [currentChatId])
 
-  // Whenever messages update, recalc tokens
-  useEffect(() => {
-    if (!currentChatId) return
-    const currentChat = chats.find(c => c.id === currentChatId)
-    if (!currentChat) return
-    // useTokenCounter is async now
-    ;(async () => {
-      const count = await tokenCounter(currentChat.messages)
-      setTokenCount(count)
-    })()
-  }, [chats, currentChatId, tokenCounter])
+  const currentChat = chats.find(c => c.id === currentChatId) ?? { messages: [] }
 
-  const currentChat = chats.find(c => c.id === currentChatId) || {messages:[]}
-
-  // --- Handlers ---
-  async function handleNewChat() {
-    setLoadingSend(true)
-    const nc = await createChat({ title:'New Chat', model:settings.codeType })
-    const shaped = { id:nc.id, title:nc.title, started:nc.created_at, model:nc.code_type, messages:[] }
-    setChats(cs => [shaped, ...cs])
-    setCurrent(nc.id)
-    setLoadingSend(false)
-  }
-
-  async function handleSend() {
-    if (!currentChatId) return
-    if (mode === 'DEVELOP' && !formData.developGoal.trim()) {
-      return alert('GOAL is required for DEVELOP mode.')
-    }
-    setLoadingSend(true)
-
-    let userPrompt = ''
+  /*────────────────────────── Utilities */
+  const buildUserPrompt = () => {
     if (mode === 'DEVELOP') {
-      userPrompt = `
+      return `
 MODE: DEVELOP
-GOAL: ${formData.developGoal}
-FEATURES: ${formData.developFeatures}
-RETURN FORMAT: ${formData.developReturnFormat}
-WARNINGS: ${formData.developWarnings}
-CONTEXT: ${formData.developContext}`.trim()
+GOAL: ${form.developGoal}
+FEATURES: ${form.developFeatures}
+RETURN FORMAT: ${form.developReturnFormat}
+WARNINGS: ${form.developWarnings}
+CONTEXT: ${form.developContext}`.trim()
     }
-    else if (mode === 'COMMIT') {
-      userPrompt = `MODE: COMMIT\nPlease generate a git‐style commit message.`
-    }
-    else if (mode === 'DIAGNOSE') {
-      userPrompt = `MODE: DIAGNOSE\nPlease analyze any errors or pitfalls.`
+    if (mode === 'COMMIT')   return 'MODE: COMMIT\nPlease generate a git-style commit message.'
+    if (mode === 'DIAGNOSE') return 'MODE: DIAGNOSE\nPlease analyze any errors or pitfalls.'
+    return ''
+  }
+
+  /*────────────────────────── Handlers */
+  async function handleNewChat () {
+    setLS(true)
+    try {
+      const c = await createChat({ title: 'New Chat', model: settings.codeType })
+      setChats(cs => [{ id: c.id, title: c.title, started: c.created_at, model: c.code_type, messages: [] }, ...cs])
+      setCurrent(c.id)
+    } catch (err) {
+      alert('Failed to create chat: ' + err.message)
+    } finally { setLS(false) }
+  }
+
+  async function handleSend () {
+    if (!currentChatId) return
+    if (mode === 'DEVELOP' && !form.developGoal.trim()) {
+      alert('GOAL is required for DEVELOP mode.')
+      return
     }
 
-    if (editingMessageId) {
-      await updateMessage(editingMessageId, userPrompt)
-      await archiveMessagesAfter(currentChatId, editingMessageId)
-      setEditing(null)
-    } else {
-      await createMessage({
+    setLS(true)
+    try {
+      const prompt = buildUserPrompt()
+      let   msgs   = currentChat.messages
+
+      if (editingId) {
+        await updateMessage(editingId, prompt)
+        await archiveMessagesAfter(currentChatId, editingId)
+        setEditing(null)
+        msgs = await fetchMessages(currentChatId)      // only ONE re-fetch
+      } else {
+        const newMsg = await createMessage({
+          chat_id: currentChatId,
+          role   : 'user',
+          content: [{ type: 'text', text: prompt }]
+        })
+        msgs = [...msgs, newMsg]
+      }
+
+      const { content, error } = await callApiForText({
+        apiKey  : settings.apiKey,
+        model   : settings.model,
+        messages: msgs
+      })
+
+      const assistant = await createMessage({
         chat_id: currentChatId,
-        role: 'user',
-        content: [{ type:'text', text:userPrompt }]
+        role   : 'assistant',
+        content: error ? `Error: ${error}` : content
       })
-    }
 
-    // Re-fetch + call AI
-    const updated = await fetchMessages(currentChatId)
-    const { content, error } = await callApiForText({
-      apiKey: settings.apiKey,
-      model: settings.model,
-      messages: updated
-    })
-    await createMessage({
-      chat_id: currentChatId,
-      role: 'assistant',
-      content: error ? `Error: ${error}` : content
-    })
-    const final = await fetchMessages(currentChatId)
-    setChats(cs => cs.map(c => c.id===currentChatId ? {...c, messages: final} : c))
+      setChats(cs => cs.map(c => c.id === currentChatId
+        ? { ...c, messages: [...msgs, assistant] }
+        : c
+      ))
 
-    // Clear form if not editing
-    if (!editingMessageId) {
-      setFormData({
-        developGoal:'', developFeatures:'', developReturnFormat:'', developWarnings:'', developContext:'', fixCode:'', fixErrors:''
-      })
-    }
-    setLoadingSend(false)
+      if (!editingId) {
+        setForm({
+          developGoal: '', developFeatures: '', developReturnFormat: '',
+          developWarnings: '', developContext: '', fixCode: '', fixErrors: ''
+        })
+      }
+    } catch (err) {
+      alert('Send failed: ' + err.message)
+    } finally { setLS(false) }
   }
 
-  function handleEditMessage(msg) {
+  function handleEdit (msg) {
     setEditing(msg.id)
-    const text = Array.isArray(msg.content)
-      ? msg.content.map(c=>c.type==='text'?c.text:'').join('')
+    const txt = Array.isArray(msg.content)
+      ? msg.content.map(c => c.type === 'text' ? c.text : '').join('')
       : String(msg.content)
-    setFormData(fd => ({ ...fd, developGoal: text }))
+    setForm(f => ({ ...f, developGoal: txt }))
   }
 
-  function handleCopyAll() {
+  function handleCopyAll () {
     const txt = currentChat.messages
       .map(m => `${m.role.toUpperCase()}: ${
         Array.isArray(m.content)
-          ? m.content.map(c=>c.type==='text'?c.text:'[img]').join('')
+          ? m.content.map(c => c.type === 'text' ? c.text : '[img]').join('')
           : m.content
-      }`)
-      .join('\n\n')
+      }`).join('\n\n')
     navigator.clipboard.writeText(txt)
   }
 
-  // --- Render ---
+  /*────────────────────────── Render */
   if (loadingChats) {
-    return <h2 style={{textAlign:'center',marginTop:'20vh'}}>Loading…</h2>
+    return <h2 style={{ textAlign: 'center', marginTop: '20vh' }}>Loading…</h2>
   }
 
   return (
     <div className="app-container">
+      {/* Sidebar */}
       <ChatPane
         chats={chats}
         currentChatId={currentChatId}
         onNewChat={handleNewChat}
         onSelectChat={setCurrent}
-        onDeleteChat={id=>setChats(cs=>cs.filter(c=>c.id!==id))}
+        onDeleteChat={id => setChats(cs => cs.filter(c => c.id !== id))}
       />
 
+      {/* Main column */}
       <div className="main-content">
+        {/* Top bar */}
         <div className="top-bar">
-          <button className="button" onClick={()=>setSettings(s=>({...s,showSettings:!s.showSettings}))}>
+          <button className="button" onClick={() => setSettings(s => ({ ...s, showSettings: !s.showSettings }))}>
             {settings.showSettings ? 'Close Settings' : 'Open Settings'}
           </button>
-          <span style={{margin:'0 1em',fontWeight:'bold'}}>konzuko-code</span>
+          <span style={{ margin: '0 1em', fontWeight: 'bold' }}>konzuko-code</span>
           <select
             value={settings.codeType}
-            onChange={e=>setSettings({...settings,codeType:e.target.value})}
-            style={{marginRight:'1em'}}
+            onChange={e => setSettings({ ...settings, codeType: e.target.value })}
+            style={{ marginRight: '1em' }}
           >
             <option value="javascript">JavaScript</option>
             <option value="python">Python</option>
             <option value="hugo">Hugo</option>
             <option value="go">Go</option>
           </select>
-          <div style={{marginLeft:'auto',padding:'4px 12px',background:'#4f8eff',color:'#fff',borderRadius:'4px'}}>
+          <div style={{ marginLeft: 'auto', padding: '4px 12px',
+                        background: '#4f8eff', borderRadius: 4 }}>
             Tokens: {tokenCount.toLocaleString()}
           </div>
         </div>
 
+        {/* Settings drawer */}
         {settings.showSettings && (
           <div className="settings-panel">
             <div className="form-group">
               <label>OpenAI API Key:</label>
               <input
                 className="form-input"
-                type="text"
                 value={settings.apiKey}
-                onInput={e=>setSettings({...settings,apiKey:e.target.value})}
+                onInput={e => setSettings({ ...settings, apiKey: e.target.value })}
               />
             </div>
             <div className="form-group">
@@ -226,7 +238,7 @@ CONTEXT: ${formData.developContext}`.trim()
               <select
                 className="form-select"
                 value={settings.model}
-                onChange={e=>setSettings({...settings,model:e.target.value})}
+                onChange={e => setSettings({ ...settings, model: e.target.value })}
               >
                 <option>gpt-4o</option>
                 <option>gpt-3.5-turbo</option>
@@ -236,105 +248,87 @@ CONTEXT: ${formData.developContext}`.trim()
           </div>
         )}
 
+        {/* Split view – messages | template */}
         <div className="content-container">
+          {/* Conversation */}
           <div className="chat-container">
-            {currentChat.messages.map((m,idx)=>(
-              <div key={idx} className={`message message-${m.role}`}>
+            {currentChat.messages.map((m, i) => (
+              <div key={i} className={`message message-${m.role}`}>
                 <div className="message-header">
                   <span className="message-role">{m.role}</span>
                   <div className="message-actions">
                     <button
                       className="button icon-button"
-                      onClick={()=>navigator.clipboard.writeText(
+                      onClick={() => navigator.clipboard.writeText(
                         Array.isArray(m.content)
-                          ? m.content.map(c=>c.type==='text'?c.text:'').join('')
+                          ? m.content.map(c => c.type === 'text' ? c.text : '').join('')
                           : m.content
                       )}
                     >Copy</button>
-                    {m.role==='user' && (
+                    {m.role === 'user' && (
                       <button
                         className="button icon-button"
-                        onClick={()=>handleEditMessage(m)}
+                        onClick={() => handleEdit(m)}
                       >Edit</button>
                     )}
                   </div>
                 </div>
                 <div className="message-content">
                   {Array.isArray(m.content)
-                    ? m.content.map((c,i)=>c.type==='text'
-                        ? <div key={i} style={{whiteSpace:'pre-wrap'}}>{c.text}</div>
-                        : <img key={i} src={c.image_url.url} style={{maxWidth:'200px'}}/>)
+                    ? m.content.map((c, j) => c.type === 'text'
+                        ? <div key={j} style={{ whiteSpace: 'pre-wrap' }}>{c.text}</div>
+                        : <img key={j} src={c.image_url.url} style={{ maxWidth: 200 }} />)
                     : <div>{m.content}</div>}
                 </div>
               </div>
             ))}
           </div>
 
+          {/* Prompt builder */}
           <div className="template-container">
+            {/* Mode buttons */}
             <div className="template-buttons">
-              <button className={`button ${mode==='DEVELOP'?'active':''}`} onClick={()=>{setMode('DEVELOP');setEditing(null)}}>
-                DEVELOP
-              </button>
-              <button className={`button ${mode==='COMMIT'?'active':''}`} onClick={()=>{setMode('COMMIT');setEditing(null)}}>
-                COMMIT
-              </button>
-              <button className={`button ${mode==='DIAGNOSE'?'active':''}`} onClick={()=>{setMode('DIAGNOSE');setEditing(null)}}>
-                DIAGNOSE
-              </button>
+              {['DEVELOP','COMMIT','DIAGNOSE'].map(m => (
+                <button
+                  key={m}
+                  className={`button ${mode === m ? 'active' : ''}`}
+                  onClick={() => { setMode(m); setEditing(null) }}
+                >{m}</button>
+              ))}
             </div>
 
-            {mode==='DEVELOP' && (
+            {/* DEVELOP fields */}
+            {mode === 'DEVELOP' && (
               <>
-                <div className="form-group">
-                  <label>GOAL:</label>
-                  <textarea
-                    className="form-textarea"
-                    rows={2}
-                    value={formData.developGoal}
-                    onInput={e=>setFormData(fd=>({...fd,developGoal:e.target.value}))}
-                  />
-                </div>
-                <div className="form-group">
-                  <label>FEATURES:</label>
-                  <textarea
-                    className="form-textarea"
-                    rows={2}
-                    value={formData.developFeatures}
-                    onInput={e=>setFormData(fd=>({...fd,developFeatures:e.target.value}))}
-                  />
-                </div>
-                <div className="form-group">
-                  <label>RETURN FORMAT:</label>
-                  <textarea
-                    className="form-textarea"
-                    rows={2}
-                    value={formData.developReturnFormat}
-                    onInput={e=>setFormData(fd=>({...fd,developReturnFormat:e.target.value}))}
-                  />
-                </div>
-                <div className="form-group">
-                  <label>WARNINGS:</label>
-                  <textarea
-                    className="form-textarea"
-                    rows={2}
-                    value={formData.developWarnings}
-                    onInput={e=>setFormData(fd=>({...fd,developWarnings:e.target.value}))}
-                  />
-                </div>
-                <div className="form-group">
-                  <label>CONTEXT:</label>
-                  <textarea
-                    className="form-textarea"
-                    rows={3}
-                    value={formData.developContext}
-                    onInput={e=>setFormData(fd=>({...fd,developContext:e.target.value}))}
-                  />
-                </div>
+                {[
+                  ['GOAL',   'developGoal',        2],
+                  ['FEATURES','developFeatures',   2],
+                  ['RETURN FORMAT','developReturnFormat',2],
+                  ['WARNINGS','developWarnings',   2],
+                  ['CONTEXT','developContext',     3]
+                ].map(([label, key, rows]) => (
+                  <div key={key} className="form-group">
+                    <label>{label}:</label>
+                    <textarea
+                      rows={rows}
+                      className="form-textarea"
+                      value={form[key]}
+                      onInput={e => setForm(f => ({ ...f, [key]: e.target.value }))}
+                    />
+                  </div>
+                ))}
               </>
             )}
 
-            <button className="button send-button" onClick={handleSend} disabled={loadingSend}>
-              {loadingSend ? 'Working…' : editingMessageId ? 'Update & Resend' : 'Send Prompt'}
+            {/* Send */}
+            <button
+              className="button send-button"
+              disabled={loadingSend}
+              onClick={handleSend}
+            >
+              {loadingSend
+                ? 'Working…'
+                : editingId ? 'Update & Resend' : 'Send Prompt'}
             </button>
 
             <div className="action-row">
