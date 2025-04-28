@@ -1,8 +1,6 @@
-
 /* -------------------------------------------------------------------------
    src/hooks.js
-   Generic hooks + NEW useUndoableDelete helper
-   + NEW useFileDrop helper (restores drag-&-drop of .jsx / .md / etc.)
+   Generic hooks + useUndoableDelete + useFileDrop
 ---------------------------------------------------------------------------*/
 import {
   useState,
@@ -64,11 +62,7 @@ export function useFormData() {
   })
 }
 
-/*────────────────────────────  Drag-&-drop files  ────────────────────────
-  Returns two callbacks: onDragOver + onDrop.
-  Pass them to any element (e.g. a <textarea>) to allow users to drop a file
-  whose text content is then delivered to `onText`.
--------------------------------------------------------------------------*/
+/*────────────────────────────  Drag-and-drop files  ──────────────────────*/
 export function useFileDrop(onText /* (text, file) => void */) {
   const dragOver = useCallback((e) => {
     e.preventDefault() // allow drop
@@ -90,13 +84,30 @@ export function useFileDrop(onText /* (text, file) => void */) {
 }
 
 /*────────────────────────────  Misc. UI state  ───────────────────────────*/
+/* Hardened version: UNDER NO CIRCUMSTANCES can mode be invalid */
 export function useMode() {
-  const [mode, setMode] = useState(
-    () => localStorage.getItem('konzuko-mode') ?? 'DEVELOP',
-  )
+  const ALLOWED = ['DEVELOP', 'COMMIT', 'DIAGNOSE']
+
+  // 1) safe initial value
+  const stored  = localStorage.getItem('konzuko-mode')
+  const initial = ALLOWED.includes(stored) ? stored : 'DEVELOP'
+
+  const [mode, _setMode] = useState(initial)
+
+  // 2) guarded setter
+  const setMode = (val) => {
+    if (!ALLOWED.includes(val)) {
+      console.warn('⚠️  Ignored attempt to set illegal mode:', val)
+      return
+    }
+    _setMode(val)
+  }
+
+  // 3) keep localStorage in sync
   useEffect(() => {
     localStorage.setItem('konzuko-mode', mode)
   }, [mode])
+
   return [mode, setMode]
 }
 

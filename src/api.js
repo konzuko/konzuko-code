@@ -1,4 +1,3 @@
-
 /* -------------------------------------------------------------------------
    src/api.js
    Centralised Supabase + OpenAI helpers – ordering & soft-delete fixes
@@ -6,7 +5,7 @@
 import { supabase }          from './lib/supabase.js'
 import { OPENAI_TIMEOUT_MS } from './config.js'
 
-// helper – always ISO UTC timestamp
+/* helper – always ISO UTC timestamp */
 const isoNow = () => new Date().toISOString()
 
 /*────────────────────────────  Auth  ─────────────────────────────────────*/
@@ -88,6 +87,16 @@ export async function createChat ({ title = 'New Chat', model = 'javascript' }) 
     .single()
   if (error) throw error
   return data
+}
+
+/* NEW → rename chat */
+export async function updateChatTitle (id, newTitle) {
+  const { error } = await supabase
+    .from('chats')
+    .update({ title: newTitle })
+    .eq('id', id)
+  if (error) throw error
+  return { success: true }
 }
 
 /* soft-delete a chat (DB trigger will cascade to messages) */
