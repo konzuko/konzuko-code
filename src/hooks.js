@@ -1,15 +1,11 @@
 /* -------------------------------------------------------------------------
    src/hooks.js
-   Generic hooks – +NEW useUndoableDelete helper
+   Generic hooks + NEW useUndoableDelete helper
 ---------------------------------------------------------------------------*/
 import { useState, useEffect, useCallback, useRef } from 'preact/hooks'
 import { encodingForModel }                         from 'js-tiktoken'
 import { LOCALSTORAGE_DEBOUNCE }                    from './config.js'
 
-/*────────────────────────────
-  Generic debounced
-  localStorage helper
-─────────────────────────────*/
 function useDebouncedLocalStorage (key, initial, delay = LOCALSTORAGE_DEBOUNCE) {
   const [value, setValue] = useState(() => {
     try { return JSON.parse(localStorage.getItem(key)) ?? initial }
@@ -27,7 +23,6 @@ function useDebouncedLocalStorage (key, initial, delay = LOCALSTORAGE_DEBOUNCE) 
   return [value, setValue]
 }
 
-/*────────────────── Settings */
 export function useSettings () {
   return useDebouncedLocalStorage('konzuko-settings', {
     apiKey       : '',
@@ -37,7 +32,6 @@ export function useSettings () {
   })
 }
 
-/*────────────────── Form data */
 export function useFormData () {
   return useDebouncedLocalStorage('konzuko-form-data', {
     developGoal        : '',
@@ -50,23 +44,24 @@ export function useFormData () {
   })
 }
 
-/*────────── Misc small hooks */
-export function useDroppedFiles () { return useState({}) }
+export function useDroppedFiles () {
+  return useState({})
+}
 
 export function useMode () {
-  const [mode, setMode] = useState(() => localStorage.getItem('konzuko-mode') ?? 'DEVELOP')
-  useEffect(() => { localStorage.setItem('konzuko-mode', mode) }, [mode])
+  const [mode, setMode] = useState(() =>
+    localStorage.getItem('konzuko-mode') ?? 'DEVELOP'
+  )
+  useEffect(() => {
+    localStorage.setItem('konzuko-mode', mode)
+  }, [mode])
   return [mode, setMode]
 }
 
-/*────────────────────────────
-  Exact token counter – safe,
-  memoised & cancellation-aware
-─────────────────────────────*/
 export function useTokenCount (messages = [], model = 'gpt-3.5-turbo') {
   const [count, setCount] = useState(0)
-
   const encRef = useRef({})
+
   const getEncoder = useCallback(async () => {
     if (!encRef.current[model]) {
       encRef.current[model] = await encodingForModel(model)
@@ -77,8 +72,10 @@ export function useTokenCount (messages = [], model = 'gpt-3.5-turbo') {
   useEffect(() => {
     let cancelled = false
     ;(async () => {
-      if (!messages.length) { setCount(0); return }
-
+      if (!messages.length) {
+        setCount(0)
+        return
+      }
       try {
         const enc = await getEncoder()
         const total = messages.reduce((sum, m) => {
@@ -99,32 +96,28 @@ export function useTokenCount (messages = [], model = 'gpt-3.5-turbo') {
   return count
 }
 
-/*────────────────────────────
-  NEW: One-liner to DRY undoable
-  delete flows for chats/messages
-─────────────────────────────*/
+/* NEW: DRY undoable delete + toast flow */
 export function useUndoableDelete (showToast) {
   return useCallback(async ({
-    itemLabel       = 'Item',          // “Chat” | “Message” | etc.
-    confirmMessage  = `Delete this ${itemLabel.toLowerCase()}? You can undo for ~30 min.`,
-    deleteFn,                          // () → Promise
-    undoFn,                            // () → Promise
-    afterDelete                     ,  // () → void (optional)
+    itemLabel      = 'Item',                // e.g. "Chat" or "Message"
+    confirmMessage = `Delete this ${itemLabel.toLowerCase()}? You can undo for ~30 min.`,
+    deleteFn,                             // () => Promise
+    undoFn,                               // () => Promise
+    afterDelete                           // () => void
   }) => {
     if (!deleteFn || !undoFn) {
       throw new Error('useUndoableDelete requires deleteFn and undoFn')
     }
-
     if (!confirm(confirmMessage)) return
     try {
       await deleteFn()
       afterDelete?.()
       showToast(
         `${itemLabel} deleted.`,
-        () => undoFn()                 // Toast catches & reports errors
+        () => undoFn()    // Toast will catch & report any errors
       )
     } catch (err) {
-      alert('Delete failed: ' + err.message)
+      alert(`Delete failed: ${err.message}`)
     }
   }, [showToast])
 }
