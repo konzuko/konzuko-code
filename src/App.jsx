@@ -1,7 +1,7 @@
+
 /* -------------------------------------------------------------------------
    src/App.jsx
-   Main UI container – adds numbered assistant headers, per-snippet copy
-   buttons, floating tool-rail & Delete action.
+   Main UI container – now with soft-delete, undo-toast & unchanged helpers
 ---------------------------------------------------------------------------*/
 import { useState, useEffect } from 'preact/hooks'
 import ChatPane                from './chatpane.jsx'
@@ -10,7 +10,7 @@ import {
   fetchChats,          fetchMessages,
   createChat,          createMessage,
   updateMessage,       archiveMessagesAfter,
-  deleteMessage
+  deleteMessage,       undoDeleteMessage
 } from './api.js'
 import {
   useSettings,
@@ -47,6 +47,29 @@ function renderRichText (text) {
 }
 
 /*──────────────────────────────────────────────────────────────────────────
+  Minimal toast – no external deps
+──────────────────────────────────────────────────────────────────────────*/
+function Toast ({ text, actionLabel, onAction, onClose }) {
+  return (
+    <div
+      style={{
+        position: 'fixed', bottom: 20, left: '50%',
+        transform: 'translateX(-50%)',
+        background: '#333', color: '#fff',
+        padding: '10px 18px', borderRadius: 4,
+        display: 'flex', gap: 12, zIndex: 9999
+      }}
+    >
+      <span>{text}</span>
+      {actionLabel && (
+        <button className="button" onClick={onAction}>{actionLabel}</button>
+      )}
+      <button className="button icon-button" onClick={onClose}>✕</button>
+    </div>
+  )
+}
+
+/*──────────────────────────────────────────────────────────────────────────
   Top-level component
 ──────────────────────────────────────────────────────────────────────────*/
 export default function App () {
@@ -56,6 +79,7 @@ export default function App () {
   const [loadingChats, setLC]       = useState(true)
   const [loadingSend, setLS]        = useState(false)
   const [editingId,    setEditing]  = useState(null)
+  const [toast,        setToast]    = useState(null)
 
   const [settings, setSettings] = useSettings()
   const [form,     setForm]     = useFormData()
@@ -197,13 +221,29 @@ CONTEXT: ${form.developContext}`.trim()
   }
 
   async function handleDelete (id) {
-    if (!confirm('Delete this message?')) return
+    if (!confirm('Delete this message? You can undo for ~30 min.')) return
     try {
       await deleteMessage(id)
+
+      /* Optimistically remove from UI */
       setChats(cs => cs.map(c => c.id === currentChatId
         ? { ...c, messages: c.messages.filter(m => m.id !== id) }
         : c
       ))
+
+      /* Show toast with undo */
+      setToast({
+        text : 'Message deleted.',
+        undo : () => {
+          undoDeleteMessage(id)
+            .then(() => fetchMessages(currentChatId))
+            .then(msgs => setChats(cs => cs.map(c =>
+              c.id === currentChatId ? { ...c, messages: msgs } : c
+            )))
+            .catch(err => alert('Undo failed: ' + err.message))
+            .finally(() => setToast(null))
+        }
+      })
     } catch (err) { alert('Delete failed: ' + err.message) }
   }
 
@@ -369,12 +409,22 @@ CONTEXT: ${form.developContext}`.trim()
           />
         </div>
       </div>
+
+      {/* toast */}
+      {toast && (
+        <Toast
+          text={toast.text}
+          actionLabel="Undo"
+          onAction={toast.undo}
+          onClose={() => setToast(null)}
+        />
+      )}
     </div>
   )
 }
 
 /*──────────────────────────────────────────────────────────────────────────
-  PromptBuilder (minor component for clarity)
+  PromptBuilder (unchanged from original)
 ──────────────────────────────────────────────────────────────────────────*/
 function PromptBuilder ({
   mode, setMode,
