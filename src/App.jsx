@@ -1,7 +1,7 @@
 
 /* -------------------------------------------------------------------------
    src/App.jsx
-   Main UI container – now with soft-delete, undo-toast & unchanged helpers
+   Main UI container – fully updated for soft-delete, cascades & undo-toast
 ---------------------------------------------------------------------------*/
 import { useState, useEffect } from 'preact/hooks'
 import ChatPane                from './chatpane.jsx'
@@ -10,7 +10,8 @@ import {
   fetchChats,          fetchMessages,
   createChat,          createMessage,
   updateMessage,       archiveMessagesAfter,
-  deleteMessage,       undoDeleteMessage
+  deleteMessage,       undoDeleteMessage,
+  deleteChat,          undoDeleteChat
 } from './api.js'
 import {
   useSettings,
@@ -20,14 +21,13 @@ import {
 } from './hooks.js'
 
 /*──────────────────────────────────────────────────────────────────────────
-  Helper → render markdown-like ``` fences with copy-button per snippet
+  Helper → render markdown-like ``` fences with per-snippet copy buttons
 ──────────────────────────────────────────────────────────────────────────*/
 function renderRichText (text) {
   if (!text.includes('```')) {
-    return <div style={{ whiteSpace: 'pre-wrap' }}>{text}</div>
+    return <div style={{ whiteSpace:'pre-wrap' }}>{text}</div>
   }
-
-  const parts = text.split(/```/g)  // even idx = plain, odd idx = code
+  const parts = text.split(/```/g)       // even idx = plain, odd idx = code
   return parts.map((chunk, i) =>
     i % 2 === 1
       ? (
@@ -47,23 +47,18 @@ function renderRichText (text) {
 }
 
 /*──────────────────────────────────────────────────────────────────────────
-  Minimal toast – no external deps
+  Minimal toast component (auto-dismiss in 30 s)
 ──────────────────────────────────────────────────────────────────────────*/
-function Toast ({ text, actionLabel, onAction, onClose }) {
+function Toast ({ text, onUndo, onClose }) {
+  useEffect(() => {
+    const id = setTimeout(onClose, 30_000)
+    return () => clearTimeout(id)
+  }, [onClose])
+
   return (
-    <div
-      style={{
-        position: 'fixed', bottom: 20, left: '50%',
-        transform: 'translateX(-50%)',
-        background: '#333', color: '#fff',
-        padding: '10px 18px', borderRadius: 4,
-        display: 'flex', gap: 12, zIndex: 9999
-      }}
-    >
+    <div className="toast">
       <span>{text}</span>
-      {actionLabel && (
-        <button className="button" onClick={onAction}>{actionLabel}</button>
-      )}
+      {onUndo && <button className="button" onClick={onUndo}>Undo</button>}
       <button className="button icon-button" onClick={onClose}>✕</button>
     </div>
   )
@@ -77,9 +72,9 @@ export default function App () {
   const [chats, setChats]           = useState([])
   const [currentChatId, setCurrent] = useState(null)
   const [loadingChats, setLC]       = useState(true)
-  const [loadingSend, setLS]        = useState(false)
+  const [loadingSend,  setLS]       = useState(false)
   const [editingId,    setEditing]  = useState(null)
-  const [toast,        setToast]    = useState(null)
+  const [toast,        setToast]    = useState(null)      // {text,onUndo}
 
   const [settings, setSettings] = useSettings()
   const [form,     setForm]     = useFormData()
@@ -89,6 +84,8 @@ export default function App () {
     chats.find(c => c.id === currentChatId)?.messages ?? [],
     settings.model
   )
+
+  const showToast = (text, onUndo) => setToast({ text, onUndo })
 
   /* ── fetch chat list on mount / codeType change ──────────────────────*/
   useEffect(() => {
@@ -103,7 +100,7 @@ export default function App () {
         }))
 
         if (!shaped.length) {
-          const c = await createChat({ title: 'New Chat', model: settings.codeType })
+          const c = await createChat({ title:'New Chat', model: settings.codeType })
           shaped  = [{
             id: c.id, title: c.title, started: c.created_at,
             model: c.code_type, messages: []
@@ -114,9 +111,8 @@ export default function App () {
           setChats(shaped)
           setCurrent(shaped[0].id)
         }
-      } catch (err) {
-        alert('Failed to load chats: ' + err.message)
-      } finally { alive && setLC(false) }
+      } catch (err) { alert('Failed to load chats: ' + err.message) }
+      finally      { alive && setLC(false) }
     })()
     return () => { alive = false }
   }, [settings.codeType])
@@ -154,13 +150,19 @@ CONTEXT: ${form.developContext}`.trim()
   const scrollTo = idx =>
     document.getElementById(`msg-${idx}`)?.scrollIntoView({ behavior:'smooth', block:'center' })
 
-  /* ── CRUD handlers ──────────────────────────────────────────────────*/
+  const resetForm = () => setForm({
+    developGoal:'', developFeatures:'', developReturnFormat:'',
+    developWarnings:'', developContext:'',
+    fixCode:'', fixErrors:''
+  })
+
+  /* ── CRUD helpers ────────────────────────────────────────────────────*/
   async function handleNewChat () {
     setLS(true)
     try {
-      const c = await createChat({ title: 'New Chat', model: settings.codeType })
+      const c = await createChat({ title:'New Chat', model: settings.codeType })
       setChats(cs => [
-        { id: c.id, title: c.title, started: c.created_at, model: c.code_type, messages: [] },
+        { id:c.id, title:c.title, started:c.created_at, model:c.code_type, messages:[] },
         ...cs
       ])
       setCurrent(c.id)
@@ -183,12 +185,11 @@ CONTEXT: ${form.developContext}`.trim()
         await updateMessage(editingId, prompt)
         await archiveMessagesAfter(currentChatId, editingId)
         setEditing(null)
-        msgs = await fetchMessages(currentChatId)         /* single re-fetch */
+        msgs = await fetchMessages(currentChatId)      /* re-fetch once */
       } else {
         const newMsg = await createMessage({
-          chat_id: currentChatId,
-          role   : 'user',
-          content: [{ type: 'text', text: prompt }]
+          chat_id: currentChatId, role:'user',
+          content:[{ type:'text', text:prompt }]
         })
         msgs = [...msgs, newMsg]
       }
@@ -200,50 +201,59 @@ CONTEXT: ${form.developContext}`.trim()
       })
 
       const assistantMsg = await createMessage({
-        chat_id: currentChatId,
-        role   : 'assistant',
+        chat_id: currentChatId, role:'assistant',
         content: error ? `Error: ${error}` : content
       })
 
       setChats(cs => cs.map(c => c.id === currentChatId
-        ? { ...c, messages: [...msgs, assistantMsg] }
+        ? { ...c, messages:[...msgs, assistantMsg] }
         : c
       ))
 
-      if (!editingId) {
-        setForm({
-          developGoal: '', developFeatures: '', developReturnFormat: '',
-          developWarnings: '', developContext: '', fixCode: '', fixErrors: ''
-        })
-      }
+      if (!editingId) resetForm()
     } catch (err) { alert('Send failed: ' + err.message) }
     finally      { setLS(false) }
   }
 
-  async function handleDelete (id) {
+  /*────────────────── new delete handlers with undo ───────────────────*/
+  async function handleDeleteMessage (id) {
     if (!confirm('Delete this message? You can undo for ~30 min.')) return
     try {
       await deleteMessage(id)
-
-      /* Optimistically remove from UI */
       setChats(cs => cs.map(c => c.id === currentChatId
-        ? { ...c, messages: c.messages.filter(m => m.id !== id) }
+        ? { ...c, messages:c.messages.filter(m => m.id !== id) }
         : c
       ))
+      showToast(
+        'Message deleted.',
+        () => undoDeleteMessage(id)
+              .then(() => fetchMessages(currentChatId))
+              .then(msgs => setChats(cs => cs.map(c =>
+                c.id === currentChatId ? { ...c, messages:msgs } : c
+              )))
+              .catch(err => alert('Undo failed: '+err.message))
+              .finally(() => setToast(null))
+      )
+    } catch (err) { alert('Delete failed: ' + err.message) }
+  }
 
-      /* Show toast with undo */
-      setToast({
-        text : 'Message deleted.',
-        undo : () => {
-          undoDeleteMessage(id)
-            .then(() => fetchMessages(currentChatId))
-            .then(msgs => setChats(cs => cs.map(c =>
-              c.id === currentChatId ? { ...c, messages: msgs } : c
-            )))
-            .catch(err => alert('Undo failed: ' + err.message))
-            .finally(() => setToast(null))
-        }
-      })
+  async function handleDeleteChatUI (id) {
+    if (!confirm('Delete this entire chat? You can undo for ~30 min.')) return
+    try {
+      await deleteChat(id)
+      setChats(cs => cs.filter(c => c.id !== id))
+      if (id === currentChatId) setCurrent(null)
+      showToast(
+        'Chat deleted.',
+        () => undoDeleteChat(id)
+              .then(() => fetchChats())
+              .then(rows => setChats(rows.map(r => ({
+                id:r.id, title:r.title, started:r.created_at,
+                model:r.code_type, messages:[]
+              }))))
+              .catch(err => alert('Undo failed: '+err.message))
+              .finally(() => setToast(null))
+      )
     } catch (err) { alert('Delete failed: ' + err.message) }
   }
 
@@ -251,7 +261,7 @@ CONTEXT: ${form.developContext}`.trim()
     const txt = currentChat.messages
       .map(m => `${m.role.toUpperCase()}: ${
         Array.isArray(m.content)
-          ? m.content.map(c => c.type === 'text' ? c.text : '[img]').join('')
+          ? m.content.map(c => c.type==='text'?c.text:'[img]').join('')
           : m.content
       }`).join('\n\n')
     navigator.clipboard.writeText(txt)
@@ -270,10 +280,10 @@ CONTEXT: ${form.developContext}`.trim()
         currentChatId={currentChatId}
         onNewChat={handleNewChat}
         onSelectChat={setCurrent}
-        onDeleteChat={id => setChats(cs => cs.filter(c => c.id !== id))}
+        onDeleteChat={handleDeleteChatUI}
       />
 
-      {/* ── main column ───────────────────────────────────────────*/}
+      {/* ── main content column ───────────────────────────────────*/}
       <div className="main-content">
         {/* top-bar */}
         <div className="top-bar">
@@ -288,7 +298,7 @@ CONTEXT: ${form.developContext}`.trim()
 
           <select
             value={settings.codeType}
-            onChange={e => setSettings({ ...settings, codeType: e.target.value })}
+            onChange={e => setSettings({ ...settings, codeType:e.target.value })}
             style={{ marginRight:'1em' }}
           >
             <option value="javascript">JavaScript</option>
@@ -313,7 +323,7 @@ CONTEXT: ${form.developContext}`.trim()
               <input
                 className="form-input"
                 value={settings.apiKey}
-                onInput={e => setSettings({ ...settings, apiKey: e.target.value })}
+                onInput={e => setSettings({ ...settings, apiKey:e.target.value })}
               />
             </div>
             <div className="form-group">
@@ -321,7 +331,7 @@ CONTEXT: ${form.developContext}`.trim()
               <select
                 className="form-select"
                 value={settings.model}
-                onChange={e => setSettings({ ...settings, model: e.target.value })}
+                onChange={e => setSettings({ ...settings, model:e.target.value })}
               >
                 <option>gpt-4o</option>
                 <option>gpt-3.5-turbo</option>
@@ -333,20 +343,19 @@ CONTEXT: ${form.developContext}`.trim()
 
         {/* split: left chat / right prompt builder */}
         <div className="content-container">
-          {/* ───────── conversation ─────────────────────────────*/}
+          {/* ───────── conversation list ───────────────────────*/}
           <div className="chat-container">
             {(() => {
               let assistantCounter = 0
               return currentChat.messages.map((m, idx) => {
                 const isAssistant = m.role === 'assistant'
                 const num         = isAssistant ? ++assistantCounter : null
-
-                const upIdx   = idx > 0 ? idx - 1 : null
-                const downIdx = idx < currentChat.messages.length - 1 ? idx + 1 : null
+                const upIdx   = idx>0 ? idx-1 : null
+                const downIdx = idx<currentChat.messages.length-1 ? idx+1 : null
 
                 const copyFull = () => navigator.clipboard.writeText(
                   Array.isArray(m.content)
-                    ? m.content.map(c => c.type === 'text' ? c.text : '').join('')
+                    ? m.content.map(c => c.type==='text'?c.text:'').join('')
                     : m.content
                 )
 
@@ -354,9 +363,9 @@ CONTEXT: ${form.developContext}`.trim()
                   <div key={idx} id={`msg-${idx}`} className={`message message-${m.role}`}>
                     {isAssistant && (
                       <div className="floating-controls">
-                        <button className="button icon-button" onClick={copyFull}                 title="Copy message">📋</button>
-                        <button className="button icon-button" onClick={() => scrollTo(upIdx)}    disabled={upIdx==null}>▲</button>
-                        <button className="button icon-button" onClick={() => scrollTo(downIdx)}  disabled={downIdx==null}>▼</button>
+                        <button className="button icon-button" onClick={copyFull} title="Copy">📋</button>
+                        <button className="button icon-button" onClick={() => scrollTo(upIdx)}   disabled={upIdx==null}>▲</button>
+                        <button className="button icon-button" onClick={() => scrollTo(downIdx)} disabled={downIdx==null}>▼</button>
                       </div>
                     )}
 
@@ -367,7 +376,7 @@ CONTEXT: ${form.developContext}`.trim()
 
                       <div className="message-actions">
                         <button className="button icon-button" onClick={copyFull}>Copy</button>
-                        {m.role === 'user' && (
+                        {m.role==='user' && (
                           <button
                             className="button icon-button"
                             onClick={() => {
@@ -375,21 +384,21 @@ CONTEXT: ${form.developContext}`.trim()
                               const txt = Array.isArray(m.content)
                                 ? m.content.map(c => c.type==='text'?c.text:'').join('')
                                 : String(m.content)
-                              setForm(f => ({ ...f, developGoal: txt }))
+                              setForm(f => ({ ...f, developGoal:txt }))
                             }}
                           >Edit</button>
                         )}
                         <button
                           className="button icon-button"
-                          onClick={() => handleDelete(m.id)}
+                          onClick={() => handleDeleteMessage(m.id)}
                         >Del</button>
                       </div>
                     </div>
 
                     <div className="message-content">
                       {Array.isArray(m.content)
-                        ? m.content.map((c, j) =>
-                            c.type === 'text'
+                        ? m.content.map((c,j) =>
+                            c.type==='text'
                               ? <div key={j}>{renderRichText(c.text)}</div>
                               : <img key={j} src={c.image_url.url} style={{ maxWidth:200 }}/>)
                         : renderRichText(m.content)}
@@ -402,10 +411,12 @@ CONTEXT: ${form.developContext}`.trim()
 
           {/* ───────── prompt builder ───────────────────────────*/}
           <PromptBuilder
-            mode={mode}           setMode={setMode}
-            form={form}           setForm={setForm}
-            loadingSend={loadingSend} editingId={editingId}
-            handleSend={handleSend} handleCopyAll={handleCopyAll}
+            mode={mode} setMode={setMode}
+            form={form} setForm={setForm}
+            loadingSend={loadingSend}
+            editingId={editingId}
+            handleSend={handleSend}
+            handleCopyAll={handleCopyAll}
           />
         </div>
       </div>
@@ -414,8 +425,7 @@ CONTEXT: ${form.developContext}`.trim()
       {toast && (
         <Toast
           text={toast.text}
-          actionLabel="Undo"
-          onAction={toast.undo}
+          onUndo={toast.onUndo}
           onClose={() => setToast(null)}
         />
       )}
@@ -424,7 +434,7 @@ CONTEXT: ${form.developContext}`.trim()
 }
 
 /*──────────────────────────────────────────────────────────────────────────
-  PromptBuilder (unchanged from original)
+  PromptBuilder – unchanged from earlier versions
 ──────────────────────────────────────────────────────────────────────────*/
 function PromptBuilder ({
   mode, setMode,
@@ -446,7 +456,7 @@ function PromptBuilder ({
         {['DEVELOP','COMMIT','DIAGNOSE'].map(m => (
           <button
             key={m}
-            className={`button ${mode === m ? 'active' : ''}`}
+            className={`button ${mode===m ? 'active' : ''}`}
             onClick={() => setMode(m)}
           >
             {m}
@@ -454,14 +464,14 @@ function PromptBuilder ({
         ))}
       </div>
 
-      {mode === 'DEVELOP' && fields.map(([label, key, rows]) => (
+      {mode==='DEVELOP' && fields.map(([label,key,rows]) => (
         <div key={key} className="form-group">
           <label>{label}:</label>
           <textarea
             rows={rows}
             className="form-textarea"
             value={form[key]}
-            onInput={e => setForm(f => ({ ...f, [key]: e.target.value }))}
+            onInput={e => setForm(f => ({ ...f, [key]:e.target.value }))}
           />
         </div>
       ))}

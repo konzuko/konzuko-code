@@ -1,14 +1,14 @@
 /* -------------------------------------------------------------------------
    src/api.js
-   Centralised Supabase + OpenAI helpers
-   – now includes soft-delete helpers for *messages* and *chats*
+   Centralised Supabase + OpenAI helpers – soft-delete, undo, cascades
 ---------------------------------------------------------------------------*/
 import { supabase }          from './lib/supabase.js'
 import { OPENAI_TIMEOUT_MS } from './config.js'
 
-/*──────────────────────────────────────────────────────────────────────────
-  Auth – cached session
-──────────────────────────────────────────────────────────────────────────*/
+/* helper – always ISO UTC */
+const isoNow = () => new Date().toISOString()
+
+/*────────────────────────────  Auth  ─────────────────────────────────────*/
 let _cachedUser = null
 export async function getCurrentUser ({ forceRefresh = false } = {}) {
   if (_cachedUser && !forceRefresh) return _cachedUser
@@ -19,9 +19,7 @@ export async function getCurrentUser ({ forceRefresh = false } = {}) {
   return _cachedUser
 }
 
-/*──────────────────────────────────────────────────────────────────────────
-  OpenAI Chat Completion (unchanged)
-──────────────────────────────────────────────────────────────────────────*/
+/*────────────────────  OpenAI Chat Completion (unchanged)  ───────────────*/
 export async function callApiForText ({
   messages, apiKey, model = 'o3-mini-high', signal = undefined
 }) {
@@ -70,16 +68,14 @@ export async function callApiForText ({
   }
 }
 
-/*──────────────────────────────────────────────────────────────────────────
-  Supabase CRUD – CHATS
-──────────────────────────────────────────────────────────────────────────*/
+/*──────────────────────────  CHATS  ──────────────────────────────────────*/
 export async function fetchChats () {
   const user = await getCurrentUser()
   const { data, error } = await supabase
     .from('chats')
     .select('*')
     .eq('user_id', user.id)
-    .is('deleted_at', null)                    // ◀─ hide soft-deleted chats
+    .is('deleted_at', null)                 // hide soft-deleted chats
     .order('created_at', { ascending: false })
   if (error) throw error
   return data
@@ -96,35 +92,50 @@ export async function createChat ({ title = 'New Chat', model = 'javascript' }) 
   return data
 }
 
-/* NEW — soft-delete & undo for chats */
+/* soft-delete chat + cascade to its messages */
 export async function deleteChat (id) {
+  const ts = isoNow()
   const { error } = await supabase
     .from('chats')
-    .update({ deleted_at: new Date().toISOString() })
+    .update({ deleted_at: ts })
     .eq('id', id)
   if (error) throw error
+
+  /* cascade */
+  const { error: msgErr } = await supabase
+    .from('messages')
+    .update({ deleted_at: ts })
+    .eq('chat_id', id)
+  if (msgErr) throw msgErr
+
   return { success: true }
 }
 
+/* undo chat delete – 30-minute window */
 export async function undoDeleteChat (id) {
+  const cutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString()
   const { error } = await supabase
     .from('chats')
     .update({ deleted_at: null })
     .eq('id', id)
+    .gt('deleted_at', cutoff)
   if (error) throw error
+
+  await supabase
+    .from('messages')
+    .update({ deleted_at: null })
+    .eq('chat_id', id)
   return { success: true }
 }
 
-/*──────────────────────────────────────────────────────────────────────────
-  Supabase CRUD – MESSAGES
-──────────────────────────────────────────────────────────────────────────*/
+/*──────────────────────────  MESSAGES  ───────────────────────────────────*/
 export async function fetchMessages (chat_id) {
   const { data, error } = await supabase
     .from('messages')
     .select('*')
     .eq('chat_id', chat_id)
-    .is('deleted_at', null)                    // ◀─ hide soft-deleted msgs
-    .order('created_at', { ascending: true })
+    .is('deleted_at', null)                // hide soft-deleted messages
+    .order('id', { ascending: true })
   if (error) throw error
   return data
 }
@@ -150,32 +161,34 @@ export async function updateMessage (id, newContent) {
   return data
 }
 
-/* soft-archive everything *after* a message when user edits */
 export async function archiveMessagesAfter (chat_id, message_id) {
   const { error } = await supabase
     .from('messages')
-    .update({ deleted_at: new Date().toISOString() })
+    .update({ deleted_at: isoNow() })
     .eq('chat_id', chat_id)
     .gt('id', message_id)
   if (error) throw error
   return { success: true }
 }
 
-/* soft-delete + undo for individual messages */
+/* soft-delete message */
 export async function deleteMessage (id) {
   const { error } = await supabase
     .from('messages')
-    .update({ deleted_at: new Date().toISOString() })   // ◀─ SOFT delete
+    .update({ deleted_at: isoNow() })
     .eq('id', id)
   if (error) throw error
   return { success: true }
 }
 
+/* undo message delete – 30-minute window */
 export async function undoDeleteMessage (id) {
+  const cutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString()
   const { error } = await supabase
     .from('messages')
     .update({ deleted_at: null })
     .eq('id', id)
+    .gt('deleted_at', cutoff)
   if (error) throw error
   return { success: true }
 }
