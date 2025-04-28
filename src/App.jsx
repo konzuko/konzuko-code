@@ -1,7 +1,6 @@
-
 /* -------------------------------------------------------------------------
    src/App.jsx
-   Main UI container – fully updated for soft-delete, cascades & undo-toast
+   Main UI – message ordering + auto-select next chat on delete
 ---------------------------------------------------------------------------*/
 import { useState, useEffect } from 'preact/hooks'
 import ChatPane                from './chatpane.jsx'
@@ -20,21 +19,18 @@ import {
   useTokenCount
 } from './hooks.js'
 
-/*──────────────────────────────────────────────────────────────────────────
-  Helper → render markdown-like ``` fences with per-snippet copy buttons
-──────────────────────────────────────────────────────────────────────────*/
+/* render markdown-like code fences with copy buttons */
 function renderRichText (text) {
   if (!text.includes('```')) {
     return <div style={{ whiteSpace:'pre-wrap' }}>{text}</div>
   }
-  const parts = text.split(/```/g)       // even idx = plain, odd idx = code
+  const parts = text.split(/```/g)
   return parts.map((chunk, i) =>
     i % 2 === 1
       ? (
         <div key={i} className="code-wrapper">
           <button
             className="copy-snippet"
-            title="Copy code"
             onClick={() => navigator.clipboard.writeText(chunk)}
           >
             Copy
@@ -46,15 +42,12 @@ function renderRichText (text) {
   )
 }
 
-/*──────────────────────────────────────────────────────────────────────────
-  Minimal toast component (auto-dismiss in 30 s)
-──────────────────────────────────────────────────────────────────────────*/
+/* toast – auto-dismiss in 30s + optional Undo */
 function Toast ({ text, onUndo, onClose }) {
   useEffect(() => {
-    const id = setTimeout(onClose, 30_000)
-    return () => clearTimeout(id)
+    const t = setTimeout(onClose, 30000)
+    return () => clearTimeout(t)
   }, [onClose])
-
   return (
     <div className="toast">
       <span>{text}</span>
@@ -64,21 +57,18 @@ function Toast ({ text, onUndo, onClose }) {
   )
 }
 
-/*──────────────────────────────────────────────────────────────────────────
-  Top-level component
-──────────────────────────────────────────────────────────────────────────*/
 export default function App () {
-  /* ── state ───────────────────────────────────────────────────────────*/
+  /* ── state ─────────────────────────────────────────────────────────*/
   const [chats, setChats]           = useState([])
   const [currentChatId, setCurrent] = useState(null)
   const [loadingChats, setLC]       = useState(true)
-  const [loadingSend,  setLS]       = useState(false)
-  const [editingId,    setEditing]  = useState(null)
-  const [toast,        setToast]    = useState(null)      // {text,onUndo}
+  const [loadingSend, setLS]        = useState(false)
+  const [editingId, setEditing]     = useState(null)
+  const [toast, setToast]           = useState(null)   // { text, onUndo }
 
   const [settings, setSettings] = useSettings()
-  const [form,     setForm]     = useFormData()
-  const [mode,     setMode]     = useMode()
+  const [form, setForm]         = useFormData()
+  const [mode, setMode]         = useMode()
 
   const tokenCount = useTokenCount(
     chats.find(c => c.id === currentChatId)?.messages ?? [],
@@ -87,7 +77,7 @@ export default function App () {
 
   const showToast = (text, onUndo) => setToast({ text, onUndo })
 
-  /* ── fetch chat list on mount / codeType change ──────────────────────*/
+  /* fetch chat list */
   useEffect(() => {
     let alive = true
     ;(async () => {
@@ -95,43 +85,44 @@ export default function App () {
       try {
         const rows = await fetchChats()
         let shaped = rows.map(r => ({
-          id: r.id, title: r.title, started: r.created_at,
-          model: r.code_type, messages: []
+          id     : r.id,
+          title  : r.title,
+          started: r.created_at,
+          model  : r.code_type,
+          messages: []
         }))
-
         if (!shaped.length) {
-          const c = await createChat({ title:'New Chat', model: settings.codeType })
-          shaped  = [{
-            id: c.id, title: c.title, started: c.created_at,
-            model: c.code_type, messages: []
-          }]
+          const c = await createChat({ title:'New Chat', model:settings.codeType })
+          shaped = [{ id:c.id, title:c.title, started:c.created_at, model:c.code_type, messages:[] }]
         }
-
         if (alive) {
           setChats(shaped)
           setCurrent(shaped[0].id)
         }
-      } catch (err) { alert('Failed to load chats: ' + err.message) }
-      finally      { alive && setLC(false) }
+      } catch (err) {
+        alert('Failed to load chats: ' + err.message)
+      } finally {
+        alive && setLC(false)
+      }
     })()
     return () => { alive = false }
   }, [settings.codeType])
 
-  /* ── fetch messages whenever active chat changes ─────────────────────*/
+  /* fetch messages */
   useEffect(() => {
     if (!currentChatId) return
     let alive = true
     fetchMessages(currentChatId)
-      .then(msgs => alive && setChats(cs => cs.map(c =>
-        c.id === currentChatId ? { ...c, messages: msgs } : c
-      )))
+      .then(msgs => alive && setChats(cs =>
+        cs.map(c => c.id === currentChatId ? { ...c, messages: msgs } : c)
+      ))
       .catch(err => alert('Failed to fetch messages: ' + err.message))
     return () => { alive = false }
   }, [currentChatId])
 
   const currentChat = chats.find(c => c.id === currentChatId) ?? { messages: [] }
 
-  /* ── helpers ─────────────────────────────────────────────────────────*/
+  /* build the OpenAI prompt */
   const buildUserPrompt = () => {
     if (mode === 'DEVELOP') {
       return `
@@ -156,26 +147,27 @@ CONTEXT: ${form.developContext}`.trim()
     fixCode:'', fixErrors:''
   })
 
-  /* ── CRUD helpers ────────────────────────────────────────────────────*/
+  /* create new chat */
   async function handleNewChat () {
     setLS(true)
     try {
-      const c = await createChat({ title:'New Chat', model: settings.codeType })
-      setChats(cs => [
-        { id:c.id, title:c.title, started:c.created_at, model:c.code_type, messages:[] },
-        ...cs
-      ])
+      const c = await createChat({ title:'New Chat', model:settings.codeType })
+      setChats(cs => [{ id:c.id, title:c.title, started:c.created_at, model:c.code_type, messages:[] }, ...cs])
       setCurrent(c.id)
-    } catch (err) { alert('Failed to create chat: ' + err.message) }
-    finally      { setLS(false) }
+    } catch (err) {
+      alert('Failed to create chat: ' + err.message)
+    } finally {
+      setLS(false)
+    }
   }
 
+  /* send prompt & receive assistant response */
   async function handleSend () {
     if (!currentChatId) return
     if (mode === 'DEVELOP' && !form.developGoal.trim()) {
-      alert('GOAL is required for DEVELOP mode.'); return
+      alert('GOAL is required for DEVELOP mode.')
+      return
     }
-
     setLS(true)
     try {
       const prompt = buildUserPrompt()
@@ -185,11 +177,12 @@ CONTEXT: ${form.developContext}`.trim()
         await updateMessage(editingId, prompt)
         await archiveMessagesAfter(currentChatId, editingId)
         setEditing(null)
-        msgs = await fetchMessages(currentChatId)      /* re-fetch once */
+        msgs = await fetchMessages(currentChatId)  // re-fetch
       } else {
         const newMsg = await createMessage({
-          chat_id: currentChatId, role:'user',
-          content:[{ type:'text', text:prompt }]
+          chat_id: currentChatId,
+          role   : 'user',
+          content: [{ type:'text', text:prompt }]
         })
         msgs = [...msgs, newMsg]
       }
@@ -201,28 +194,30 @@ CONTEXT: ${form.developContext}`.trim()
       })
 
       const assistantMsg = await createMessage({
-        chat_id: currentChatId, role:'assistant',
+        chat_id: currentChatId,
+        role   : 'assistant',
         content: error ? `Error: ${error}` : content
       })
 
-      setChats(cs => cs.map(c => c.id === currentChatId
-        ? { ...c, messages:[...msgs, assistantMsg] }
-        : c
+      setChats(cs => cs.map(c => 
+        c.id === currentChatId ? { ...c, messages:[...msgs, assistantMsg] } : c
       ))
 
       if (!editingId) resetForm()
-    } catch (err) { alert('Send failed: ' + err.message) }
-    finally      { setLS(false) }
+    } catch (err) {
+      alert('Send failed: ' + err.message)
+    } finally {
+      setLS(false)
+    }
   }
 
-  /*────────────────── new delete handlers with undo ───────────────────*/
+  /* delete a single message (soft) with undo */
   async function handleDeleteMessage (id) {
     if (!confirm('Delete this message? You can undo for ~30 min.')) return
     try {
       await deleteMessage(id)
-      setChats(cs => cs.map(c => c.id === currentChatId
-        ? { ...c, messages:c.messages.filter(m => m.id !== id) }
-        : c
+      setChats(cs => cs.map(c =>
+        c.id === currentChatId ? { ...c, messages:c.messages.filter(m => m.id !== id) } : c
       ))
       showToast(
         'Message deleted.',
@@ -231,50 +226,67 @@ CONTEXT: ${form.developContext}`.trim()
               .then(msgs => setChats(cs => cs.map(c =>
                 c.id === currentChatId ? { ...c, messages:msgs } : c
               )))
-              .catch(err => alert('Undo failed: '+err.message))
+              .catch(e => alert('Undo failed: '+e.message))
               .finally(() => setToast(null))
       )
-    } catch (err) { alert('Delete failed: ' + err.message) }
+    } catch (err) {
+      alert('Delete failed: ' + err.message)
+    }
   }
 
+  /* delete an entire chat (soft) with undo + auto-select next */
   async function handleDeleteChatUI (id) {
     if (!confirm('Delete this entire chat? You can undo for ~30 min.')) return
     try {
       await deleteChat(id)
-      setChats(cs => cs.filter(c => c.id !== id))
-      if (id === currentChatId) setCurrent(null)
+      setChats(cs => {
+        const filtered = cs.filter(c => c.id !== id)
+        // if we deleted the active chat, pick the next one
+        if (currentChatId === id) {
+          setCurrent(filtered[0]?.id ?? null)
+        }
+        return filtered
+      })
       showToast(
         'Chat deleted.',
         () => undoDeleteChat(id)
               .then(() => fetchChats())
-              .then(rows => setChats(rows.map(r => ({
-                id:r.id, title:r.title, started:r.created_at,
-                model:r.code_type, messages:[]
-              }))))
-              .catch(err => alert('Undo failed: '+err.message))
+              .then(rows => {
+                const shaped = rows.map(r => ({
+                  id:r.id, title:r.title,
+                  started:r.created_at,
+                  model:r.code_type,
+                  messages:[]
+                }))
+                setChats(shaped)
+                setCurrent(shaped[0]?.id ?? null)
+              })
+              .catch(e => alert('Undo failed: '+e.message))
               .finally(() => setToast(null))
       )
-    } catch (err) { alert('Delete failed: ' + err.message) }
+    } catch (err) {
+      alert('Delete failed: ' + err.message)
+    }
   }
 
+  /* copy entire conversation to clipboard */
   function handleCopyAll () {
     const txt = currentChat.messages
       .map(m => `${m.role.toUpperCase()}: ${
         Array.isArray(m.content)
-          ? m.content.map(c => c.type==='text'?c.text:'[img]').join('')
+          ? m.content.map(c => c.type==='text'?c.text:'').join('')
           : m.content
       }`).join('\n\n')
     navigator.clipboard.writeText(txt)
   }
 
-  /* ── render ──────────────────────────────────────────────────────────*/
+  /* render */
   if (loadingChats) {
     return <h2 style={{ textAlign:'center', marginTop:'20vh' }}>Loading…</h2>
   }
 
   return (
     <div className="app-container">
-      {/* ── sidebar ───────────────────────────────────────────────*/}
       <ChatPane
         chats={chats}
         currentChatId={currentChatId}
@@ -283,8 +295,8 @@ CONTEXT: ${form.developContext}`.trim()
         onDeleteChat={handleDeleteChatUI}
       />
 
-      {/* ── main content column ───────────────────────────────────*/}
-      <div className="main-content">
+       {/* ── main content column ───────────────────────────────────*/}
+       <div className="main-content">
         {/* top-bar */}
         <div className="top-bar">
           <button
@@ -420,8 +432,6 @@ CONTEXT: ${form.developContext}`.trim()
           />
         </div>
       </div>
-
-      {/* toast */}
       {toast && (
         <Toast
           text={toast.text}
@@ -434,7 +444,7 @@ CONTEXT: ${form.developContext}`.trim()
 }
 
 /*──────────────────────────────────────────────────────────────────────────
-  PromptBuilder – unchanged from earlier versions
+  PromptBuilder – unchanged
 ──────────────────────────────────────────────────────────────────────────*/
 function PromptBuilder ({
   mode, setMode,

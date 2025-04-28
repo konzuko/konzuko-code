@@ -1,14 +1,20 @@
+
 import { useState, useMemo } from 'preact/hooks'
 
+/* Single chat item in the sidebar */
 function ChatItem({ chat, isActive, onSelectChat, onTitleUpdate, onDeleteChat }) {
   const [editing, setEditing] = useState(false)
   const [title, setTitle]     = useState(chat.title)
 
-  /* local-tz date */
-  const started = new Date(chat.started).toLocaleString()
+  // display local timezone
+  const ts    = new Date(chat.started)
+  const date  = ts.toLocaleDateString()
+  const time  = ts.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 
-  const handleDoubleClick = (e) => { e.stopPropagation(); setEditing(true) }
-  const finishEdit = () => { setEditing(false); onTitleUpdate(chat.id, title) }
+  const finishEdit = () => {
+    setEditing(false)
+    onTitleUpdate(chat.id, title)
+  }
 
   return (
     <div
@@ -25,31 +31,35 @@ function ChatItem({ chat, isActive, onSelectChat, onTitleUpdate, onDeleteChat })
             autoFocus
           />
         ) : (
-          <span onDoubleClick={handleDoubleClick}>{chat.title}</span>
+          <span onDoubleClick={() => setEditing(true)}>{chat.title}</span>
         )}
         <button
           className="button icon-button"
-          onClick={e => { e.stopPropagation(); onDeleteChat(chat.id) }}
+          onClick={e => {
+            e.stopPropagation()
+            onDeleteChat(chat.id)
+          }}
           title="Delete Chat"
         >
           Del
         </button>
       </div>
       <div style={{ fontSize:'smaller', color:'var(--text-secondary)' }}>
-        {chat.messages.length} messages • {started}
+        {chat.messages.length} messages • {date} {time}
       </div>
     </div>
   )
 }
 
-function ChatPane({ chats, currentChatId, onSelectChat,
-                    onNewChat, onTitleUpdate, onDeleteChat }) {
+/* Sidebar container */
+export default function ChatPane({ chats, currentChatId,
+                                   onSelectChat, onNewChat,
+                                   onTitleUpdate, onDeleteChat }) {
   const [collapsed, setCollapsed] = useState(false)
-  const sortedChats = useMemo(
+  const sorted = useMemo(
     () => [...chats].sort((a,b) => new Date(b.started) - new Date(a.started)),
     [chats]
   )
-
   return (
     <div className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
       <div className="flex space-between align-center" style={{ padding:'var(--space-sm)' }}>
@@ -59,7 +69,7 @@ function ChatPane({ chats, currentChatId, onSelectChat,
         {!collapsed && <button className="button" onClick={onNewChat}>New Chat</button>}
       </div>
 
-      {!collapsed && sortedChats.map(chat =>
+      {!collapsed && sorted.map(chat => (
         <ChatItem
           key={chat.id}
           chat={chat}
@@ -68,9 +78,7 @@ function ChatPane({ chats, currentChatId, onSelectChat,
           onTitleUpdate={onTitleUpdate}
           onDeleteChat={onDeleteChat}
         />
-      )}
+      ))}
     </div>
   )
 }
-
-export default ChatPane
