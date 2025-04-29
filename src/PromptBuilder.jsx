@@ -1,3 +1,4 @@
+
 import { useState, useEffect, useCallback } from 'preact/hooks'
 import { useFileDrop }                    from './hooks.js'
 
@@ -40,14 +41,18 @@ export default function PromptBuilder({
     form.developContext
   ])
 
-  // set up text-file drop hooks
+  // For each text field, build a drag+drop object that can handle multiple files
   const makeDrop = fieldKey => {
-    const { dragOver, drop } = useFileDrop((text,file)=>{
+    const { dragOver, drop } = useFileDrop((text, file) => {
       const header = `/* content of ${file.name} */\n\n`
-      setForm(f=>({...f,[fieldKey]:header+text}))
-      setFileNames(f=>({
+      // Append new file content instead of replacing
+      setForm(f => ({
         ...f,
-        [fieldKey]:[...f[fieldKey],file.name]
+        [fieldKey]: f[fieldKey] + '\n\n' + header + text
+      }))
+      setFileNames(f => ({
+        ...f,
+        [fieldKey]: [...f[fieldKey], file.name]
       }))
     })
     return { dragOver, drop }
@@ -57,14 +62,6 @@ export default function PromptBuilder({
   const dropReturn   = makeDrop('developReturnFormat')
   const dropWarns    = makeDrop('developWarnings')
   const dropContext  = makeDrop('developContext')
-
-  const handlers = {
-    developGoal        : dropGoal,
-    developFeatures    : dropFeatures,
-    developReturnFormat: dropReturn,
-    developWarnings    : dropWarns,
-    developContext     : dropContext
-  }
 
   // container-level image drop
   const onDragOverImg = useCallback(e=>e.preventDefault(),[])
@@ -109,10 +106,15 @@ export default function PromptBuilder({
             className="form-textarea"
             value={form[key]}
             onInput={e=>setForm(f=>({...f,[key]:e.target.value}))}
-            onDragOver={handlers[key].dragOver}
+            onDragOver={dropContext.dragOver /* fallback; see override below */}
             onDrop={e=>{
               e.stopPropagation()
-              handlers[key].drop(e)
+              // Each text area uses its own “makeDrop” results:
+              if (key==='developGoal')     dropGoal.drop(e)
+              if (key==='developFeatures') dropFeatures.drop(e)
+              if (key==='developReturnFormat') dropReturn.drop(e)
+              if (key==='developWarnings') dropWarns.drop(e)
+              if (key==='developContext')  dropContext.drop(e)
             }}
           />
           {fileNames[key].length>0 && (
@@ -181,3 +183,4 @@ export default function PromptBuilder({
     </div>
   )
 }
+

@@ -1,3 +1,4 @@
+
 import {
   useState,
   useEffect,
@@ -49,15 +50,22 @@ export function useFormData() {
 }
 
 /*────────────────────────────  Drag-and-drop files  ──────────────────────────*/
-export function useFileDrop(onText /* (text, file) => void */) {
+/**
+ * Updated to support multiple file drops at once.
+ * We call onText(result, file) for each file in the event.
+ */
+export function useFileDrop(onText) {
   const dragOver = useCallback(e => { e.preventDefault() }, [])
   const drop     = useCallback(e => {
     e.preventDefault()
-    const file = e.dataTransfer.files?.[0]
-    if (!file) return
-    const reader = new FileReader()
-    reader.onload = () => onText(reader.result, file)
-    reader.readAsText(file)
+    const files = e.dataTransfer.files
+    if (!files?.length) return
+
+    Array.from(files).forEach(file => {
+      const reader = new FileReader()
+      reader.onload = () => onText(reader.result, file)
+      reader.readAsText(file)
+    })
   }, [onText])
   return { dragOver, drop }
 }
