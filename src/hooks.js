@@ -1,7 +1,4 @@
-/* -------------------------------------------------------------------------
-   src/hooks.js
-   Generic hooks + useUndoableDelete + useFileDrop
----------------------------------------------------------------------------*/
+// src/hooks.js
 import {
   useState,
   useEffect,
@@ -11,7 +8,7 @@ import {
 import { encodingForModel } from 'js-tiktoken'
 import { LOCALSTORAGE_DEBOUNCE } from './config.js'
 
-/*────────────────────────────  Local-storage helpers  ────────────────────*/
+/*─────────────────────  localStorage w/ debounce ──────────────────────*/
 function useDebouncedLocalStorage(
   key,
   initial,
@@ -39,7 +36,7 @@ function useDebouncedLocalStorage(
   return [value, setValue]
 }
 
-/*────────────────────────────  App-level settings  ───────────────────────*/
+/*──────────────────────────  settings ─────────────────────────────────*/
 export function useSettings() {
   return useDebouncedLocalStorage('konzuko-settings', {
     apiKey: '',
@@ -49,6 +46,7 @@ export function useSettings() {
   })
 }
 
+/*──────────────────────────  form-data ─────────────────────────────────*/
 export function useFormData() {
   return useDebouncedLocalStorage('konzuko-form-data', {
     developGoal: '',
@@ -62,10 +60,10 @@ export function useFormData() {
   })
 }
 
-/*────────────────────────────  Drag-and-drop files  ──────────────────────*/
+/*──────────────────────────  file‐drop ─────────────────────────────────*/
 export function useFileDrop(onText /* (text, file) => void */) {
   const dragOver = useCallback((e) => {
-    e.preventDefault() // allow drop
+    e.preventDefault()
   }, [])
 
   const drop = useCallback(
@@ -83,34 +81,26 @@ export function useFileDrop(onText /* (text, file) => void */) {
   return { dragOver, drop }
 }
 
-/*────────────────────────────  Misc. UI state  ───────────────────────────*/
-/* Hardened version: UNDER NO CIRCUMSTANCES can mode be invalid */
+/*─────────────────────────────  mode ───────────────────────────────────*/
 export function useMode() {
   const ALLOWED = ['DEVELOP', 'COMMIT', 'DIAGNOSE']
-
-  // 1) safe initial value
   const stored  = localStorage.getItem('konzuko-mode')
   const initial = ALLOWED.includes(stored) ? stored : 'DEVELOP'
-
   const [mode, _setMode] = useState(initial)
-
-  // 2) guarded setter
   const setMode = (val) => {
     if (!ALLOWED.includes(val)) {
-      console.warn('⚠️  Ignored attempt to set illegal mode:', val)
+      console.warn('⚠️ Ignored illegal mode:', val)
       return
     }
     _setMode(val)
   }
-
-  // 3) keep localStorage in sync
   useEffect(() => {
     localStorage.setItem('konzuko-mode', mode)
   }, [mode])
-
   return [mode, setMode]
 }
 
+/*───────────────────────────  token count ─────────────────────────────*/
 export function useTokenCount(messages = [], model = 'gpt-3.5-turbo') {
   const [count, setCount] = useState(0)
   const encRef = useRef({})
@@ -133,39 +123,31 @@ export function useTokenCount(messages = [], model = 'gpt-3.5-turbo') {
         const enc = await getEncoder()
         const total = messages.reduce((sum, m) => {
           const txt = Array.isArray(m.content)
-            ? m.content
-                .map((c) => (c.type === 'text' ? c.text : ''))
-                .join('')
+            ? m.content.map(c => c.type === 'text' ? c.text : '').join('')
             : String(m.content)
           return sum + enc.encode(txt).length
         }, 0)
         if (!cancelled) setCount(total)
-      } catch (err) {
+      } catch {
         if (!cancelled) setCount(0)
-        console.warn('Token count failed:', err)
       }
     })()
-    return () => {
-      cancelled = true
-    }
+    return () => { cancelled = true }
   }, [messages, getEncoder])
 
   return count
 }
 
-/*────────────────────────────  Undoable delete  ──────────────────────────*/
+/*──────────────────────────── undoable delete ──────────────────────────*/
 export function useUndoableDelete(showToast) {
   return useCallback(
     async ({
-      itemLabel = 'Item', // e.g. "Chat" or "Message"
+      itemLabel,
       confirmMessage = `Delete this ${itemLabel.toLowerCase()}? You can undo for ~30 min.`,
-      deleteFn, // () => Promise
-      undoFn, // () => Promise
-      afterDelete, // () => void
+      deleteFn,
+      undoFn,
+      afterDelete,
     }) => {
-      if (!deleteFn || !undoFn) {
-        throw new Error('useUndoableDelete requires deleteFn and undoFn')
-      }
       if (!confirm(confirmMessage)) return
       try {
         await deleteFn()

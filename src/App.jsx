@@ -1,9 +1,8 @@
 
-// src/App.jsx
-
 import { useState, useEffect, useCallback } from 'preact/hooks'
 import ChatPane                            from './chatpane.jsx'
 import Toast                               from './components/Toast.jsx'
+import PromptBuilder                       from './PromptBuilder.jsx'
 import {
   callApiForText,
   fetchChats,
@@ -26,34 +25,6 @@ import {
   useUndoableDelete
 } from './hooks.js'
 
-/*──────────────────────────
-  helper – simple markdown/code rendering
-────────────────────────────────────────────────*/
-function renderRichText(text) {
-  if (!text.includes('```')) {
-    return <div style={{ whiteSpace: 'pre-wrap' }}>{text}</div>
-  }
-  const parts = text.split(/```/g)
-  return parts.map((chunk, i) =>
-    i % 2
-      ? (
-        <div key={i} className="code-wrapper">
-          <button
-            className="copy-snippet"
-            onClick={() => navigator.clipboard.writeText(chunk)}
-          >
-            Copy
-          </button>
-          <pre className="code-block"><code>{chunk}</code></pre>
-        </div>
-      )
-      : <span key={i}>{chunk}</span>
-  )
-}
-
-/*──────────────────────────────────────────────────────────────────────────
-  App
-──────────────────────────────────────────────────────────────────────────*/
 export default function App() {
   const [chats, setChats]           = useState([])
   const [currentChatId, setCurrent] = useState(null)
@@ -62,9 +33,10 @@ export default function App() {
   const [editingId, setEditing]     = useState(null)
   const [toast, setToast]           = useState(null)
 
-  const [settings, setSettings]     = useSettings()
-  const [form, setForm]             = useFormData()
-  const [mode, setMode]             = useMode()
+  const [settings, setSettings] = useSettings()
+  const [form, setForm]         = useFormData()
+  const [mode, setMode]         = useMode()
+
   const tokenCount = useTokenCount(
     chats.find(c => c.id === currentChatId)?.messages ?? [],
     settings.model
@@ -73,7 +45,7 @@ export default function App() {
   const showToast      = useCallback((text, onUndo) => setToast({ text, onUndo }), [])
   const undoableDelete = useUndoableDelete(showToast)
 
-  /* Load chats */
+  /* ─── Load chats on startup or codeType change ──────────────────────── */
   useEffect(() => {
     let alive = true
     ;(async () => {
@@ -110,18 +82,22 @@ export default function App() {
     return () => { alive = false }
   }, [settings.codeType])
 
-  /* Load messages for current chat */
+  /* ─── Load messages whenever the selected chat changes ─────────────── */
   useEffect(() => {
     if (!currentChatId) return
     let alive = true
     fetchMessages(currentChatId)
-      .then(msgs =>
-        alive && setChats(cs =>
-          cs.map(c =>
-            c.id === currentChatId ? { ...c, messages: msgs } : c
+      .then(msgs => {
+        if (alive) {
+          setChats(cs =>
+            cs.map(c =>
+              c.id === currentChatId
+                ? { ...c, messages: msgs }
+                : c
+            )
           )
-        )
-      )
+        }
+      })
       .catch(err => alert('Failed to fetch messages: ' + err.message))
     return () => { alive = false }
   }, [currentChatId])
@@ -143,9 +119,6 @@ CONTEXT: ${form.developContext}`.trim()
     return ''
   }
 
-  const scrollTo = idx =>
-    document.getElementById(`msg-${idx}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-
   const resetForm = () => setForm({
     developGoal:        '',
     developFeatures:    '',
@@ -156,12 +129,19 @@ CONTEXT: ${form.developContext}`.trim()
     fixErrors:          ''
   })
 
-  /* Actions */
+  /* ─── Handlers for Chat + Message CRUD + ChatPane ─────────────────── */
+
   async function handleNewChat() {
     setLS(true)
     try {
       const c = await createChat({ title: 'New Chat', model: settings.codeType })
-      setChats(cs => [{ id: c.id, title: c.title, started: c.created_at, model: c.code_type, messages: [] }, ...cs])
+      setChats(cs => [{
+        id      : c.id,
+        title   : c.title,
+        started : c.created_at,
+        model   : c.code_type,
+        messages: []
+      }, ...cs])
       setCurrent(c.id)
     } catch (err) {
       alert('Failed to create chat: ' + err.message)
@@ -176,6 +156,7 @@ CONTEXT: ${form.developContext}`.trim()
       await updateChatTitle(id, newTitle)
     } catch (err) {
       alert('Rename failed: ' + err.message)
+      // rollback
       const rows = await fetchChats()
       setChats(rows.map(r => ({
         id      : r.id,
@@ -226,7 +207,9 @@ CONTEXT: ${form.developContext}`.trim()
 
       setChats(cs =>
         cs.map(c =>
-          c.id === currentChatId ? { ...c, messages: [...msgs, assistantMsg] } : c
+          c.id === currentChatId
+            ? { ...c, messages: [...msgs, assistantMsg] }
+            : c
         )
       )
 
@@ -276,7 +259,9 @@ CONTEXT: ${form.developContext}`.trim()
         setChats(shaped)
         setCurrent(id)
         const msgs = await fetchMessages(id)
-        setChats(cs => cs.map(c => c.id === id ? { ...c, messages: msgs } : c))
+        setChats(cs =>
+          cs.map(c => c.id === id ? { ...c, messages: msgs } : c)
+        )
       },
       afterDelete: () => setChats(cs => {
         const filtered = cs.filter(c => c.id !== id)
@@ -297,7 +282,7 @@ CONTEXT: ${form.developContext}`.trim()
   }
 
   if (loadingChats) {
-    return <h2 style={{ textAlign: 'center', marginTop: '20vh' }}>Loading…</h2>
+    return <h2 style={{ textAlign:'center', marginTop:'20vh' }}>Loading…</h2>
   }
 
   return (
@@ -319,11 +304,11 @@ CONTEXT: ${form.developContext}`.trim()
           >
             {settings.showSettings ? 'Close Settings' : 'Open Settings'}
           </button>
-          <span style={{ margin: '0 1em', fontWeight: 'bold' }}>konzuko-code</span>
+          <span style={{ margin:'0 1em', fontWeight:'bold' }}>konzuko-code</span>
           <select
             value={settings.codeType}
             onChange={e => setSettings({ ...settings, codeType: e.target.value })}
-            style={{ marginRight: '1em' }}
+            style={{ marginRight:'1em' }}
           >
             <option value="javascript">JavaScript</option>
             <option value="python">Python</option>
@@ -331,10 +316,10 @@ CONTEXT: ${form.developContext}`.trim()
             <option value="go">Go</option>
           </select>
           <div style={{
-            marginLeft: 'auto',
-            padding: '4px 12px',
-            background: '#4f8eff',
-            borderRadius: 4
+            marginLeft:'auto',
+            padding:'4px 12px',
+            background:'#4f8eff',
+            borderRadius:4
           }}>
             Tokens: {tokenCount.toLocaleString()}
           </div>
@@ -367,71 +352,61 @@ CONTEXT: ${form.developContext}`.trim()
 
         <div className="content-container">
           <div className="chat-container">
-            {(() => {
-              let assistantCounter = 0
-              return currentChat.messages.map((m, idx) => {
-                const isAssistant = m.role === 'assistant'
-                const num         = isAssistant ? ++assistantCounter : null
-                const upIdx       = idx > 0 ? idx - 1 : null
-                const downIdx     = idx < currentChat.messages.length - 1 ? idx + 1 : null
-                const copyFull    = () =>
-                  navigator.clipboard.writeText(
-                    Array.isArray(m.content)
-                      ? m.content.map(c => c.type === 'text' ? c.text : '').join('')
-                      : m.content
-                  )
-
-                return (
-                  <div
-                    key={m.id}
-                    id={`msg-${idx}`}
-                    className={`message message-${m.role}`}
-                  >
-                    {isAssistant && (
-                      <div className="floating-controls">
-                        <button className="button icon-button" onClick={copyFull} title="Copy">📋</button>
-                        <button className="button icon-button" onClick={() => scrollTo(upIdx)} disabled={upIdx==null}>▲</button>
-                        <button className="button icon-button" onClick={() => scrollTo(downIdx)} disabled={downIdx==null}>▼</button>
-                      </div>
-                    )}
-                    <div className="message-header">
-                      <span className="message-role">
-                        {isAssistant ? `${num} assistant` : m.role}
-                      </span>
-                      <div className="message-actions">
-                        <button className="button icon-button" onClick={copyFull}>Copy</button>
-                        {m.role === 'user' && (
-                          <button
-                            className="button icon-button"
-                            onClick={() => {
-                              setEditing(m.id)
-                              const txt = Array.isArray(m.content)
-                                ? m.content.map(c => c.type === 'text' ? c.text : '').join('')
-                                : String(m.content)
-                              setForm(f => ({ ...f, developGoal: txt }))
-                            }}
-                          >Edit</button>
-                        )}
-                        <button className="button icon-button" onClick={() => handleDeleteMessage(m.id)}>Del</button>
-                      </div>
+            {currentChat.messages.map((m, idx) => {
+              const isAssistant = m.role === 'assistant'
+              const copyFull = () =>
+                navigator.clipboard.writeText(
+                  Array.isArray(m.content)
+                    ? m.content.map(c => c.type==='text'?c.text:'').join('')
+                    : m.content
+                )
+              return (
+                <div
+                  key={m.id}
+                  id={`msg-${idx}`}
+                  className={`message message-${m.role}`}
+                >
+                  {isAssistant && (
+                    <div className="floating-controls">
+                      <button className="button icon-button" onClick={copyFull}>📋</button>
                     </div>
-                    <div className="message-content">
-                      {Array.isArray(m.content)
-                        ? m.content.map((c,j) =>
-                            c.type === 'text'
-                              ? <div key={j}>{renderRichText(c.text)}</div>
-                              : <img key={j} src={c.image_url.url} style={{ maxWidth:200 }}/>
-                          )
-                        : renderRichText(m.content)
-                      }
+                  )}
+                  <div className="message-header">
+                    <span className="message-role">
+                      {isAssistant ? `${idx} assistant` : m.role}
+                    </span>
+                    <div className="message-actions">
+                      <button className="button icon-button" onClick={copyFull}>Copy</button>
+                      {m.role==='user' && (
+                        <button
+                          className="button icon-button"
+                          onClick={() => {
+                            setEditing(m.id)
+                            const txt = Array.isArray(m.content)
+                              ? m.content.map(c=>c.type==='text'?c.text:'').join('')
+                              : String(m.content)
+                            setForm(f => ({ ...f, developGoal: txt }))
+                          }}
+                        >Edit</button>
+                      )}
+                      <button className="button icon-button" onClick={()=>handleDeleteMessage(m.id)}>Del</button>
                     </div>
                   </div>
-                )
-              })
-            })()}
+                  <div className="message-content">
+                    {Array.isArray(m.content)
+                      ? m.content.map((c,j) =>
+                          c.type==='text'
+                            ? <div key={j}>{c.text}</div>
+                            : <img key={j} src={c.image_url.url} style={{ maxWidth:200 }}/>
+                        )
+                      : <div style={{ whiteSpace:'pre-wrap' }}>{m.content}</div>
+                    }
+                  </div>
+                </div>
+              )
+            })}
           </div>
 
-          {/* ────────── Prompt Builder ────────── */}
           <PromptBuilder
             mode={mode}
             setMode={setMode}
@@ -452,101 +427,6 @@ CONTEXT: ${form.developContext}`.trim()
           onClose={() => setToast(null)}
         />
       )}
-    </div>
-  )
-}
-
-/*──────────────────────────────────────────────────────────────────────────
-  Inline PromptBuilder
-──────────────────────────────────────────────────────────────────────────*/
-function PromptBuilder({
-  mode, setMode,
-  form, setForm,
-  loadingSend, editingId,
-  handleSend, handleCopyAll
-}) {
-  const onChange = (key) => (e) =>
-    setForm(f => ({ ...f, [key]: e.target.value }))
-
-  return (
-    <div className="template-container">
-      <div className="mode-selector form-group">
-        {['DEVELOP','COMMIT','DIAGNOSE'].map(m => (
-          <button
-            key={m}
-            className={mode === m ? 'button active' : 'button'}
-            onClick={() => setMode(m)}
-          >
-            {m}
-          </button>
-        ))}
-      </div>
-
-      {mode === 'DEVELOP' && (
-        <>
-          <div className="form-group">
-            <label>GOAL:</label>
-            <textarea
-              className="form-textarea"
-              value={form.developGoal}
-              onInput={onChange('developGoal')}
-            />
-          </div>
-          <div className="form-group">
-            <label>FEATURES:</label>
-            <textarea
-              className="form-textarea"
-              value={form.developFeatures}
-              onInput={onChange('developFeatures')}
-            />
-          </div>
-          <div className="form-group">
-            <label>RETURN FORMAT:</label>
-            <textarea
-              className="form-textarea"
-              value={form.developReturnFormat}
-              onInput={onChange('developReturnFormat')}
-            />
-          </div>
-          <div className="form-group">
-            <label>WARNINGS:</label>
-            <textarea
-              className="form-textarea"
-              value={form.developWarnings}
-              onInput={onChange('developWarnings')}
-            />
-          </div>
-          <div className="form-group">
-            <label>CONTEXT:</label>
-            <textarea
-              className="form-textarea"
-              value={form.developContext}
-              onInput={onChange('developContext')}
-            />
-          </div>
-        </>
-      )}
-
-      <button
-        className="button send-button"
-        onClick={handleSend}
-        disabled={loadingSend}
-      >
-        {loadingSend
-          ? 'Sending…'
-          : editingId
-            ? 'Update'
-            : 'Send'
-        }
-      </button>
-
-      <button
-        className="button"
-        onClick={handleCopyAll}
-        style={{ marginTop:'8px' }}
-      >
-        Copy All Text
-      </button>
     </div>
   )
 }
