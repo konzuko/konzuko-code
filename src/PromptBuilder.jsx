@@ -81,7 +81,7 @@ export default function PromptBuilder({
     ['GOAL','developGoal',2],
     ['FEATURES','developFeatures',2],
     ['RETURN FORMAT','developReturnFormat',2],
-    ['WARNINGS','developWarnings',2],
+    ['THINGS TO REMEMBER/WARNINGS','developWarnings',2],
     ['CONTEXT','developContext',3]
   ]
 

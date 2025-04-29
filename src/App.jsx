@@ -112,7 +112,7 @@ MODE: DEVELOP
 GOAL: ${form.developGoal}
 FEATURES: ${form.developFeatures}
 RETURN FORMAT: ${form.developReturnFormat}
-WARNINGS: ${form.developWarnings}
+THINGS TO REMEMBER/WARNINGS: ${form.developWarnings}
 CONTEXT: ${form.developContext}`.trim()
     }
     if (mode==='COMMIT')   return 'MODE: COMMIT\nPlease generate a git-style commit message.'
