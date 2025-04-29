@@ -1,96 +1,95 @@
-/* -------------------------------------------------------------------------
-   src/api.js
-   Centralised Supabase + OpenAI helpers – ordering & soft-delete fixes
----------------------------------------------------------------------------*/
+// src/api.js
 import { supabase }          from './lib/supabase.js'
 import { OPENAI_TIMEOUT_MS } from './config.js'
 
-/* helper – always ISO UTC timestamp */
 const isoNow = () => new Date().toISOString()
 
-/*────────────────────────────  Auth  ─────────────────────────────────────*/
 let _cachedUser = null
 export async function getCurrentUser ({ forceRefresh = false } = {}) {
   if (_cachedUser && !forceRefresh) return _cachedUser
-  const { data: { session }, error } = await supabase.auth.getSession()
+  const { data:{ session }, error } = await supabase.auth.getSession()
   if (error) throw error
   if (!session?.user) throw new Error('Not authenticated')
   _cachedUser = session.user
   return _cachedUser
 }
 
-/*────────────────── OpenAI Chat Completion ───────────────────────────────*/
-export async function callApiForText ({
-  messages, apiKey, model = 'o3-mini-high', signal
+/** 
+ * Send chat.messages straight through (including image_url objects)
+ * to a vision‐capable model (e.g. "gpt-4o").
+ */
+export async function callApiForText({
+  messages, apiKey, model = 'gpt-4o', signal
 }) {
   try {
-    const formatted = messages.map(m =>
-      Array.isArray(m.content)
-        ? m
-        : {
-            role   : m.role === 'system' ? 'developer' : m.role,
-            content: [{ type: 'text', text: m.content }]
-          }
-    )
+    const formatted = messages.map(m => ({
+      role:    m.role === 'system' ? 'developer' : m.role,
+      content: Array.isArray(m.content)
+        ? m.content
+        : [{ type:'text', text: m.content }]
+    }))
+
     const body = {
       model,
       messages: formatted,
-      response_format: { type: 'text' },
-      ...( /o[13]/.test(model) ? { reasoning_effort: 'high' } : {} )
+      response_format: { type:'text' },
+      // you can add reasoning_effort if you like
     }
+
     const ctrl  = new AbortController()
     const timer = setTimeout(() => ctrl.abort(), OPENAI_TIMEOUT_MS)
     const res = await fetch('https://api.openai.com/v1/chat/completions', {
-      method : 'POST',
+      method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization : `Bearer ${apiKey}`
       },
-      body  : JSON.stringify(body),
+      body: JSON.stringify(body),
       signal: signal ?? ctrl.signal
     })
     clearTimeout(timer)
+
     if (!res.ok) {
       let txt = await res.text()
       try { txt = JSON.parse(txt).error?.message || txt } catch {}
       return { error: `HTTP ${res.status}: ${txt}` }
     }
+
     const data = await res.json()
     return data.error
       ? { error: data.error.message }
       : { content: data.choices?.[0]?.message?.content ?? '' }
-  } catch (err) {
+  }
+  catch (err) {
     if (err.name === 'AbortError') return { error: 'Request timed out' }
     return { error: err.message }
   }
 }
 
-/*────────────────────────────  CHATS  ────────────────────────────────────*/
-export async function fetchChats () {
+// ─── Chats CRUD ───────────────────────────────────────────────────────────────
+export async function fetchChats() {
   const user = await getCurrentUser()
   const { data, error } = await supabase
     .from('chats')
     .select('*')
     .eq('user_id', user.id)
-    .is('deleted_at', null)                 // hide soft-deleted
+    .is('deleted_at', null)
     .order('created_at', { ascending: false })
   if (error) throw error
   return data
 }
 
-export async function createChat ({ title = 'New Chat', model = 'javascript' }) {
+export async function createChat({ title='New Chat', model='javascript' }) {
   const user = await getCurrentUser()
   const { data, error } = await supabase
     .from('chats')
     .insert({ user_id: user.id, title, code_type: model })
-    .select()
-    .single()
+    .select().single()
   if (error) throw error
   return data
 }
 
-/* NEW → rename chat */
-export async function updateChatTitle (id, newTitle) {
+export async function updateChatTitle(id, newTitle) {
   const { error } = await supabase
     .from('chats')
     .update({ title: newTitle })
@@ -99,8 +98,7 @@ export async function updateChatTitle (id, newTitle) {
   return { success: true }
 }
 
-/* soft-delete a chat (DB trigger will cascade to messages) */
-export async function deleteChat (id) {
+export async function deleteChat(id) {
   const { error } = await supabase
     .from('chats')
     .update({ deleted_at: isoNow() })
@@ -109,12 +107,8 @@ export async function deleteChat (id) {
   return { success: true }
 }
 
-/* undo a chat delete within 30 minutes
-   ALSO clears deleted_at on any messages that were soft-deleted with it */
-export async function undoDeleteChat (id) {
+export async function undoDeleteChat(id) {
   const cutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString()
-
-  // 1) restore the chat row
   const { error } = await supabase
     .from('chats')
     .update({ deleted_at: null })
@@ -122,7 +116,6 @@ export async function undoDeleteChat (id) {
     .gt('deleted_at', cutoff)
   if (error) throw error
 
-  // 2) restore any messages soft-deleted in the same operation
   const { error: msgErr } = await supabase
     .from('messages')
     .update({ deleted_at: null })
@@ -133,40 +126,38 @@ export async function undoDeleteChat (id) {
   return { success: true }
 }
 
-/*───────────────────────────  MESSAGES  ──────────────────────────────────*/
-export async function fetchMessages (chat_id) {
+// ─── Messages CRUD ────────────────────────────────────────────────────────────
+export async function fetchMessages(chat_id) {
   const { data, error } = await supabase
     .from('messages')
     .select('*')
     .eq('chat_id', chat_id)
-    .is('deleted_at', null)                 // hide soft-deleted
+    .is('deleted_at', null)
     .order('created_at', { ascending: true })
   if (error) throw error
   return data
 }
 
-export async function createMessage ({ chat_id, role, content }) {
+export async function createMessage({ chat_id, role, content }) {
   const { data, error } = await supabase
     .from('messages')
     .insert({ chat_id, role, content })
-    .select()
-    .single()
+    .select().single()
   if (error) throw error
   return data
 }
 
-export async function updateMessage (id, newContent) {
+export async function updateMessage(id, newContent) {
   const { data, error } = await supabase
     .from('messages')
-    .update({ content: [{ type: 'text', text: newContent }] })
+    .update({ content: [{ type:'text', text:newContent }] })
     .eq('id', id)
-    .select()
-    .single()
+    .select().single()
   if (error) throw error
   return data
 }
 
-export async function archiveMessagesAfter (chat_id, message_id) {
+export async function archiveMessagesAfter(chat_id, message_id) {
   const { error } = await supabase
     .from('messages')
     .update({ deleted_at: isoNow() })
@@ -176,8 +167,7 @@ export async function archiveMessagesAfter (chat_id, message_id) {
   return { success: true }
 }
 
-/* soft-delete a single message */
-export async function deleteMessage (id) {
+export async function deleteMessage(id) {
   const { error } = await supabase
     .from('messages')
     .update({ deleted_at: isoNow() })
@@ -186,8 +176,7 @@ export async function deleteMessage (id) {
   return { success: true }
 }
 
-/* undo a message delete within 30 minutes */
-export async function undoDeleteMessage (id) {
+export async function undoDeleteMessage(id) {
   const cutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString()
   const { error } = await supabase
     .from('messages')

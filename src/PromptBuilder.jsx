@@ -1,35 +1,62 @@
-
-// src/PromptBuilder.jsx
-import { useState }               from 'preact/hooks'
-import { useFileDrop }            from './hooks.js'
+import { useState, useEffect, useCallback } from 'preact/hooks'
+import { useFileDrop }                    from './hooks.js'
 
 export default function PromptBuilder({
   mode, setMode,
   form, setForm,
   loadingSend, editingId,
-  handleSend, handleCopyAll
+  handleSend, handleCopyAll,
+  onImageDrop,    // (name, dataUrl)=>void
+  onRemoveImage,  // idx=>void
+  imagePreviews   // [{name,url}]
 }) {
-  // track text-file names
-  const [includedFiles, setIncludedFiles] = useState([])
-  // track image previews
-  const [imagePreviews, setImagePreviews] = useState([])
+  // file-name lists per text field
+  const FIELD_KEYS = [
+    'developGoal',
+    'developFeatures',
+    'developReturnFormat',
+    'developWarnings',
+    'developContext'
+  ]
+  const initialFiles = FIELD_KEYS.reduce((o,k)=>(o[k]=[],o),{})
+  const [fileNames, setFileNames] = useState(initialFiles)
 
-  // build a drop-handler for each textarea
-  const dropFor = (fieldKey) => (text, file) => {
-    // inject a header comment + file contents
-    const headered = `/* content of ${file.name} */\n\n${text}`
-    setForm(f => ({ ...f, [fieldKey]: headered }))
-    setIncludedFiles(list =>
-      Array.from(new Set([...list, file.name]))
-    )
+  // clear fileNames when form is reset
+  useEffect(() => {
+    if (
+      !form.developGoal &&
+      !form.developFeatures &&
+      !form.developReturnFormat &&
+      !form.developWarnings &&
+      !form.developContext
+    ) {
+      setFileNames(initialFiles)
+    }
+  }, [
+    form.developGoal,
+    form.developFeatures,
+    form.developReturnFormat,
+    form.developWarnings,
+    form.developContext
+  ])
+
+  // set up text-file drop hooks
+  const makeDrop = fieldKey => {
+    const { dragOver, drop } = useFileDrop((text,file)=>{
+      const header = `/* content of ${file.name} */\n\n`
+      setForm(f=>({...f,[fieldKey]:header+text}))
+      setFileNames(f=>({
+        ...f,
+        [fieldKey]:[...f[fieldKey],file.name]
+      }))
+    })
+    return { dragOver, drop }
   }
-
-  // instantiate five text-drop hooks
-  const dropGoal     = useFileDrop(dropFor('developGoal'))
-  const dropFeatures = useFileDrop(dropFor('developFeatures'))
-  const dropReturn   = useFileDrop(dropFor('developReturnFormat'))
-  const dropWarns    = useFileDrop(dropFor('developWarnings'))
-  const dropContext  = useFileDrop(dropFor('developContext'))
+  const dropGoal     = makeDrop('developGoal')
+  const dropFeatures = makeDrop('developFeatures')
+  const dropReturn   = makeDrop('developReturnFormat')
+  const dropWarns    = makeDrop('developWarnings')
+  const dropContext  = makeDrop('developContext')
 
   const handlers = {
     developGoal        : dropGoal,
@@ -40,86 +67,95 @@ export default function PromptBuilder({
   }
 
   // container-level image drop
-  const handleImageDragOver = e => e.preventDefault()
-  const handleImageDrop = e => {
+  const onDragOverImg = useCallback(e=>e.preventDefault(),[])
+  const onDropImg     = useCallback(e=>{
     e.preventDefault()
     const file = e.dataTransfer.files?.[0]
-    if (!file || !file.type.startsWith('image/')) return
+    if (!file||!file.type.startsWith('image/')) return
     const reader = new FileReader()
-    reader.onload = () => {
-      setImagePreviews(imgs => [
-        ...imgs,
-        { name: file.name, url: reader.result }
-      ])
-    }
+    reader.onload = ()=>onImageDrop(file.name, reader.result)
     reader.readAsDataURL(file)
-  }
+  },[onImageDrop])
 
-  // form rows
   const fields = [
-    ['GOAL',          'developGoal',         2],
-    ['FEATURES',      'developFeatures',     2],
-    ['RETURN FORMAT', 'developReturnFormat', 2],
-    ['WARNINGS',      'developWarnings',     2],
-    ['CONTEXT',       'developContext',      3]
+    ['GOAL','developGoal',2],
+    ['FEATURES','developFeatures',2],
+    ['RETURN FORMAT','developReturnFormat',2],
+    ['WARNINGS','developWarnings',2],
+    ['CONTEXT','developContext',3]
   ]
 
   return (
     <div
       className="template-container"
-      onDragOver={handleImageDragOver}
-      onDrop={handleImageDrop}
+      onDragOver={onDragOverImg}
+      onDrop={onDropImg}
     >
       <div className="mode-selector form-group">
-        {['DEVELOP','COMMIT','DIAGNOSE'].map(m => (
+        {['DEVELOP','COMMIT','DIAGNOSE'].map(m=>(
           <button
             key={m}
-            className={mode === m ? 'button active' : 'button'}
-            onClick={() => setMode(m)}
+            className={mode===m?'button active':'button'}
+            onClick={()=>setMode(m)}
           >{m}</button>
         ))}
       </div>
 
-      {mode === 'DEVELOP' && fields.map(([label, key, rows]) => (
+      {mode==='DEVELOP' && fields.map(([label,key,rows])=>(
         <div key={key} className="form-group">
           <label>{label}:</label>
           <textarea
             rows={rows}
             className="form-textarea"
             value={form[key]}
-            onInput={e => setForm(f => ({ ...f, [key]: e.target.value }))}
+            onInput={e=>setForm(f=>({...f,[key]:e.target.value}))}
             onDragOver={handlers[key].dragOver}
-            onDrop={e => {
+            onDrop={e=>{
               e.stopPropagation()
               handlers[key].drop(e)
             }}
           />
+          {fileNames[key].length>0 && (
+            <div style={{fontSize:'0.8rem',color:'#aaa',marginTop:4}}>
+              Files: {fileNames[key].join(', ')}
+            </div>
+          )}
         </div>
       ))}
 
-      {includedFiles.length > 0 && (
-        <div style={{
-          marginTop:'var(--space-md)',
-          fontSize:'0.8rem',
-          color:'var(--text-secondary)'
-        }}>
-          Included files: {includedFiles.join(', ')}
-        </div>
-      )}
-
-      {imagePreviews.length > 0 && (
-        <div style={{
-          marginTop:'var(--space-md)',
-          display:'flex', gap:'8px', flexWrap:'wrap'
-        }}>
-          {imagePreviews.map((img, i) => (
-            <div key={i} style={{ textAlign:'center' }}>
+      {imagePreviews.length>0 && (
+        <div style={{display:'flex',gap:8,flexWrap:'wrap',margin:'8px 0'}}>
+          {imagePreviews.map((img,i)=>(
+            <div key={i} style={{position:'relative'}}>
               <img
                 src={img.url}
                 alt={img.name}
-                style={{ width:100, height:'auto', borderRadius:4 }}
+                style={{width:100,borderRadius:4}}
               />
-              <div style={{ fontSize:'0.7rem', marginTop:'4px' }}>
+              <div style={{
+                position:'absolute',
+                top:2,right:2,
+                background:'rgba(0,0,0,0.6)',
+                color:'#fff',
+                borderRadius:'50%',
+                width:20,height:20,
+                textAlign:'center',
+                lineHeight:'20px',
+                cursor:'pointer'
+              }}
+                onClick={()=>onRemoveImage(i)}
+                title="Remove image"
+              >×</div>
+              <div style={{
+                fontSize:'0.7rem',
+                color:'#ccc',
+                textAlign:'center',
+                marginTop:2,
+                width:100,
+                overflow:'hidden',
+                textOverflow:'ellipsis',
+                whiteSpace:'nowrap'
+              }}>
                 {img.name}
               </div>
             </div>
@@ -132,12 +168,12 @@ export default function PromptBuilder({
         disabled={loadingSend}
         onClick={handleSend}
       >
-        {loadingSend ? 'Sending…' : editingId ? 'Update' : 'Send'}
+        {loadingSend?'Sending…':(editingId?'Update':'Send')}
       </button>
 
       <button
         className="button"
-        style={{ marginTop:'8px' }}
+        style={{marginTop:'8px'}}
         onClick={handleCopyAll}
       >
         Copy All Text

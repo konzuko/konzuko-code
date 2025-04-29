@@ -1,8 +1,7 @@
-
 import { useState, useEffect, useCallback } from 'preact/hooks'
-import ChatPane                            from './chatpane.jsx'
-import Toast                               from './components/Toast.jsx'
-import PromptBuilder                       from './PromptBuilder.jsx'
+import ChatPane        from './chatpane.jsx'
+import Toast           from './components/Toast.jsx'
+import PromptBuilder   from './PromptBuilder.jsx'
 import {
   callApiForText,
   fetchChats,
@@ -37,15 +36,18 @@ export default function App() {
   const [form, setForm]         = useFormData()
   const [mode, setMode]         = useMode()
 
+  // NEW → in-memory Base64 images
+  const [pendingImages, setPendingImages] = useState([]) // { name, url }[]
+
   const tokenCount = useTokenCount(
     chats.find(c => c.id === currentChatId)?.messages ?? [],
     settings.model
   )
 
-  const showToast      = useCallback((text, onUndo) => setToast({ text, onUndo }), [])
+  const showToast      = useCallback((text,onUndo)=>setToast({text,onUndo}),[])
   const undoableDelete = useUndoableDelete(showToast)
 
-  /* ─── Load chats on startup or codeType change ──────────────────────── */
+  // ─── Load chats ───────────────────────────────────────────────────────────
   useEffect(() => {
     let alive = true
     ;(async () => {
@@ -60,7 +62,7 @@ export default function App() {
           messages: []
         }))
         if (!shaped.length) {
-          const c = await createChat({ title: 'New Chat', model: settings.codeType })
+          const c = await createChat({ title:'New Chat', model:settings.codeType })
           shaped = [{
             id      : c.id,
             title   : c.title,
@@ -79,33 +81,32 @@ export default function App() {
         alive && setLC(false)
       }
     })()
-    return () => { alive = false }
+    return ()=>{ alive=false }
   }, [settings.codeType])
 
-  /* ─── Load messages whenever the selected chat changes ─────────────── */
+  // ─── Load messages on chat change ────────────────────────────────────────
   useEffect(() => {
     if (!currentChatId) return
     let alive = true
     fetchMessages(currentChatId)
       .then(msgs => {
-        if (alive) {
-          setChats(cs =>
-            cs.map(c =>
-              c.id === currentChatId
-                ? { ...c, messages: msgs }
-                : c
-            )
+        if (!alive) return
+        setChats(cs =>
+          cs.map(c =>
+            c.id===currentChatId
+              ? { ...c, messages: msgs }
+              : c
           )
-        }
+        )
       })
-      .catch(err => alert('Failed to fetch messages: ' + err.message))
-    return () => { alive = false }
+      .catch(err => alert('Failed to fetch messages: '+err.message))
+    return ()=>{ alive=false }
   }, [currentChatId])
 
-  const currentChat = chats.find(c => c.id === currentChatId) ?? { messages: [] }
+  const currentChat = chats.find(c=>c.id===currentChatId) ?? { messages: [] }
 
   function buildUserPrompt() {
-    if (mode === 'DEVELOP') {
+    if (mode==='DEVELOP') {
       return `
 MODE: DEVELOP
 GOAL: ${form.developGoal}
@@ -114,27 +115,26 @@ RETURN FORMAT: ${form.developReturnFormat}
 WARNINGS: ${form.developWarnings}
 CONTEXT: ${form.developContext}`.trim()
     }
-    if (mode === 'COMMIT')   return 'MODE: COMMIT\nPlease generate a git-style commit message.'
-    if (mode === 'DIAGNOSE') return 'MODE: DIAGNOSE\nPlease analyze any errors or pitfalls.'
+    if (mode==='COMMIT')   return 'MODE: COMMIT\nPlease generate a git-style commit message.'
+    if (mode==='DIAGNOSE') return 'MODE: DIAGNOSE\nPlease analyze any errors or pitfalls.'
     return ''
   }
 
   const resetForm = () => setForm({
-    developGoal:        '',
-    developFeatures:    '',
-    developReturnFormat:'',
-    developWarnings:    '',
-    developContext:     '',
-    fixCode:            '',
-    fixErrors:          ''
+    developGoal        : '',
+    developFeatures    : '',
+    developReturnFormat: '',
+    developWarnings    : '',
+    developContext     : '',
+    fixCode            : '',
+    fixErrors          : ''
   })
 
-  /* ─── Handlers for Chat + Message CRUD + ChatPane ─────────────────── */
-
+  // ─── Chat CRUD ────────────────────────────────────────────────────────────
   async function handleNewChat() {
     setLS(true)
     try {
-      const c = await createChat({ title: 'New Chat', model: settings.codeType })
+      const c = await createChat({ title:'New Chat', model:settings.codeType })
       setChats(cs => [{
         id      : c.id,
         title   : c.title,
@@ -150,15 +150,15 @@ CONTEXT: ${form.developContext}`.trim()
     }
   }
 
-  async function handleRenameChat(id, newTitle) {
-    setChats(cs => cs.map(c => c.id === id ? { ...c, title: newTitle } : c))
+  async function handleRenameChat(id,newTitle) {
+    setChats(cs=>cs.map(c=>c.id===id?{...c,title:newTitle}:c))
     try {
-      await updateChatTitle(id, newTitle)
+      await updateChatTitle(id,newTitle)
     } catch (err) {
-      alert('Rename failed: ' + err.message)
+      alert('Rename failed: '+err.message)
       // rollback
       const rows = await fetchChats()
-      setChats(rows.map(r => ({
+      setChats(rows.map(r=>({
         id      : r.id,
         title   : r.title,
         started : r.created_at,
@@ -168,74 +168,20 @@ CONTEXT: ${form.developContext}`.trim()
     }
   }
 
-  async function handleSend() {
-    if (!currentChatId) return
-    if (mode === 'DEVELOP' && !form.developGoal.trim()) {
-      alert('GOAL is required for DEVELOP mode.')
-      return
-    }
-    setLS(true)
-    try {
-      const prompt = buildUserPrompt()
-      let msgs     = currentChat.messages
-
-      if (editingId) {
-        await updateMessage(editingId, prompt)
-        await archiveMessagesAfter(currentChatId, editingId)
-        setEditing(null)
-        msgs = await fetchMessages(currentChatId)
-      } else {
-        const newMsg = await createMessage({
-          chat_id: currentChatId,
-          role   : 'user',
-          content: [{ type: 'text', text: prompt }]
-        })
-        msgs = [...msgs, newMsg]
-      }
-
-      const { content, error } = await callApiForText({
-        apiKey  : settings.apiKey,
-        model   : settings.model,
-        messages: msgs
-      })
-
-      const assistantMsg = await createMessage({
-        chat_id: currentChatId,
-        role   : 'assistant',
-        content: error ? `Error: ${error}` : content
-      })
-
-      setChats(cs =>
-        cs.map(c =>
-          c.id === currentChatId
-            ? { ...c, messages: [...msgs, assistantMsg] }
-            : c
-        )
-      )
-
-      if (!editingId) resetForm()
-    } catch (err) {
-      alert('Send failed: ' + err.message)
-    } finally {
-      setLS(false)
-    }
-  }
-
+  // ─── Message CRUD ───────────────────────────────────────────────────────
   function handleDeleteMessage(id) {
     undoableDelete({
       itemLabel  : 'Message',
-      deleteFn   : () => deleteMessage(id),
-      undoFn     : async () => {
+      deleteFn   : ()=>deleteMessage(id),
+      undoFn     : async ()=>{
         await undoDeleteMessage(id)
         const msgs = await fetchMessages(currentChatId)
-        setChats(cs =>
-          cs.map(c => c.id === currentChatId ? { ...c, messages: msgs } : c)
-        )
+        setChats(cs=>cs.map(c=>c.id===currentChatId?{...c,messages:msgs}:c))
       },
-      afterDelete: () => setChats(cs =>
-        cs.map(c =>
-          c.id === currentChatId
-            ? { ...c, messages: c.messages.filter(m => m.id !== id) }
+      afterDelete: ()=>setChats(cs=>
+        cs.map(c=>
+          c.id===currentChatId
+            ? { ...c, messages: c.messages.filter(m=>m.id!==id) }
             : c
         )
       )
@@ -245,11 +191,11 @@ CONTEXT: ${form.developContext}`.trim()
   function handleDeleteChatUI(id) {
     undoableDelete({
       itemLabel  : 'Chat',
-      deleteFn   : () => deleteChat(id),
-      undoFn     : async () => {
+      deleteFn   : ()=>deleteChat(id),
+      undoFn     : async ()=>{
         await undoDeleteChat(id)
-        const rows   = await fetchChats()
-        const shaped = rows.map(r => ({
+        const rows = await fetchChats()
+        const shaped = rows.map(r=>({
           id      : r.id,
           title   : r.title,
           started : r.created_at,
@@ -259,13 +205,11 @@ CONTEXT: ${form.developContext}`.trim()
         setChats(shaped)
         setCurrent(id)
         const msgs = await fetchMessages(id)
-        setChats(cs =>
-          cs.map(c => c.id === id ? { ...c, messages: msgs } : c)
-        )
+        setChats(cs=>cs.map(c=>c.id===id?{...c,messages:msgs}:c))
       },
-      afterDelete: () => setChats(cs => {
-        const filtered = cs.filter(c => c.id !== id)
-        if (currentChatId === id) setCurrent(filtered[0]?.id ?? null)
+      afterDelete: ()=>setChats(cs=>{
+        const filtered = cs.filter(c=>c.id!==id)
+        if (currentChatId===id) setCurrent(filtered[0]?.id??null)
         return filtered
       })
     })
@@ -273,12 +217,73 @@ CONTEXT: ${form.developContext}`.trim()
 
   function handleCopyAll() {
     const txt = currentChat.messages
-      .map(m => `${m.role.toUpperCase()}: ${
-        Array.isArray(m.content)
-          ? m.content.map(c => c.type === 'text' ? c.text : '').join('')
-          : m.content
-      }`).join('\n\n')
+      .map(m => Array.isArray(m.content)
+        ? m.content.map(c=>c.type==='text'?c.text:'').join('')
+        : String(m.content)
+      )
+      .join('\n\n')
     navigator.clipboard.writeText(txt)
+  }
+
+  // ─── MAIN SEND ──────────────────────────────────────────────────────────
+  async function handleSend() {
+    if (!currentChatId) return
+    if (mode==='DEVELOP' && !form.developGoal.trim()) {
+      alert('GOAL is required for DEVELOP mode.')
+      return
+    }
+
+    setLS(true)
+    try {
+      // 1) mix images + prompt text
+      const parts = [
+        ...pendingImages.map(img=>({
+          type:'image_url',
+          image_url:{ url:img.url, detail:'auto' }
+        })),
+        { type:'text', text: buildUserPrompt() }
+      ]
+
+      // 2) save user
+      await createMessage({
+        chat_id: currentChatId,
+        role   : 'user',
+        content: parts
+      })
+
+      // 3) clear form + images
+      setPendingImages([])
+      resetForm()
+
+      // 4) refetch
+      const msgs = await fetchMessages(currentChatId)
+
+      // 5) call OpenAI vision
+      const { content, error } = await callApiForText({
+        apiKey  : settings.apiKey,
+        model   : settings.model,
+        messages: msgs
+      })
+
+      // 6) save assistant
+      const assistantMsg = await createMessage({
+        chat_id: currentChatId,
+        role   : 'assistant',
+        content: [{ type:'text', text: error?`Error: ${error}`:content }]
+      })
+
+      // 7) update UI
+      setChats(cs=>cs.map(c=>
+        c.id===currentChatId
+          ? { ...c, messages:[...msgs, assistantMsg] }
+          : c
+      ))
+
+    } catch (err) {
+      alert('Send failed: '+err.message)
+    } finally {
+      setLS(false)
+    }
   }
 
   if (loadingChats) {
@@ -297,18 +302,19 @@ CONTEXT: ${form.developContext}`.trim()
       />
 
       <div className="main-content">
+        {/* ── top bar ── */}
         <div className="top-bar">
           <button
             className="button"
-            onClick={() => setSettings(s => ({ ...s, showSettings: !s.showSettings }))}
+            onClick={()=>setSettings(s=>({...s,showSettings:!s.showSettings}))}
           >
-            {settings.showSettings ? 'Close Settings' : 'Open Settings'}
+            {settings.showSettings?'Close Settings':'Open Settings'}
           </button>
-          <span style={{ margin:'0 1em', fontWeight:'bold' }}>konzuko-code</span>
+          <span style={{margin:'0 1em',fontWeight:'bold'}}>konzuko-code</span>
           <select
             value={settings.codeType}
-            onChange={e => setSettings({ ...settings, codeType: e.target.value })}
-            style={{ marginRight:'1em' }}
+            onChange={e=>setSettings(s=>({...s,codeType:e.target.value}))}
+            style={{marginRight:'1em'}}
           >
             <option value="javascript">JavaScript</option>
             <option value="python">Python</option>
@@ -325,6 +331,7 @@ CONTEXT: ${form.developContext}`.trim()
           </div>
         </div>
 
+        {/* ── settings panel ── */}
         {settings.showSettings && (
           <div className="settings-panel">
             <div className="form-group">
@@ -332,7 +339,7 @@ CONTEXT: ${form.developContext}`.trim()
               <input
                 className="form-input"
                 value={settings.apiKey}
-                onInput={e => setSettings({ ...settings, apiKey: e.target.value })}
+                onInput={e=>setSettings(s=>({...s,apiKey:e.target.value}))}
               />
             </div>
             <div className="form-group">
@@ -340,7 +347,7 @@ CONTEXT: ${form.developContext}`.trim()
               <select
                 className="form-select"
                 value={settings.model}
-                onChange={e => setSettings({ ...settings, model: e.target.value })}
+                onChange={e=>setSettings(s=>({...s,model:e.target.value}))}
               >
                 <option>gpt-4o</option>
                 <option>gpt-3.5-turbo</option>
@@ -351,55 +358,64 @@ CONTEXT: ${form.developContext}`.trim()
         )}
 
         <div className="content-container">
+          {/* ── chat messages ── */}
           <div className="chat-container">
-            {currentChat.messages.map((m, idx) => {
-              const isAssistant = m.role === 'assistant'
-              const copyFull = () =>
-                navigator.clipboard.writeText(
-                  Array.isArray(m.content)
-                    ? m.content.map(c => c.type==='text'?c.text:'').join('')
-                    : m.content
-                )
+            {currentChat.messages.map((m,idx)=> {
+              const isAssistant = m.role==='assistant'
+              const copyFull = ()=>navigator.clipboard.writeText(
+                Array.isArray(m.content)
+                  ? m.content.map(c=>c.type==='text'?c.text:'').join('')
+                  : String(m.content)
+              )
               return (
-                <div
-                  key={m.id}
-                  id={`msg-${idx}`}
-                  className={`message message-${m.role}`}
-                >
+                <div key={m.id} className={`message message-${m.role}`}>
                   {isAssistant && (
                     <div className="floating-controls">
-                      <button className="button icon-button" onClick={copyFull}>📋</button>
+                      <button
+                        className="button icon-button"
+                        onClick={copyFull}
+                      >📋</button>
                     </div>
                   )}
                   <div className="message-header">
                     <span className="message-role">
-                      {isAssistant ? `${idx} assistant` : m.role}
+                      {isAssistant?`${idx} assistant`:m.role}
                     </span>
                     <div className="message-actions">
-                      <button className="button icon-button" onClick={copyFull}>Copy</button>
+                      <button
+                        className="button icon-button"
+                        onClick={copyFull}
+                      >Copy</button>
                       {m.role==='user' && (
                         <button
                           className="button icon-button"
-                          onClick={() => {
+                          onClick={()=>{
                             setEditing(m.id)
                             const txt = Array.isArray(m.content)
                               ? m.content.map(c=>c.type==='text'?c.text:'').join('')
                               : String(m.content)
-                            setForm(f => ({ ...f, developGoal: txt }))
+                            setForm(f=>({...f,developGoal:txt}))
                           }}
                         >Edit</button>
                       )}
-                      <button className="button icon-button" onClick={()=>handleDeleteMessage(m.id)}>Del</button>
+                      <button
+                        className="button icon-button"
+                        onClick={()=>handleDeleteMessage(m.id)}
+                      >Del</button>
                     </div>
                   </div>
                   <div className="message-content">
                     {Array.isArray(m.content)
-                      ? m.content.map((c,j) =>
+                      ? m.content.map((c,j)=>
                           c.type==='text'
                             ? <div key={j}>{c.text}</div>
-                            : <img key={j} src={c.image_url.url} style={{ maxWidth:200 }}/>
+                            : <img
+                                key={j}
+                                src={c.image_url.url}
+                                style={{maxWidth:200,margin:'8px 0'}}
+                              />
                         )
-                      : <div style={{ whiteSpace:'pre-wrap' }}>{m.content}</div>
+                      : <div style={{whiteSpace:'pre-wrap'}}>{m.content}</div>
                     }
                   </div>
                 </div>
@@ -407,6 +423,7 @@ CONTEXT: ${form.developContext}`.trim()
             })}
           </div>
 
+          {/* ── prompt builder ── */}
           <PromptBuilder
             mode={mode}
             setMode={setMode}
@@ -416,6 +433,9 @@ CONTEXT: ${form.developContext}`.trim()
             editingId={editingId}
             handleSend={handleSend}
             handleCopyAll={handleCopyAll}
+            onImageDrop={(name,url)=>setPendingImages(a=>[...a,{name,url}])}
+            onRemoveImage={i=>setPendingImages(a=>a.filter((_,j)=>j!==i))}
+            imagePreviews={pendingImages}
           />
         </div>
       </div>
@@ -424,7 +444,7 @@ CONTEXT: ${form.developContext}`.trim()
         <Toast
           text={toast.text}
           onAction={toast.onUndo}
-          onClose={() => setToast(null)}
+          onClose={()=>setToast(null)}
         />
       )}
     </div>
