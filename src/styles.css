@@ -233,3 +233,39 @@ html, body {
   .template-container { width: 100%; max-width: 100%; }
   .message { width: 90%; }
 }
+
+/* File Pane */
+
+.file-pane-container {
+  border: 1px solid var(--border);
+  background-color: var(--bg-secondary);
+  padding: var(--space-md);
+  margin-top: var(--space-md);
+  border-radius: var(--radius);
+}
+
+.file-pane-container h2 {
+  margin-bottom: var(--space-sm);
+  font-size: 1.2rem;
+  color: var(--accent);
+}
+
+.file-pane-filelist {
+  max-height: 200px;
+  overflow-y: auto;
+  margin-top: var(--space-sm);
+  list-style: none;
+  padding-left: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background-color: var(--bg-tertiary);
+}
+
+.file-pane-filelist li {
+  padding: var(--space-xs) var(--space-md);
+  border-bottom: 1px solid var(--border);
+  line-height: 1.4;
+}
+.file-pane-filelist li:last-child {
+  border: none;
+}
