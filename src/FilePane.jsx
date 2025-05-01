@@ -2,17 +2,19 @@
 import { h } from 'preact';
 import { useState, useCallback } from 'preact/hooks';
 
-/* ────────────────────────────────────────────────────────────────────────── */
-/*  Constants & helpers                                                      */
-/* ────────────────────────────────────────────────────────────────────────── */
+/* ------------------------------------------------------------------------
+   Reuse your existing scanning, dedupe, asciiTree, etc. helper code here
+   (scanDir, asciiTree, fileToText, dedupe).  Below is the entire new version
+   with a “Paste Image” button + OS shortcuts text on the right side.
+------------------------------------------------------------------------ */
+
 const FILE_LIMIT = 500;
 
-/* Recursively scan directory handles (File-System-Access API) */
+/* Recursively scan a directory handle (File System Access API) */
 async function scanDir(dirHandle, out, remaining, path = '') {
   if (remaining <= 0) return;
   for await (const [name, handle] of dirHandle.entries()) {
     const full = path ? `${path}/${name}` : name;
-
     if (handle.kind === 'file') {
       if (out.length >= FILE_LIMIT) return;
       const file = await handle.getFile();
@@ -25,7 +27,7 @@ async function scanDir(dirHandle, out, remaining, path = '') {
   }
 }
 
-/* Build ASCII tree */
+/* Build an ASCII tree from a list of full paths */
 function asciiTree(paths) {
   const root = {};
   paths.forEach((p) =>
@@ -36,6 +38,7 @@ function asciiTree(paths) {
   );
   return renderTree(root, '');
 }
+
 function renderTree(node, prefix) {
   if (!node) return '';
   const keys = Object.keys(node).sort();
@@ -49,14 +52,15 @@ function renderTree(node, prefix) {
     .join('\n');
 }
 
-/* File → text promise */
-const fileToText = (file) =>
-  new Promise((res, rej) => {
+/* File → text Promise */
+function fileToText(file) {
+  return new Promise((res, rej) => {
     const r = new FileReader();
     r.onload = () => res(String(r.result));
     r.onerror = () => rej(r.error);
     r.readAsText(file);
   });
+}
 
 /* Dedupe by fullPath */
 function dedupe(files) {
@@ -68,35 +72,31 @@ function dedupe(files) {
   });
 }
 
-/* ────────────────────────────────────────────────────────────────────────── */
-/*  Component                                                                */
-/* ────────────────────────────────────────────────────────────────────────── */
-export default function FilePane({ form, setForm }) {
+export default function FilePane({
+  form,
+  setForm,
+  onPasteImage // NEW: (name, dataUrl) => void
+}) {
   const [pendingFiles, setPendingFiles] = useState([]);
   const [adding, setAdding]             = useState(false);
 
-  /* Is there already persisted file code in developContext? */
-  const hasPersisted = /File structure \(added batch/i.test(
-    form.developContext || ''
-  );
-
-  /* ─── Callbacks ──────────────────────────────────────────────────────── */
+  // Merge new batch into pendingFiles
   const mergeBatch = useCallback((batch) => {
     setPendingFiles((prev) =>
       dedupe([...prev, ...batch]).slice(0, FILE_LIMIT)
     );
   }, []);
 
+  // Append batch details to developContext
   const appendBatchToContext = useCallback(
     async (batch) => {
       if (!batch.length) return;
-
       const tree  = asciiTree(batch.map((f) => f.fullPath));
       const texts = await Promise.all(batch.map(fileToText));
 
       setForm((prev) => {
-        const prevCtx   = prev.developContext || '';
-        const batchNum  =
+        const prevCtx  = prev.developContext || '';
+        const batchNum =
           (prevCtx.match(/File structure \(added batch/gi) || []).length + 1;
 
         let block = `\n\n/* File structure (added batch ${batchNum}):\n${tree}\n*/\n`;
@@ -110,6 +110,7 @@ export default function FilePane({ form, setForm }) {
     [setForm]
   );
 
+  // “+ Add Files”
   const handleAddFiles = useCallback(async () => {
     if (!window.showOpenFilePicker) {
       alert('Your browser lacks showOpenFilePicker (Chrome 86+, Edge 86+).');
@@ -134,6 +135,7 @@ export default function FilePane({ form, setForm }) {
     }
   }, [mergeBatch, appendBatchToContext, pendingFiles.length]);
 
+  // “+ Add Folder”
   const handleAddFolder = useCallback(async () => {
     if (!window.showDirectoryPicker) {
       alert('Your browser lacks showDirectoryPicker (Chrome 86+).');
@@ -153,25 +155,53 @@ export default function FilePane({ form, setForm }) {
     }
   }, [mergeBatch, appendBatchToContext, pendingFiles.length]);
 
-  /* NEW: also clear developContext so localStorage is wiped */
+  // Clear all
   const handleClearAll = useCallback(() => {
     if (
       !confirm(
         'Remove all files from the list and erase their code from the prompt?'
       )
-    )
-      return;
+    ) return;
 
     setPendingFiles([]);
     setForm((prev) => ({ ...prev, developContext: '' }));
   }, [setForm]);
 
-  /* ─── UI ─────────────────────────────────────────────────────────────── */
+  // “Paste Image” button
+  const handlePasteClipboard = useCallback(async () => {
+    if (!navigator.clipboard || !navigator.clipboard.read) {
+      alert('Clipboard API not supported');
+      return;
+    }
+    try {
+      const items = await navigator.clipboard.read();
+      let found   = false;
+      for (const item of items) {
+        for (const type of item.types) {
+          if (type.startsWith('image/')) {
+            const blob = await item.getType(type);
+            const url  = URL.createObjectURL(blob);
+            onPasteImage?.('Clipboard Image', url);
+            found = true;
+          }
+        }
+      }
+      if (!found) {
+        alert('No image found in clipboard');
+      }
+    }
+    catch (err) {
+      console.error(err);
+      alert('Failed to read clipboard: ' + err.message);
+    }
+  }, [onPasteImage]);
+
   return (
     <div className="file-pane-container">
       <h2>Project Files</h2>
 
-      {hasPersisted && (
+      {/* show a notice if we have persisted code */}
+      {/File structure \(added batch/i.test(form.developContext) && (
         <div
           style={{
             marginBottom: '1rem',
@@ -182,8 +212,8 @@ export default function FilePane({ form, setForm }) {
             fontSize: '0.9rem',
           }}
         >
-          Your prompt already contains persisted file code. Use <em>Clear
-          List</em> if you’d like to wipe it and start fresh.
+          Already appended file code to your prompt. “Clear List” removes them
+          from memory and also erases them from the prompt.
         </div>
       )}
 
@@ -198,30 +228,60 @@ export default function FilePane({ form, setForm }) {
             fontSize: '0.9rem',
           }}
         >
-          {pendingFiles.length} / {FILE_LIMIT} files in memory. “Clear List”
-          removes them and erases them from your prompt.
+          {pendingFiles.length} / {FILE_LIMIT} files in memory. Clear List wipes
+          them from the prompt.
         </div>
       )}
 
-      <div style={{ display: 'flex', gap: 8 }}>
-        <button className="button" onClick={handleAddFiles} disabled={adding}>
-          + Add Files
-        </button>
-        <button className="button" onClick={handleAddFolder} disabled={adding}>
-          + Add Folder
-        </button>
-        <button
-          className="button"
-          onClick={handleClearAll}
-          disabled={adding && pendingFiles.length === 0}
-          style={
-            pendingFiles.length
-              ? { background: '#b71c1c', color: '#fff', borderColor: '#7f0000' }
-              : {}
-          }
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'flex-start',
+          gap: 8
+        }}
+      >
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="button" onClick={handleAddFiles} disabled={adding}>
+            + Add Files
+          </button>
+          <button className="button" onClick={handleAddFolder} disabled={adding}>
+            + Add Folder
+          </button>
+          <button
+            className="button"
+            onClick={handleClearAll}
+            disabled={adding && pendingFiles.length === 0}
+            style={
+              pendingFiles.length
+                ? { background: '#b71c1c', color: '#fff', borderColor: '#7f0000' }
+                : {}
+            }
+          >
+            Clear List
+          </button>
+        </div>
+
+        {/* Right side: OS shortcuts + a "Paste Image" button */}
+        <div
+          style={{
+            textAlign: 'right',
+            fontSize: '0.8rem',
+            lineHeight: 1.2,
+            color: '#ccc'
+          }}
         >
-          Clear List
-        </button>
+          <div><strong>Mac</strong>: Cmd+Ctrl+Shift+3 or 4 → copies screenshot</div>
+          <div><strong>Win</strong>: Win+Shift+S → copies screenshot</div>
+          <div><strong>Linux</strong>: PrtSc w/ Flameshot → to clipboard</div>
+          <button
+            className="button"
+            style={{ marginTop: '6px', fontSize: '0.8rem' }}
+            onClick={handlePasteClipboard}
+          >
+            Paste Image
+          </button>
+        </div>
       </div>
 
       <div style={{ marginTop: '1rem' }}>

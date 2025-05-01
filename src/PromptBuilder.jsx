@@ -1,17 +1,17 @@
-
 import { useState, useEffect, useCallback } from 'preact/hooks'
 import { useFileDrop }                    from './hooks.js'
+import FilePane                           from './FilePane.jsx'
 
 export default function PromptBuilder({
   mode, setMode,
   form, setForm,
   loadingSend, editingId,
   handleSend, handleCopyAll,
-  onImageDrop,    // (name, dataUrl)=>void
-  onRemoveImage,  // idx=>void
+  onImageDrop,    // (name, dataUrl) => void
+  onRemoveImage,  // idx => void
   imagePreviews   // [{name,url}]
 }) {
-  // file-name lists per text field
+  // file‐name lists per text field
   const FIELD_KEYS = [
     'developGoal',
     'developFeatures',
@@ -22,7 +22,7 @@ export default function PromptBuilder({
   const initialFiles = FIELD_KEYS.reduce((o,k)=>(o[k]=[],o),{})
   const [fileNames, setFileNames] = useState(initialFiles)
 
-  // clear fileNames when form is reset
+  // Clear fileNames when form is reset
   useEffect(() => {
     if (
       !form.developGoal &&
@@ -41,11 +41,10 @@ export default function PromptBuilder({
     form.developContext
   ])
 
-  // For each text field, build a drag+drop object that can handle multiple files
+  // For each text field, build a drag+drop object to handle multiple files
   const makeDrop = fieldKey => {
     const { dragOver, drop } = useFileDrop((text, file) => {
       const header = `/* content of ${file.name} */\n\n`
-      // Append new file content instead of replacing
       setForm(f => ({
         ...f,
         [fieldKey]: f[fieldKey] + '\n\n' + header + text
@@ -63,7 +62,7 @@ export default function PromptBuilder({
   const dropWarns    = makeDrop('developWarnings')
   const dropContext  = makeDrop('developContext')
 
-  // container-level image drop
+  // Container-level image drop (drag a file onto the builder, gets read as dataURL)
   const onDragOverImg = useCallback(e=>e.preventDefault(),[])
   const onDropImg     = useCallback(e=>{
     e.preventDefault()
@@ -109,12 +108,12 @@ export default function PromptBuilder({
             onDragOver={dropContext.dragOver /* fallback; see override below */}
             onDrop={e=>{
               e.stopPropagation()
-              // Each text area uses its own “makeDrop” results:
-              if (key==='developGoal')     dropGoal.drop(e)
-              if (key==='developFeatures') dropFeatures.drop(e)
-              if (key==='developReturnFormat') dropReturn.drop(e)
-              if (key==='developWarnings') dropWarns.drop(e)
-              if (key==='developContext')  dropContext.drop(e)
+              // Route the drop to the correct text area
+              if (key==='developGoal')            dropGoal.drop(e)
+              if (key==='developFeatures')        dropFeatures.drop(e)
+              if (key==='developReturnFormat')    dropReturn.drop(e)
+              if (key==='developWarnings')        dropWarns.drop(e)
+              if (key==='developContext')         dropContext.drop(e)
             }}
           />
           {fileNames[key].length>0 && (
@@ -125,6 +124,16 @@ export default function PromptBuilder({
         </div>
       ))}
 
+      {/* Insert the FilePane right under the CONTEXT field */}
+      {mode==='DEVELOP' && (
+        <FilePane
+          form={form}
+          setForm={setForm}
+          onPasteImage={onImageDrop}
+        />
+      )}
+
+      {/* Thumbnails for any pasted or dropped images */}
       {imagePreviews.length>0 && (
         <div style={{display:'flex',gap:8,flexWrap:'wrap',margin:'8px 0'}}>
           {imagePreviews.map((img,i)=>(
@@ -170,7 +179,7 @@ export default function PromptBuilder({
         disabled={loadingSend}
         onClick={handleSend}
       >
-        {loadingSend?'Sending…':(editingId?'Update':'Send')}
+        {loadingSend ? 'Sending…' : (editingId ? 'Update' : 'Send')}
       </button>
 
       <button
@@ -183,4 +192,3 @@ export default function PromptBuilder({
     </div>
   )
 }
-

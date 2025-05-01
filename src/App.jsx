@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback } from 'preact/hooks';
 import ChatPane        from './chatpane.jsx';
 import Toast           from './components/Toast.jsx';
 import PromptBuilder   from './PromptBuilder.jsx';
-import FilePane        from './FilePane.jsx';
 
 import {
   callApiForText,
@@ -36,10 +35,10 @@ export default function App() {
   const [toast, setToast]           = useState(null);
 
   const [settings, setSettings] = useSettings();
-  const [form, setForm]         = useFormData();  // Shared state across app
+  const [form, setForm]         = useFormData();  // Shared state across the app
   const [mode, setMode]         = useMode();
 
-  // In-memory images
+  // In-memory images (screenshots, etc.)
   const [pendingImages, setPendingImages] = useState([]); // { name, url }[]
 
   const tokenCount = useTokenCount(
@@ -51,7 +50,7 @@ export default function App() {
   const undoableDelete = useUndoableDelete(showToast);
 
   // ─────────────────────────────────────────────────────────────────────────
-  // Load Chat list
+  // Load Chat list on mount
   // ─────────────────────────────────────────────────────────────────────────
   useEffect(() => {
     let alive = true;
@@ -67,6 +66,7 @@ export default function App() {
           messages: []
         }));
         if (!shaped.length) {
+          // create a new chat if none exist
           const c = await createChat({ title: 'New Chat', model: settings.codeType });
           shaped = [{
             id      : c.id,
@@ -139,7 +139,7 @@ CONTEXT: ${form.developContext}`.trim();
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // Chat CRUD
+  // Chat creation example (unchanged from your existing code)
   // ─────────────────────────────────────────────────────────────────────────
   async function handleNewChat() {
     setLS(true);
@@ -166,7 +166,7 @@ CONTEXT: ${form.developContext}`.trim();
       await updateChatTitle(id, newTitle);
     } catch (err) {
       alert('Rename failed: ' + err.message);
-      // rollback
+      // reload from DB on failure
       const rows = await fetchChats();
       setChats(rows.map(r => ({
         id      : r.id,
@@ -176,28 +176,6 @@ CONTEXT: ${form.developContext}`.trim();
         messages: []
       })));
     }
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // Message CRUD
-  // ─────────────────────────────────────────────────────────────────────────
-  function handleDeleteMessage(id) {
-    undoableDelete({
-      itemLabel  : 'Message',
-      deleteFn   : () => deleteMessage(id),
-      undoFn     : async () => {
-        await undoDeleteMessage(id);
-        const msgs = await fetchMessages(currentChatId);
-        setChats(cs => cs.map(c => c.id === currentChatId ? { ...c, messages: msgs } : c));
-      },
-      afterDelete: () => setChats(cs =>
-        cs.map(c =>
-          c.id === currentChatId
-            ? { ...c, messages: c.messages.filter(m => m.id !== id) }
-            : c
-        )
-      )
-    });
   }
 
   function handleDeleteChatUI(id) {
@@ -227,6 +205,31 @@ CONTEXT: ${form.developContext}`.trim();
     });
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // Single message deletion
+  // ─────────────────────────────────────────────────────────────────────────
+  function handleDeleteMessage(id) {
+    undoableDelete({
+      itemLabel  : 'Message',
+      deleteFn   : () => deleteMessage(id),
+      undoFn     : async () => {
+        await undoDeleteMessage(id);
+        const msgs = await fetchMessages(currentChatId);
+        setChats(cs => cs.map(c => c.id === currentChatId ? { ...c, messages: msgs } : c));
+      },
+      afterDelete: () => setChats(cs =>
+        cs.map(c =>
+          c.id === currentChatId
+            ? { ...c, messages: c.messages.filter(m => m.id !== id) }
+            : c
+        )
+      )
+    });
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // "Copy all" helper - merges entire conversation text
+  // ─────────────────────────────────────────────────────────────────────────
   function handleCopyAll() {
     const txt = currentChat.messages
       .map(m =>
@@ -280,7 +283,7 @@ CONTEXT: ${form.developContext}`.trim();
         messages: msgs
       });
 
-      // 6) Save assistant response
+      // 6) Assistant's response
       const assistantMsg = await createMessage({
         chat_id: currentChatId,
         role   : 'assistant',
@@ -315,6 +318,7 @@ CONTEXT: ${form.developContext}`.trim();
   // ─────────────────────────────────────────────────────────────────────────
   return (
     <div className="app-container">
+      {/* Sidebar for chat list */}
       <ChatPane
         chats={chats}
         currentChatId={currentChatId}
@@ -325,7 +329,7 @@ CONTEXT: ${form.developContext}`.trim();
       />
 
       <div className="main-content">
-        {/* Top bar */}
+        {/* Top bar (settings, tokens, etc.) – your existing code for UI */}
         <div className="top-bar">
           <button
             className="button"
@@ -356,7 +360,6 @@ CONTEXT: ${form.developContext}`.trim();
           </div>
         </div>
 
-        {/* Settings panel */}
         {settings.showSettings && (
           <div className="settings-panel">
             <div className="form-group">
@@ -382,9 +385,9 @@ CONTEXT: ${form.developContext}`.trim();
           </div>
         )}
 
-        {/* Main content: chat left, files + prompt right */}
+        {/* Main content: left=messages, right=PromptBuilder */}
         <div className="content-container" style={{ display:'flex' }}>
-          {/* Left: chat messages */}
+          {/* Chat area */}
           <div className="chat-container">
             {currentChat.messages.map((m, idx) => {
               const isAssistant = m.role === 'assistant';
@@ -426,6 +429,7 @@ CONTEXT: ${form.developContext}`.trim();
                             const txt = Array.isArray(m.content)
                               ? m.content.map(c => c.type === 'text' ? c.text : '').join('')
                               : String(m.content);
+                            // example: set the GOAL to the text
                             setForm(f => ({ ...f, developGoal: txt }));
                           }}
                         >
@@ -440,6 +444,7 @@ CONTEXT: ${form.developContext}`.trim();
                       </button>
                     </div>
                   </div>
+
                   <div className="message-content">
                     {Array.isArray(m.content)
                       ? m.content.map((c, j) => (
@@ -460,10 +465,8 @@ CONTEXT: ${form.developContext}`.trim();
             })}
           </div>
 
-          {/* Right: file panel + prompt builder */}
+          {/* Right side: PromptBuilder */}
           <div style={{ flex:'1', display:'flex', flexDirection:'column' }}>
-            <FilePane form={form} setForm={setForm} />
-
             <PromptBuilder
               mode={mode}
               setMode={setMode}

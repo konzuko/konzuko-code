@@ -76,8 +76,8 @@ html, body {
   border-bottom: 1px solid var(--border);
   display: flex; align-items: center;
 }
-
-.content-container { display: flex; flex: 1; overflow: hidden; }
+/* this is the right-side pane */
+.content-container { display: flex; flex: 1; overflow: auto; }
 .chat-container    {
   width: 50%; overflow-y: auto;
   padding: var(--space-md);
