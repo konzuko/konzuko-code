@@ -1,12 +1,10 @@
 import { h } from 'preact';
 import { useState, useCallback } from 'preact/hooks';
+import { asciiTree, dedupe }     from './lib/textUtils.js';  // NEW import
 
 /* ------------------------------------------------------------------------
-   Reuse your existing scanning, dedupe, asciiTree, etc. helper code here
-   (scanDir, asciiTree, fileToText, dedupe). Below is the entire new version
-   with a “Paste Image” button + OS shortcuts text on the right side.
+   Reuse your existing scanning helpers. FILE_LIMIT remains local here.
 ------------------------------------------------------------------------ */
-
 const FILE_LIMIT = 500;
 
 /* Recursively scan a directory handle (File System Access API) */
@@ -26,31 +24,6 @@ async function scanDir(dirHandle, out, remaining, path = '') {
   }
 }
 
-/* Build an ASCII tree from a list of full paths */
-function asciiTree(paths) {
-  const root = {};
-  paths.forEach((p) =>
-    p.split('/').reduce((node, part, i, arr) => {
-      node[part] ??= i === arr.length - 1 ? null : {};
-      return node[part];
-    }, root)
-  );
-  return renderTree(root, '');
-}
-
-function renderTree(node, prefix) {
-  if (!node) return '';
-  const keys = Object.keys(node).sort();
-  return keys
-    .map((k, i) => {
-      const isLast = i === keys.length - 1;
-      const line = `${prefix}${isLast ? '└─ ' : '├─ '}${k}`;
-      const kids = renderTree(node[k], prefix + (isLast ? '   ' : '│  '));
-      return kids ? `${line}\n${kids}` : line;
-    })
-    .join('\n');
-}
-
 /* File → text Promise */
 function fileToText(file) {
   return new Promise((res, rej) => {
@@ -61,55 +34,41 @@ function fileToText(file) {
   });
 }
 
-/* Dedupe by fullPath */
-function dedupe(files) {
-  const seen = new Set();
-  return files.filter((f) => {
-    if (seen.has(f.fullPath)) return false;
-    seen.add(f.fullPath);
-    return true;
-  });
-}
-
 export default function FilePane({
   form,
   setForm,
-  onPasteImage // NEW: (name, dataUrl) => void
+  onPasteImage // (name, dataUrl) => void
 }) {
   const [pendingFiles, setPendingFiles] = useState([]);
   const [adding, setAdding]             = useState(false);
 
   // Merge new batch into pendingFiles
   const mergeBatch = useCallback((batch) => {
-    setPendingFiles((prev) =>
-      dedupe([...prev, ...batch]).slice(0, FILE_LIMIT)
-    );
+    setPendingFiles(prev => dedupe([...prev, ...batch]).slice(0, FILE_LIMIT));
   }, []);
 
   // Append batch details to developContext
-  const appendBatchToContext = useCallback(
-    async (batch) => {
-      if (!batch.length) return;
-      const tree  = asciiTree(batch.map((f) => f.fullPath));
-      const texts = await Promise.all(batch.map(fileToText));
+  const appendBatchToContext = useCallback(async (batch) => {
+    if (!batch.length) return;
 
-      setForm((prev) => {
-        const prevCtx  = prev.developContext || '';
-        const batchNum =
-          (prevCtx.match(/File structure \(added batch/gi) || []).length + 1;
+    const tree  = asciiTree(batch.map(f => f.fullPath));
+    const texts = await Promise.all(batch.map(fileToText));
 
-        let block = `\n\n/* File structure (added batch ${batchNum}):\n${tree}\n*/\n`;
-        batch.forEach((file, idx) => {
-          block += `\n/* ${file.fullPath} */\n\n${texts[idx]}\n`;
-        });
+    setForm(prev => {
+      const prevCtx  = prev.developContext || '';
+      const batchNum =
+        (prevCtx.match(/File structure \(added batch/gi) || []).length + 1;
 
-        return { ...prev, developContext: prevCtx + block };
+      let block = `\n\n/* File structure (added batch ${batchNum}):\n${tree}\n*/\n`;
+      batch.forEach((file, idx) => {
+        block += `\n/* ${file.fullPath} */\n\n${texts[idx]}\n`;
       });
-    },
-    [setForm]
-  );
 
-  // “+ Add Files”
+      return { ...prev, developContext: prevCtx + block };
+    });
+  }, [setForm]);
+
+  /* “+ Add Files” */
   const handleAddFiles = useCallback(async () => {
     if (!window.showOpenFilePicker) {
       alert('Your browser lacks showOpenFilePicker (Chrome 86+, Edge 86+).');
@@ -134,7 +93,7 @@ export default function FilePane({
     }
   }, [mergeBatch, appendBatchToContext, pendingFiles.length]);
 
-  // “+ Add Folder”
+  /* “+ Add Folder” */
   const handleAddFolder = useCallback(async () => {
     if (!window.showDirectoryPicker) {
       alert('Your browser lacks showDirectoryPicker (Chrome 86+).');
@@ -154,7 +113,7 @@ export default function FilePane({
     }
   }, [mergeBatch, appendBatchToContext, pendingFiles.length]);
 
-  // Clear all
+  /* Clear all */
   const handleClearAll = useCallback(() => {
     if (
       !confirm(
@@ -163,10 +122,10 @@ export default function FilePane({
     ) return;
 
     setPendingFiles([]);
-    setForm((prev) => ({ ...prev, developContext: '' }));
+    setForm(prev => ({ ...prev, developContext: '' }));
   }, [setForm]);
 
-  // “Paste Image” button
+  /* “Paste Image” button */
   const handlePasteClipboard = useCallback(async () => {
     if (!navigator.clipboard || !navigator.clipboard.read) {
       alert('Clipboard API not supported');
@@ -195,11 +154,12 @@ export default function FilePane({
     }
   }, [onPasteImage]);
 
+  /* UI ------------------------------------------------------------------- */
   return (
     <div className="file-pane-container">
       <h2>Project Files</h2>
 
-      {/* show a notice if we have persisted code */}
+      {/* notice if persisted code present */}
       {/File structure \(added batch/i.test(form.developContext) && (
         <div
           style={{
@@ -289,7 +249,7 @@ export default function FilePane({
         </strong>
         {pendingFiles.length > 0 && (
           <ul className="file-pane-filelist">
-            {pendingFiles.map((f) => (
+            {pendingFiles.map(f => (
               <li key={f.fullPath}>{f.fullPath}</li>
             ))}
           </ul>
