@@ -1,10 +1,9 @@
-
 import { h } from 'preact';
 import { useState, useCallback } from 'preact/hooks';
 
 /* ------------------------------------------------------------------------
    Reuse your existing scanning, dedupe, asciiTree, etc. helper code here
-   (scanDir, asciiTree, fileToText, dedupe).  Below is the entire new version
+   (scanDir, asciiTree, fileToText, dedupe). Below is the entire new version
    with a “Paste Image” button + OS shortcuts text on the right side.
 ------------------------------------------------------------------------ */
 

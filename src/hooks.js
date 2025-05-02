@@ -53,14 +53,7 @@ export function useFormData() {
 }
 
 /*──────────────────────────────────────────────────────────────────────────────
-  Recursive BFS traversal, using BOTH:
-  1) File System Access API → handle.getAsFileSystemHandle().
-  2) webkitGetAsEntry → readEntries().
-  3) Fallback to item.getAsFile() for browsers w/o directory support.
-
-  The gatherAllDroppedFiles(...) function loops every dropped item, tries BFS
-  approach for directories, and adds all discovered File objects into allFiles.
-  You can drop multiple directories + single files in a single operation.
+  For dropping directories & multiple files at once
 ──────────────────────────────────────────────────────────────────────────────*/
 
 /** BFS for File System Access API: gather file handles recursively. */
@@ -79,7 +72,6 @@ async function bfsTraverseFsHandle(rootHandle, outFiles = []) {
           file.fullPath = `${handle.name}/${file.name}`
           outFiles.push(file)
         } else {
-          // Another directory
           child.fullPath = `${handle.name}/`
           queue.push(child)
         }
@@ -120,7 +112,6 @@ function fileEntryToFile(entry) {
   return new Promise((resolve, reject) => {
     entry.file(
       file => {
-        // If entry knows its path, store it
         file.fullPath = entry.fullPath || file.name
         resolve(file)
       },
@@ -208,10 +199,6 @@ export function useFileDrop(onText) {
 
   return { dragOver, drop }
 }
-
-/*──────────────────────────────────────────────────────────────────────────────
-  The other hooks: useMode, useTokenCount, useUndoableDelete
-──────────────────────────────────────────────────────────────────────────────*/
 
 export function useMode() {
   const ALLOWED = ['DEVELOP','COMMIT','DIAGNOSE']

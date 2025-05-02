@@ -6,10 +6,12 @@ export default function PromptBuilder({
   mode, setMode,
   form, setForm,
   loadingSend, editingId,
-  handleSend, handleCopyAll,
-  onImageDrop,    // (name, dataUrl) => void
-  onRemoveImage,  // idx => void
-  imagePreviews   // [{name,url}]
+  handleSend,
+  // We receive handleCopyAll here (still used if we want, but button is relocated)
+  handleCopyAll,
+  onImageDrop,
+  onRemoveImage,
+  imagePreviews
 }) {
   // file‐name lists per text field
   const FIELD_KEYS = [
@@ -62,7 +64,7 @@ export default function PromptBuilder({
   const dropWarns    = makeDrop('developWarnings')
   const dropContext  = makeDrop('developContext')
 
-  // Container-level image drop (drag a file onto the builder, gets read as dataURL)
+  // Container-level image drop
   const onDragOverImg = useCallback(e=>e.preventDefault(),[])
   const onDropImg     = useCallback(e=>{
     e.preventDefault()
@@ -174,20 +176,13 @@ export default function PromptBuilder({
         </div>
       )}
 
+      {/* Removed the "Copy All Text" button from here */}
       <button
         className="button send-button"
         disabled={loadingSend}
         onClick={handleSend}
       >
         {loadingSend ? 'Sending…' : (editingId ? 'Update' : 'Send')}
-      </button>
-
-      <button
-        className="button"
-        style={{marginTop:'8px'}}
-        onClick={handleCopyAll}
-      >
-        Copy All Text
       </button>
     </div>
   )

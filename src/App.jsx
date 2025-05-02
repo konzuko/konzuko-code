@@ -139,7 +139,7 @@ CONTEXT: ${form.developContext}`.trim();
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // Chat creation example (unchanged from your existing code)
+  // Chat creation example
   // ─────────────────────────────────────────────────────────────────────────
   async function handleNewChat() {
     setLS(true);
@@ -329,7 +329,7 @@ CONTEXT: ${form.developContext}`.trim();
       />
 
       <div className="main-content">
-        {/* Top bar (settings, tokens, etc.) – your existing code for UI */}
+        {/* Top bar (no code selection) + we move token counter + copy button here */}
         <div className="top-bar">
           <button
             className="button"
@@ -340,23 +340,23 @@ CONTEXT: ${form.developContext}`.trim();
           <span style={{ margin:'0 1em', fontWeight:'bold' }}>
             konzuko-code
           </span>
-          <select
-            value={settings.codeType}
-            onChange={e => setSettings(s => ({ ...s, codeType:e.target.value }))}
-            style={{ marginRight:'1em' }}
-          >
-            <option value="javascript">JavaScript</option>
-            <option value="python">Python</option>
-            <option value="hugo">Hugo</option>
-            <option value="go">Go</option>
-          </select>
+          {/* Removed the code-type <select> */}
           <div style={{
             marginLeft:'auto',
-            padding:'4px 12px',
-            background:'#4f8eff',
-            borderRadius:4
+            display:'flex',
+            alignItems:'center',
+            gap:'0.5em'
           }}>
-            Tokens: {tokenCount.toLocaleString()}
+            <div style={{
+              padding:'4px 12px',
+              background:'#4f8eff',
+              borderRadius:4
+            }}>
+              Tokens: {tokenCount.toLocaleString()}
+            </div>
+            <button className="button" onClick={handleCopyAll}>
+              Copy All Text
+            </button>
           </div>
         </div>
 
@@ -475,7 +475,7 @@ CONTEXT: ${form.developContext}`.trim();
               loadingSend={loadingSend}
               editingId={editingId}
               handleSend={handleSend}
-              handleCopyAll={handleCopyAll}
+              handleCopyAll={handleCopyAll} 
               onImageDrop={(name, url) =>
                 setPendingImages(a => [...a, { name, url }])
               }

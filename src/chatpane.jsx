@@ -1,3 +1,4 @@
+/* Content from chatpane.jsx */
 // src/chatpane.jsx
 
 import { useState, useMemo } from 'preact/hooks';
@@ -65,7 +66,7 @@ export default function ChatPane({
   currentChatId,
   onSelectChat,
   onNewChat,
-  onTitleUpdate,    /* ← now required */
+  onTitleUpdate,    
   onDeleteChat
 }) {
   const [collapsed, setCollapsed] = useState(false);

@@ -7,8 +7,8 @@ function buildTree(paths) {
   paths.forEach(p => {
     const parts = p.split('/').filter(Boolean)
     let cur = root
-    parts.forEach((part, i) => {
-      if (!cur[part]) cur[part] = i === parts.length - 1 ? null : {}
+    parts.forEach((part, i, arr) => {
+      if (!cur[part]) cur[part] = i === arr.length - 1 ? null : {}
       cur = cur[part] || {}
     })
   })
