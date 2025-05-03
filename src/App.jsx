@@ -377,9 +377,10 @@ CONTEXT: ${form.developContext}`.trim();
                 value={settings.model}
                 onChange={e => setSettings(s => ({ ...s, model:e.target.value }))}
               >
-                <option value="gpt-4o">gpt-4o</option>
-                <option value="gpt-3.5-turbo">gpt-3.5-turbo</option>
-                <option value="o3-2025-04-16">o3-2025-04-16</option>
+                <option value="o4-mini-2025-04-16">o4-mini-2025-04-16 (default)</option>
+                <option value="o1">o1 (slower, more reasoning)</option>
+                <option value="o3-2025-04-16">o3-2025-04-16 (high-end reasoning)</option>
+                <option value="gpt-4.5-preview-2025-02-27">gpt-4.5-preview-2025-02-27 (newest)</option>
               </select>
             </div>
           </div>
