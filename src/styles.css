@@ -254,7 +254,7 @@ html, body {
 @media (max-width: 768px) {
   .content-container { flex-direction: column; }
   .chat-container,
-  .template-container { width: 100%; max-width: 100%; }
+  .template-container { width: 100%; max-width: 100%;overflow-y: auto; }
   .message { width: 90%; }
 }
 
