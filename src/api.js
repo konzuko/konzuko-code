@@ -39,11 +39,11 @@ export async function callApiForText({
       response_format: { type:'text' }
     }
 
-    // if model is an O3/O1 variant, add reasoning_effort: 'high'
+    // if model is an o1/o3/o4 variant, add reasoning_effort: 'high'
     if (
       model.includes('o3-mini') ||
       model.includes('o3') ||
-      model.includes('o1')
+      model.includes('o1') ||
       model.includes('o4-mini')
     ) {
       body.reasoning_effort = 'high'
