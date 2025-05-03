@@ -1,4 +1,3 @@
-// src/api.js
 import { supabase }          from './lib/supabase.js'
 import { OPENAI_TIMEOUT_MS } from './config.js'
 
@@ -15,13 +14,18 @@ export async function getCurrentUser ({ forceRefresh = false } = {}) {
 }
 
 /** 
- * Send chat.messages straight through (including image_url objects)
- * to a vision‐capable model (e.g. "gpt-4o").
+ * Send chat.messages (including image_url objects)
+ * to a vision‐capable model (e.g. "gpt-4o"), and if it's one of your 
+ * mini/O1/O3 models, request a higher reasoning effort.
  */
 export async function callApiForText({
-  messages, apiKey, model = 'gpt-4o', signal
+  messages,
+  apiKey,
+  model = 'gpt-4o',
+  signal
 }) {
   try {
+    // re‐format each message into [{type, text}, ...]
     const formatted = messages.map(m => ({
       role:    m.role === 'system' ? 'developer' : m.role,
       content: Array.isArray(m.content)
@@ -32,26 +36,37 @@ export async function callApiForText({
     const body = {
       model,
       messages: formatted,
-      response_format: { type:'text' },
-      // you can add reasoning_effort if you like
+      response_format: { type:'text' }
+    }
+
+    // if model is an O3/O1 variant, add reasoning_effort: 'high'
+    if (
+      model.includes('o3-mini') ||
+      model.includes('o3') ||
+      model.includes('o1')
+      model.includes('o4-mini')
+    ) {
+      body.reasoning_effort = 'high'
     }
 
     const ctrl  = new AbortController()
     const timer = setTimeout(() => ctrl.abort(), OPENAI_TIMEOUT_MS)
     const res = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
+      method:  'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization : `Bearer ${apiKey}`
+        Authorization:  `Bearer ${apiKey}`
       },
-      body: JSON.stringify(body),
+      body:   JSON.stringify(body),
       signal: signal ?? ctrl.signal
     })
     clearTimeout(timer)
 
     if (!res.ok) {
       let txt = await res.text()
-      try { txt = JSON.parse(txt).error?.message || txt } catch {}
+      try {
+        txt = JSON.parse(txt).error?.message || txt
+      } catch {}
       return { error: `HTTP ${res.status}: ${txt}` }
     }
 
@@ -61,7 +76,9 @@ export async function callApiForText({
       : { content: data.choices?.[0]?.message?.content ?? '' }
   }
   catch (err) {
-    if (err.name === 'AbortError') return { error: 'Request timed out' }
+    if (err.name === 'AbortError') {
+      return { error: 'Request timed out' }
+    }
     return { error: err.message }
   }
 }
@@ -79,12 +96,13 @@ export async function fetchChats() {
   return data
 }
 
-export async function createChat({ title='New Chat', model='javascript' }) {
+export async function createChat({ title = 'New Chat', model = 'javascript' }) {
   const user = await getCurrentUser()
   const { data, error } = await supabase
     .from('chats')
     .insert({ user_id: user.id, title, code_type: model })
-    .select().single()
+    .select()
+    .single()
   if (error) throw error
   return data
 }
@@ -121,8 +139,8 @@ export async function undoDeleteChat(id) {
     .update({ deleted_at: null })
     .eq('chat_id', id)
     .gt('deleted_at', cutoff)
-  if (msgErr) throw msgErr
 
+  if (msgErr) throw msgErr
   return { success: true }
 }
 
@@ -142,7 +160,8 @@ export async function createMessage({ chat_id, role, content }) {
   const { data, error } = await supabase
     .from('messages')
     .insert({ chat_id, role, content })
-    .select().single()
+    .select()
+    .single()
   if (error) throw error
   return data
 }
@@ -152,7 +171,8 @@ export async function updateMessage(id, newContent) {
     .from('messages')
     .update({ content: [{ type:'text', text:newContent }] })
     .eq('id', id)
-    .select().single()
+    .select()
+    .single()
   if (error) throw error
   return data
 }
