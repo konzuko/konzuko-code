@@ -1,6 +1,10 @@
-import { useEffect } from 'preact/hooks';
+/*
+   Updated so if the undo fails we don’t close the toast immediately.
+   The user sees the error from safeAlert and can possibly retry.
+*/
 
-// safeAlert for blocked popups
+import { useEffect, useState } from 'preact/hooks';
+
 function safeAlert(msg) {
   try {
     alert(msg);
@@ -11,22 +15,39 @@ function safeAlert(msg) {
 
 export default function Toast({
   text,
-  onAction,       // optional async fn to undo or retry
+  onAction,   // async fn for “Undo” or retry
   onClose,
   duration = 30000
 }) {
-  // Auto-dismiss after <duration> ms
+  const [dismissed, setDismissed] = useState(false);
+
+  // Auto‐dismiss after <duration> if user doesn’t click “Undo”
   useEffect(() => {
-    const id = setTimeout(onClose, duration);
+    const id = setTimeout(() => {
+      setDismissed(true);
+      onClose();
+    }, duration);
     return () => clearTimeout(id);
   }, [onClose, duration]);
 
-  // wrap the undo or retry in a try/catch w/ safeAlert
-  const handleAction = () => {
-    Promise.resolve(onAction?.())
-      .catch(err => safeAlert(err.message || 'Unknown error'))
-      .finally(onClose);
+  // We only close after a successful undo action
+  const handleAction = async () => {
+    if (!onAction) {
+      // if no action, just close
+      onClose();
+      return;
+    }
+    try {
+      await onAction();
+      onClose();
+    } catch (err) {
+      // show error, but keep toast open
+      safeAlert(err.message || 'Unknown error');
+      console.error('Undo failed:', err);
+    }
   };
+
+  if (dismissed) return null;
 
   return (
     <div
@@ -52,7 +73,9 @@ export default function Toast({
         </button>
       )}
 
-      <button className="button icon-button" onClick={onClose}>✕</button>
+      <button className="button icon-button" onClick={() => { setDismissed(true); onClose(); }}>
+        ✕
+      </button>
     </div>
   );
 }

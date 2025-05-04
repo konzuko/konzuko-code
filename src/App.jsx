@@ -1,4 +1,3 @@
-
 import { useState, useEffect, useCallback } from 'preact/hooks';
 import ChatPane        from './chatpane.jsx';
 import Toast           from './components/Toast.jsx';
@@ -31,8 +30,10 @@ import {
 import { queue } from './lib/TaskQueue.js';
 
 /* ---------------------------------------------------------
-   Single global runTask + queueSetLS for loading states
-   safeAlert for blocked alert fallback
+   Single global runTask + queueSetLS for loading states.
+   safeAlert for fallback if alert is blocked.
+   They are stable top‐level functions, so we leave them
+   out of useEffect dependencies.
 ---------------------------------------------------------*/
 let queueSetLS = () => {};
 function safeAlert(msg) {
@@ -57,7 +58,7 @@ export default function App() {
   const [loadingChats, setLC]       = useState(true);
   const [loadingSend, setLS]        = useState(false);
 
-  // inline editing
+  // Inline editing
   const [editingId, setEditing]     = useState(null);
   const [editText,  setEditText]    = useState('');
 
@@ -76,7 +77,7 @@ export default function App() {
   const showToast      = useCallback((text, onUndo) => setToast({ text, onUndo }), []);
   const undoableDelete = useUndoableDelete(showToast);
 
-  // Keep runTask’s loading state in sync with our setLS
+  // Keep runTask’s loading state in sync with our local setLS
   useEffect(() => {
     queueSetLS = setLS;
   }, [setLS]);
@@ -88,7 +89,7 @@ export default function App() {
   }, [currentChatId]);
 
   // ─────────────────────────────────────────────────────────────────────────
-  // 1) Load chats
+  // 1) Load chats once at startup or when codeType changes
   // ─────────────────────────────────────────────────────────────────────────
   useEffect(() => {
     let alive = true;
@@ -103,7 +104,7 @@ export default function App() {
           model   : r.code_type,
           messages: []
         }));
-        // If user has zero chats, create one
+
         if (!shaped.length) {
           const c = await createChat({ title: 'New Chat', model: settings.codeType });
           shaped = [{
@@ -125,10 +126,11 @@ export default function App() {
       }
     });
     return () => { alive = false; };
-  }, [settings.codeType, safeAlert, runTask]);
+    // We do NOT include safeAlert or runTask in deps, as they are stable top-level
+  }, [settings.codeType]);
 
   // ─────────────────────────────────────────────────────────────────────────
-  // 2) Load messages for current chat
+  // 2) Load messages for currentChatId
   // ─────────────────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!currentChatId) return;
@@ -142,12 +144,12 @@ export default function App() {
       })
       .catch(err => safeAlert('Failed to fetch messages: ' + err.message));
     return () => { alive = false; };
-  }, [currentChatId, safeAlert]);
+  }, [currentChatId]);
 
   const currentChat = chats.find(c => c.id === currentChatId) ?? { messages: [] };
 
   // ─────────────────────────────────────────────────────────────────────────
-  // Helper: build user prompt string
+  // HELPER: build user prompt from form data
   // ─────────────────────────────────────────────────────────────────────────
   function buildUserPrompt() {
     if (mode === 'DEVELOP') {
@@ -201,13 +203,13 @@ CONTEXT: ${form.developContext}`.trim();
   }
 
   async function handleRenameChat(id, newTitle) {
-    // rename is typically quick, no queue needed
+    // rename is usually quick, no queue needed
     setChats(cs => cs.map(c => c.id === id ? { ...c, title: newTitle } : c));
     try {
       await updateChatTitle(id, newTitle);
     } catch (err) {
       safeAlert('Rename failed: ' + err.message);
-      // reload from DB on failure
+      // reload from DB if it fails
       const rows = await fetchChats();
       setChats(rows.map(r => ({
         id      : r.id,
@@ -221,12 +223,11 @@ CONTEXT: ${form.developContext}`.trim();
 
   function handleDeleteChatUI(id) {
     if (loadingSend) return;
-    const anchorChatId = currentChatId; // store for closure
+    const anchorChatId = currentChatId; // closure
     runTask(() =>
       undoableDelete({
         itemLabel: 'Chat',
         deleteFn: () => deleteChat(id),
-        // Wrap undo in runTask
         undoFn: () => runTask(async () => {
           await undoDeleteChat(id);
           const rows = await fetchChats();
@@ -238,24 +239,26 @@ CONTEXT: ${form.developContext}`.trim();
             messages: []
           }));
           setChats(shaped);
-          // Focus back on this chat if still present
+          // Focus back on this chat if it’s really restored
           if (shaped.some(c => c.id === id)) {
             setCurrent(id);
           } else {
-            // If it's truly back, but older than top, we maybe pick shaped[0]
+            // fallback to first if chat no longer found
             setCurrent(shaped[0]?.id ?? null);
           }
         }),
-        afterDelete: () => setChats(cs => {
-          const filtered = cs.filter(c => c.id !== id);
-          // If we just removed the currently open chat, pick next
-          if (anchorChatId === id) {
-            return filtered.length
-              ? (setCurrent(filtered[0].id), filtered)
-              : (setCurrent(null), filtered);
-          }
-          return filtered;
-        })
+        afterDelete: () => {
+          // Move side effects out of return statement
+          setChats(cs => {
+            const filtered = cs.filter(c => c.id !== id);
+            // If we just removed the open chat, pick next
+            if (anchorChatId === id) {
+              if (filtered.length) setCurrent(filtered[0].id);
+              else setCurrent(null);
+            }
+            return filtered;
+          });
+        }
       })
     );
   }
@@ -269,12 +272,11 @@ CONTEXT: ${form.developContext}`.trim();
       setEditText('');
     }
     if (loadingSend) return;
-    const anchorChatId = currentChatId; // store in case user changes chat
+    const anchorChatId = currentChatId;
     runTask(() =>
       undoableDelete({
         itemLabel: 'Message',
         deleteFn: () => deleteMessage(id),
-        // wrap in runTask to ensure loading & error handling
         undoFn: () => runTask(async () => {
           await undoDeleteMessage(id);
           const msgs = await fetchMessages(anchorChatId);
@@ -286,13 +288,16 @@ CONTEXT: ${form.developContext}`.trim();
             )
           );
         }),
-        afterDelete: () => setChats(cs =>
-          cs.map(c =>
-            c.id === anchorChatId
-              ? { ...c, messages: c.messages.filter(m => m.id !== id) }
-              : c
-          )
-        )
+        afterDelete: () => {
+          setChats(cs => {
+            const filteredMsgs = cs.map(c =>
+              c.id === anchorChatId
+                ? { ...c, messages: c.messages.filter(m => m.id !== id) }
+                : c
+            );
+            return filteredMsgs;
+          });
+        }
       })
     );
   }
@@ -318,18 +323,18 @@ CONTEXT: ${form.developContext}`.trim();
     if (!editingId || loadingSend) return;
     const anchorChatId = currentChatId;
     runTask(async () => {
-      const cObj = chats.find(c => c.id === anchorChatId);
-      if (!cObj) throw new Error('Chat not found');
-      const anchor = cObj.messages.find(x => x.id === editingId);
+      // re-fetch so we have fresh messages
+      const msgsNow = await fetchMessages(anchorChatId);
+      const anchor  = msgsNow.find(x => x.id === editingId);
       if (!anchor) throw new Error('Message not found for editing');
 
-      // 1) Update the existing message
+      // 1) update the existing message
       await updateMessage(editingId, editText);
 
-      // 2) Archive anything after
+      // 2) archive anything after
       await archiveMessagesAfter(anchorChatId, anchor.created_at);
 
-      // 3) Re-fetch + LLM
+      // 3) re-fetch + LLM
       const msgs = await fetchMessages(anchorChatId);
       const { content, error } = await callApiForText({
         apiKey  : settings.apiKey,
@@ -337,7 +342,7 @@ CONTEXT: ${form.developContext}`.trim();
         messages: msgs
       });
 
-      // 4) Insert new assistant
+      // 4) insert new assistant
       const assistantMsg = await createMessage({
         chat_id: anchorChatId,
         role   : 'assistant',
@@ -345,7 +350,7 @@ CONTEXT: ${form.developContext}`.trim();
       });
       const newAssistantId = assistantMsg.id;
 
-      // 5) Local update
+      // 5) local update
       setChats(cs =>
         cs.map(c =>
           c.id === anchorChatId
@@ -354,7 +359,7 @@ CONTEXT: ${form.developContext}`.trim();
         )
       );
 
-      // 6) Toast with full revert
+      // 6) Toast for undo
       showToast('Archived messages. Undo?', () =>
         runTask(async () => {
           await undoArchiveMessagesAfter(anchorChatId, anchor.created_at);
@@ -371,7 +376,6 @@ CONTEXT: ${form.developContext}`.trim();
         })
       );
 
-      // 7) Cleanup
       setEditing(null);
       setEditText('');
     });
@@ -384,15 +388,15 @@ CONTEXT: ${form.developContext}`.trim();
     if (loadingSend) return;
     const anchorChatId = currentChatId;
     runTask(async () => {
-      const cObj = chats.find(c => c.id === anchorChatId);
-      if (!cObj) throw new Error('Chat not found');
-      const anchor = cObj.messages.find(x => x.id === id);
+      // re-fetch so we have fresh messages
+      const msgsNow = await fetchMessages(anchorChatId);
+      const anchor  = msgsNow.find(x => x.id === id);
       if (!anchor) throw new Error('Message not found');
 
-      // 1) Archive everything after anchor
+      // 1) archive everything after anchor
       await archiveMessagesAfter(anchorChatId, anchor.created_at);
 
-      // 2) Re-fetch
+      // 2) re-fetch
       const msgs = await fetchMessages(anchorChatId);
 
       // 3) LLM
@@ -419,7 +423,7 @@ CONTEXT: ${form.developContext}`.trim();
         )
       );
 
-      // 6) Undo toast
+      // 6) Toast for undo
       showToast('Archived messages. Undo?', () =>
         runTask(async () => {
           await undoArchiveMessagesAfter(anchorChatId, anchor.created_at);
@@ -477,7 +481,7 @@ CONTEXT: ${form.developContext}`.trim();
       const assistantMsg = await createMessage({
         chat_id: anchorChatId,
         role   : 'assistant',
-        content: [{ type:'text', text: error ? `Error: ${error}` : content }]
+        content: [{ type: 'text', text: error ? `Error: ${error}` : content }]
       });
 
       // local update + reset form
@@ -520,7 +524,8 @@ CONTEXT: ${form.developContext}`.trim();
         onNewChat     ={handleNewChat}
         onTitleUpdate ={handleRenameChat}
         onDeleteChat  ={handleDeleteChatUI}
-        disabled      ={loadingSend /* block chat switch mid-task */}
+        // disable chat switching & newChat if a queue task is in flight
+        disabled      ={loadingSend}
       />
 
       <div className="main-content">
