@@ -1,14 +1,11 @@
-/* Content from chatpane.jsx */
-// src/chatpane.jsx
+/* src/chatpane.jsx */
 
 import { useState, useMemo } from 'preact/hooks';
 
-/* Single chat item in the sidebar */
-function ChatItem({ chat, isActive, onSelectChat, onTitleUpdate, onDeleteChat }) {
+function ChatItem({ chat, isActive, onSelectChat, onTitleUpdate, onDeleteChat, disabled }) {
   const [editing, setEditing] = useState(false);
   const [title, setTitle]     = useState(chat.title);
 
-  // display local timezone
   const ts    = new Date(chat.started);
   const date  = ts.toLocaleDateString();
   const time  = ts.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -23,25 +20,23 @@ function ChatItem({ chat, isActive, onSelectChat, onTitleUpdate, onDeleteChat })
   return (
     <div
       className={`chat-item ${isActive ? 'active' : ''}`}
-      onClick={() => onSelectChat(chat.id)}
+      onClick={() => {
+        // disable switching if disabled=true
+        if (!disabled) onSelectChat(chat.id);
+      }}
     >
       <div style={{ fontWeight: 'bold' }}>
-        {editing
-          ? (
-            <input
-              value={title}
-              onChange={e => setTitle(e.target.value)}
-              onBlur={finishEdit}
-              onKeyPress={e => e.key === 'Enter' && finishEdit()}
-              autoFocus
-            />
-          )
-          : (
-            <span onDoubleClick={() => setEditing(true)}>
-              {chat.title}
-            </span>
-          )
-        }
+        {editing ? (
+          <input
+            value={title}
+            onChange={e => setTitle(e.target.value)}
+            onBlur={finishEdit}
+            onKeyPress={e => e.key === 'Enter' && finishEdit()}
+            autoFocus
+          />
+        ) : (
+          <span onDoubleClick={() => setEditing(true)}>{chat.title}</span>
+        )}
         <button
           className="button icon-button"
           onClick={e => {
@@ -49,6 +44,7 @@ function ChatItem({ chat, isActive, onSelectChat, onTitleUpdate, onDeleteChat })
             onDeleteChat(chat.id);
           }}
           title="Delete Chat"
+          disabled={disabled}
         >
           Del
         </button>
@@ -60,14 +56,14 @@ function ChatItem({ chat, isActive, onSelectChat, onTitleUpdate, onDeleteChat })
   );
 }
 
-/* Sidebar container */
 export default function ChatPane({
   chats,
   currentChatId,
   onSelectChat,
   onNewChat,
-  onTitleUpdate,    
-  onDeleteChat
+  onTitleUpdate,
+  onDeleteChat,
+  disabled = false
 }) {
   const [collapsed, setCollapsed] = useState(false);
 
@@ -86,7 +82,7 @@ export default function ChatPane({
           {collapsed ? '>' : '<'}
         </button>
         {!collapsed && (
-          <button className="button" onClick={onNewChat}>
+          <button className="button" onClick={onNewChat} disabled={disabled}>
             New Chat
           </button>
         )}
@@ -94,12 +90,13 @@ export default function ChatPane({
 
       {!collapsed && sorted.map(chat => (
         <ChatItem
-          key={chat.id}
-          chat={chat}
-          isActive={chat.id === currentChatId}
-          onSelectChat={onSelectChat}
+          key          ={chat.id}
+          chat         ={chat}
+          isActive     ={chat.id === currentChatId}
+          onSelectChat ={onSelectChat}
           onTitleUpdate={onTitleUpdate}
-          onDeleteChat={onDeleteChat}
+          onDeleteChat ={onDeleteChat}
+          disabled     ={disabled}
         />
       ))}
     </div>

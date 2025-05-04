@@ -1,14 +1,21 @@
-/* -------------------------------------------------------------------------
-   src/components/Toast.jsx
-   Reusable toast w/ auto-dismiss + optional async “Undo”
----------------------------------------------------------------------------*/
+/* src/components/Toast.jsx */
+
 import { useEffect } from 'preact/hooks';
+
+// Copy same safeAlert logic
+function safeAlert(msg) {
+  try {
+    alert(msg);
+  } catch (e) {
+    console.error('Alert blocked in toast, fallback console:', msg, e);
+  }
+}
 
 export default function Toast({
   text,
-  onAction,          // optional async fn to undo / retry
+  onAction,        // optional async fn to undo / retry
   onClose,
-  duration = 30_000  // ms before auto-dismiss
+  duration = 30000
 }) {
   // auto-dismiss after <duration>
   useEffect(() => {
@@ -16,20 +23,20 @@ export default function Toast({
     return () => clearTimeout(id);
   }, [onClose, duration]);
 
-  // wrap async action & catch errors
+  // wrap async action & catch errors with safeAlert
   const handleAction = () => {
     Promise.resolve(onAction?.())
-      .catch(err => alert(err.message || 'Unknown error'))
+      .catch(err => safeAlert(err.message || 'Unknown error'))
       .finally(onClose);
   };
 
   return (
     <div
       style={{
-        position:    'fixed',
-        bottom:      20,
-        left:        '50%',
-        transform:   'translateX(-50%)',
+        position: 'fixed',
+        bottom:   20,
+        left:     '50%',
+        transform:'translateX(-50%)',
         background:  '#333',
         color:       '#fff',
         padding:     '10px 18px',
