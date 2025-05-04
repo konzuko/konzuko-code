@@ -1,5 +1,3 @@
-/* src/chatpane.jsx */
-
 import { useState, useMemo } from 'preact/hooks';
 
 function ChatItem({ chat, isActive, onSelectChat, onTitleUpdate, onDeleteChat, disabled }) {

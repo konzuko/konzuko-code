@@ -1,29 +1,27 @@
-/* src/components/Toast.jsx */
-
 import { useEffect } from 'preact/hooks';
 
-// Copy same safeAlert logic
+// safeAlert for blocked popups
 function safeAlert(msg) {
   try {
     alert(msg);
   } catch (e) {
-    console.error('Alert blocked in toast, fallback console:', msg, e);
+    console.error('Alert blocked in toast, fallback console error:', msg, e);
   }
 }
 
 export default function Toast({
   text,
-  onAction,        // optional async fn to undo / retry
+  onAction,       // optional async fn to undo or retry
   onClose,
   duration = 30000
 }) {
-  // auto-dismiss after <duration>
+  // Auto-dismiss after <duration> ms
   useEffect(() => {
     const id = setTimeout(onClose, duration);
     return () => clearTimeout(id);
   }, [onClose, duration]);
 
-  // wrap async action & catch errors with safeAlert
+  // wrap the undo or retry in a try/catch w/ safeAlert
   const handleAction = () => {
     Promise.resolve(onAction?.())
       .catch(err => safeAlert(err.message || 'Unknown error'))
