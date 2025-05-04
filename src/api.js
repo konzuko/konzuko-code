@@ -1,6 +1,3 @@
-
-// src/api.js
-
 import { supabase }          from './lib/supabase.js'
 import { OPENAI_TIMEOUT_MS } from './config.js'
 
@@ -27,7 +24,7 @@ export async function getCurrentUser({ forceRefresh = false } = {}) {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// OPENAI: Chat completion with vision blocks. Defaults to model="o1".
+// OPENAI: Chat completion with vision blocks. 
 // ───────────────────────────────────────────────────────────────────────────
 /**
  * @param {Object} opts
@@ -53,7 +50,7 @@ export async function callApiForText({
       : [{ type: 'text', text: String(m.content) }]
   }))
 
-  // 2) Build request body. Use an object for response_format (per the new OpenAI requirement)
+  // 2) Build request body. Use an object for response_format
   const body = {
     model,
     messages: formatted,
@@ -87,7 +84,7 @@ export async function callApiForText({
     clearTimeout(timeoutId)
 
     if (!res.ok) {
-      // 5) HTTP error; parse text or JSON
+      // parse text or JSON
       let txt = await res.text()
       try {
         const parsed = JSON.parse(txt)
@@ -100,13 +97,11 @@ export async function callApiForText({
       }
     }
 
-    // 6) Parse JSON
     const data = await res.json()
     if (data.error) {
       return { error: data.error.message }
     }
 
-    // 7) Return the content from the first choice
     return {
       content: data.choices?.[0]?.message?.content || ''
     }
@@ -221,12 +216,15 @@ export async function updateMessage(id, newContent) {
   return data
 }
 
-export async function archiveMessagesAfter(chat_id, message_id) {
+/*
+   Updated to archive by created_at rather than numeric id:
+*/
+export async function archiveMessagesAfter(chat_id, anchorCreatedAt) {
   const { error } = await supabase
     .from('messages')
     .update({ deleted_at: isoNow() })
     .eq('chat_id', chat_id)
-    .gt('id', message_id)
+    .gt('created_at', anchorCreatedAt)
   if (error) throw error
   return { success: true }
 }
