@@ -1,11 +1,3 @@
-import { supabase } from '../lib/supabase.js'
-// Wait—wrong snippet; we should insert the correct code:
-
-/* Oops, let's correct that. The file is brand new and does not import supabase.
-   It's just our local queue. */
-
---------------------------------------------------------------------------------
-/* src/lib/TaskQueue.js */
 
 export class TaskQueue {
   constructor() {

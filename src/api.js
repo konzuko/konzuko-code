@@ -1,3 +1,4 @@
+
 import { supabase }          from './lib/supabase.js'
 import { OPENAI_TIMEOUT_MS } from './config.js'
 
@@ -24,7 +25,7 @@ export async function getCurrentUser({ forceRefresh = false } = {}) {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// OPENAI: Chat completion with vision blocks. 
+// OPENAI: Chat completion with vision blocks.
 // ───────────────────────────────────────────────────────────────────────────
 /**
  * @param {Object} opts
@@ -229,6 +230,17 @@ export async function archiveMessagesAfter(chat_id, anchorCreatedAt) {
   return { success: true }
 }
 
+// NEW: Re-add the missing function
+export async function undoArchiveMessagesAfter(chat_id, anchorCreatedAt) {
+  const { error } = await supabase
+    .from('messages')
+    .update({ deleted_at: null })
+    .eq('chat_id', chat_id)
+    .gt('created_at', anchorCreatedAt)
+  if (error) throw error
+  return { success: true }
+}
+
 export async function deleteMessage(id) {
   const { error } = await supabase
     .from('messages')
@@ -249,3 +261,4 @@ export async function undoDeleteMessage(id) {
   if (error) throw error
   return { success: true }
 }
+
