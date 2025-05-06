@@ -1,7 +1,8 @@
+
 import { useState, useEffect, useCallback } from 'preact/hooks';
 import ChatPane        from './chatpane.jsx';
-import Toast           from './components/Toast.jsx';
 import PromptBuilder   from './PromptBuilder.jsx';
+import Toast           from './components/Toast.jsx';
 
 import {
   callApiForText,
@@ -10,13 +11,13 @@ import {
   createChat,
   createMessage,
   updateMessage,
-  archiveMessagesAfter,
   deleteMessage,
-  undoDeleteMessage,
   deleteChat,
+  archiveMessagesAfter,
+  undoArchiveMessagesAfter,
+  undoDeleteMessage,
   undoDeleteChat,
-  updateChatTitle,
-  undoArchiveMessagesAfter
+  updateChatTitle
 } from './api.js';
 
 import {
@@ -29,142 +30,164 @@ import {
 
 import { queue } from './lib/TaskQueue.js';
 
-/* ---------------------------------------------------------
-   Single global runTask + queueSetLS for loading states.
-   safeAlert for fallback if alert is blocked.
-   They are stable top‐level functions, so we leave them
-   out of useEffect dependencies.
----------------------------------------------------------*/
-let queueSetLS = () => {};
+/*───────────── safe alert fallback ─────────────*/
 function safeAlert(msg) {
+  try { alert(msg); }
+  catch(e) { console.error('alert blocked', msg, e); }
+}
+
+/*───────────── wrapper for queue + loadingSend ─────────────*/
+let queueSetLoading = () => {};
+
+async function runTask(taskFn) {
+  queueSetLoading(true);
   try {
-    alert(msg);
-  } catch (e) {
-    console.error('Alert blocked, fallback console error:', msg, e);
+    await queue.push(taskFn);
+  } catch (err) {
+    console.error('runTask error:', err);
+    safeAlert(err?.message || 'Unknown error');
+    throw err;
+  } finally {
+    queueSetLoading(false);
   }
 }
 
-function runTask(taskFn) {
-  queueSetLS(true);
-  return queue
-    .push(taskFn)
-    .catch(err => safeAlert(err?.message ?? 'Unknown error'))
-    .finally(() => queueSetLS(false));
+/*────────────── code fences + copy button ──────────────
+  Splits on triple-backtick blocks and wraps each in a 
+  <pre> with a small 📋 button. 
+*/
+function renderWithCodeButtons(text) {
+  const parts = text.split(/(```[\s\S]*?```)/g);
+  return parts.map((part, i) => {
+    if (part.startsWith('```') && part.endsWith('```')) {
+      const code = part.slice(3, -3).trim();
+      return (
+        <div key={i} style={{ position:'relative', margin:'8px 0' }}>
+          <button
+            className="copy-snippet"
+            onClick={() => navigator.clipboard.writeText(code)}
+          >
+            📋
+          </button>
+          <pre className="code-block">{code}</pre>
+        </div>
+      );
+    }
+    return (
+      <div key={i} style={{ whiteSpace:'pre-wrap' }}>
+        {part}
+      </div>
+    );
+  });
 }
 
+/*──────────────────────────────────────────────────────── App ─────────────*/
 export default function App() {
-  const [chats, setChats]           = useState([]);
-  const [currentChatId, setCurrent] = useState(null);
-  const [loadingChats, setLC]       = useState(true);
-  const [loadingSend, setLS]        = useState(false);
+  // ───────────────────────────── State ───────────────────────────
+  const [chats,         setChats]        = useState([]);
+  const [currentChatId, setCurrent]      = useState(null);
+  const [loadingChats,  setLC]           = useState(true);
+  const [loadingSend,   setLoadingSend]  = useState(false);
 
-  // Inline editing
-  const [editingId, setEditing]     = useState(null);
-  const [editText,  setEditText]    = useState('');
+  // Inline Edit
+  const [editingId,  setEditing]        = useState(null);
+  const [editText,   setEditText]       = useState('');
+  const [savingEdit, setSavingEdit]     = useState(false);
 
-  const [toast, setToast]          = useState(null);
-
-  const [settings, setSettings]    = useSettings();
-  const [form,     setForm]        = useFormData();
-  const [mode,     setMode]        = useMode();
-
+  // Toast + ephemeral images
+  const [toast, setToast]               = useState(null);
   const [pendingImages, setPendingImages] = useState([]);
 
-  const tokenCount     = useTokenCount(
-    chats.find(c => c.id === currentChatId)?.messages ?? [],
+  // Form, mode, settings
+  const [settings, setSettings] = useSettings();
+  const [form,     setForm]     = useFormData();
+  const [mode,     setMode]     = useMode();
+
+  // Token usage
+  const tokenCount = useTokenCount(
+    chats.find(c=> c.id===currentChatId)?.messages ?? [],
     settings.model
   );
-  const showToast      = useCallback((text, onUndo) => setToast({ text, onUndo }), []);
+
+  // wire queue-runner → loadingSend
+  useEffect(() => { queueSetLoading = setLoadingSend; }, [setLoadingSend]);
+
+  // clear editing on chat switch
+  useEffect(() => { setEditing(null); setEditText(''); }, [currentChatId]);
+
+  // toast helper
+  const showToast = useCallback((text, onUndo) => {
+    setToast({ text, onUndo });
+  }, []);
   const undoableDelete = useUndoableDelete(showToast);
 
-  // Keep runTask’s loading state in sync with our local setLS
-  useEffect(() => {
-    queueSetLS = setLS;
-  }, [setLS]);
-
-  // Clear edit state when switching chats
-  useEffect(() => {
-    setEditing(null);
-    setEditText('');
-  }, [currentChatId]);
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // 1) Load chats once at startup or when codeType changes
-  // ─────────────────────────────────────────────────────────────────────────
+  // ───────────────────────────── 1) load chat list ───────────────────────
   useEffect(() => {
     let alive = true;
     runTask(async () => {
       setLC(true);
-      try {
-        const rows = await fetchChats();
-        let shaped = rows.map(r => ({
-          id      : r.id,
-          title   : r.title,
-          started : r.created_at,
-          model   : r.code_type,
-          messages: []
-        }));
+      const rows = await fetchChats();
+      let shaped = rows.map(r => ({
+        id      : r.id,
+        title   : r.title,
+        started : r.created_at,
+        model   : r.code_type,
+        messages: []
+      }));
 
-        if (!shaped.length) {
-          const c = await createChat({ title: 'New Chat', model: settings.codeType });
-          shaped = [{
-            id      : c.id,
-            title   : c.title,
-            started : c.created_at,
-            model   : c.code_type,
-            messages: []
-          }];
-        }
-        if (alive) {
-          setChats(shaped);
-          setCurrent(shaped[0].id);
-        }
-      } catch (err) {
-        safeAlert('Failed to load chats: ' + err.message);
-      } finally {
-        if (alive) setLC(false);
+      if (!shaped.length) {
+        const c = await createChat({ title:'New Chat', model: settings.codeType });
+        shaped = [{
+          id      : c.id,
+          title   : c.title,
+          started : c.created_at,
+          model   : c.code_type,
+          messages: []
+        }];
       }
+      if (alive) {
+        setChats(shaped);
+        setCurrent(shaped[0].id);
+      }
+    }).finally(() => {
+      if (alive) setLC(false);
     });
-    return () => { alive = false; };
-    // We do NOT include safeAlert or runTask in deps, as they are stable top-level
+    return () => { alive=false; };
   }, [settings.codeType]);
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // 2) Load messages for currentChatId
-  // ─────────────────────────────────────────────────────────────────────────
+  // ───────────────────────────── 2) load messages ───────────────────────
   useEffect(() => {
     if (!currentChatId) return;
-    let alive = true;
+    let live = true;
     fetchMessages(currentChatId)
       .then(msgs => {
-        if (!alive) return;
+        if (!live) return;
         setChats(cs =>
-          cs.map(c => (c.id === currentChatId ? { ...c, messages: msgs } : c))
+          cs.map(c => c.id===currentChatId ? {...c,messages:msgs} : c)
         );
       })
-      .catch(err => safeAlert('Failed to fetch messages: ' + err.message));
-    return () => { alive = false; };
+      .catch(err => safeAlert('Failed to fetch msgs: ' + err.message));
+    return () => { live=false; };
   }, [currentChatId]);
 
-  const currentChat = chats.find(c => c.id === currentChatId) ?? { messages: [] };
+  // current chat object
+  const currentChat = chats.find(c=> c.id===currentChatId) ?? { messages:[] };
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // HELPER: build user prompt from form data
-  // ─────────────────────────────────────────────────────────────────────────
+  // ───────────────────────────── Prompt builder helper ──────────────────
   function buildUserPrompt() {
-    if (mode === 'DEVELOP') {
-      return `
-MODE: DEVELOP
-GOAL: ${form.developGoal}
-FEATURES: ${form.developFeatures}
-RETURN FORMAT: ${form.developReturnFormat}
-THINGS TO REMEMBER/WARNINGS: ${form.developWarnings}
-CONTEXT: ${form.developContext}`.trim();
+    if (mode==='DEVELOP') {
+      const lines = ['MODE: DEVELOP'];
+      if (form.developGoal.trim())         lines.push(`GOAL: ${form.developGoal.trim()}`);
+      if (form.developFeatures.trim())     lines.push(`FEATURES: ${form.developFeatures.trim()}`);
+      if (form.developReturnFormat.trim()) lines.push(`RETURN FORMAT: ${form.developReturnFormat.trim()}`);
+      if (form.developWarnings.trim())     lines.push(`THINGS TO REMEMBER/WARNINGS: ${form.developWarnings.trim()}`);
+      if (form.developContext.trim())      lines.push(`CONTEXT: ${form.developContext.trim()}`);
+      return lines.join('\n');
     }
-    if (mode === 'COMMIT') {
+    if (mode==='COMMIT') {
       return 'MODE: COMMIT\nPlease generate a git-style commit message.';
     }
-    if (mode === 'CODE CHECK') {
+    if (mode==='CODE CHECK') {
       return 'MODE: CODE CHECK\nPlease analyze any errors or pitfalls.';
     }
     return '';
@@ -172,87 +195,202 @@ CONTEXT: ${form.developContext}`.trim();
 
   function resetForm() {
     setForm({
-      developGoal         : '',
-      developFeatures     : '',
-      developReturnFormat : '',
-      developWarnings     : '',
-      developContext      : '',
-      fixCode             : '',
-      fixErrors           : ''
+      developGoal:'',developFeatures:'',developReturnFormat:'',
+      developWarnings:'',developContext:'',fixCode:'',fixErrors:''
     });
     setPendingImages([]);
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Chat creation & deletion
-  // ─────────────────────────────────────────────────────────────────────────
+  // ───────────────────────────── Copy entire chat ───────────────────────
+  function handleCopyAll() {
+    const txt = currentChat.messages.map(m =>
+      Array.isArray(m.content)
+        ? m.content.filter(b=>b.type==='text').map(b=>b.text).join('')
+        : String(m.content)
+    ).join('\n\n');
+    navigator.clipboard.writeText(txt);
+  }
+
+  // ───────────────────────────── handleSend ─────────────────────────────
+  function handleSend() {
+    if (loadingSend) return;
+    if (mode==='DEVELOP' && !form.developGoal.trim()) {
+      safeAlert('GOAL is required for DEVELOP mode.');
+      return;
+    }
+
+    runTask(async () => {
+      const prompt = buildUserPrompt();
+
+      // dedupe images by data-url
+      const uniqueImgs = Array.from(new Map(
+        pendingImages.map(i => [i.url, i])
+      ).values());
+
+      // user sends text + images, but in DB we store text only
+      const apiBlocks = [
+        ...uniqueImgs.map(img => ({
+          type:'image_url',
+          image_url:{ url:img.url, detail:'auto' }
+        })),
+        { type:'text', text: prompt }
+      ];
+
+      /* 1) create user in DB with plain text */
+      const userRow = await createMessage({
+        chat_id: currentChatId,
+        role   : 'user',
+        content:[{ type:'text', text:prompt }]
+      });
+
+      /* 2) local update to show user message immediately */
+      setChats(cs =>
+        cs.map(c =>
+          c.id===currentChatId
+            ? { ...c, messages:[...c.messages, userRow] }
+            : c
+        )
+      );
+
+      /* 3) re-fetch to ensure we have the final array (including userRow) */
+      const fresh = await fetchMessages(currentChatId);
+      // replace the last user row’s plain text with “images + text”
+      let msgsForAi = [...fresh];
+      msgsForAi[msgsForAi.length - 1] = {
+        ...msgsForAi[msgsForAi.length - 1],
+        content: apiBlocks
+      };
+
+      /* 4) call LLM */
+      const { content, error } = await callApiForText({
+        apiKey: settings.apiKey,
+        model : settings.model,
+        messages: msgsForAi
+      });
+
+      /* 5) create assistant in DB + local */
+      const asstRow = await createMessage({
+        chat_id: currentChatId,
+        role:'assistant',
+        content:[{ type:'text', text: error?`Error: ${error}`:content }]
+      });
+      setChats(cs =>
+        cs.map(c =>
+          c.id===currentChatId
+            ? { ...c, messages:[...c.messages, asstRow] }
+            : c
+        )
+      );
+
+      resetForm();
+    });
+  }
+
+  // ───────────────────────────── handleSaveEdit (slice) ─────────────────
+  function handleSaveEdit() {
+    if (!editingId || loadingSend || savingEdit) return;
+    setSavingEdit(true);
+
+    runTask(async () => {
+      let msgs = await fetchMessages(currentChatId);
+      const anchorIdx = msgs.findIndex(m => m.id===editingId);
+      if (anchorIdx===-1) throw new Error('Message not found for editing');
+
+      // 1) update DB
+      await updateMessage(editingId, editText);
+
+      // 2) fix local
+      msgs[anchorIdx] = {
+        ...msgs[anchorIdx],
+        content:[{ type:'text', text: editText }]
+      };
+
+      // 3) archive everything after
+      await archiveMessagesAfter(currentChatId, msgs[anchorIdx].created_at);
+
+      // 4) slice so LLM sees up to anchor only
+      const msgsForAi = msgs.slice(0, anchorIdx+1);
+
+      // 5) LLM
+      const { content, error } = await callApiForText({
+        apiKey: settings.apiKey,
+        model : settings.model,
+        messages: msgsForAi
+      });
+
+      // 6) insert new assistant
+      await createMessage({
+        chat_id: currentChatId,
+        role:'assistant',
+        content:[{ type:'text', text: error?`Error: ${error}`:content }]
+      });
+
+      // 7) final refresh
+      const updated = await fetchMessages(currentChatId);
+      setChats(cs =>
+        cs.map(c =>
+          c.id===currentChatId ? { ...c, messages: updated } : c
+        )
+      );
+
+      setEditing(null);
+      setEditText('');
+    }).finally(()=>setSavingEdit(false));
+  }
+
+  // ───────────────────────────── handleNewChat ──────────────────────────
   function handleNewChat() {
     if (loadingSend) return;
     runTask(async () => {
-      const c = await createChat({ title: 'New Chat', model: settings.codeType });
+      const c = await createChat({ title:'New Chat', model:settings.codeType });
       setEditing(null);
       setChats(cs => [{
-        id      : c.id,
-        title   : c.title,
-        started : c.created_at,
-        model   : c.code_type,
-        messages: []
+        id:c.id, title:c.title, started:c.created_at,
+        model:c.code_type, messages:[]
       }, ...cs]);
       setCurrent(c.id);
     });
   }
 
+  // ───────────────────────────── handleRenameChat ───────────────────────
   async function handleRenameChat(id, newTitle) {
-    // rename is usually quick, no queue needed
-    setChats(cs => cs.map(c => c.id === id ? { ...c, title: newTitle } : c));
+    setChats(cs => cs.map(c => c.id===id ? { ...c, title:newTitle } : c));
     try {
       await updateChatTitle(id, newTitle);
     } catch (err) {
       safeAlert('Rename failed: ' + err.message);
-      // reload from DB if it fails
       const rows = await fetchChats();
-      setChats(rows.map(r => ({
-        id      : r.id,
-        title   : r.title,
-        started : r.created_at,
-        model   : r.code_type,
-        messages: []
-      })));
+      const shaped = rows.map(r => ({
+        id:r.id, title:r.title, started:r.created_at,
+        model:r.code_type, messages:[]
+      }));
+      setChats(shaped);
     }
   }
 
+  // ───────────────────────────── handleDeleteChatUI ─────────────────────
   function handleDeleteChatUI(id) {
     if (loadingSend) return;
-    const anchorChatId = currentChatId; // closure
+    const anchorChatId = currentChatId;
     runTask(() =>
       undoableDelete({
-        itemLabel: 'Chat',
+        itemLabel:'Chat',
         deleteFn: () => deleteChat(id),
         undoFn: () => runTask(async () => {
           await undoDeleteChat(id);
           const rows = await fetchChats();
-          const shaped = rows.map(r => ({
-            id      : r.id,
-            title   : r.title,
-            started : r.created_at,
-            model   : r.code_type,
-            messages: []
+          const shaped = rows.map(r=>({
+            id:r.id,title:r.title,started:r.created_at,
+            model:r.code_type,messages:[]
           }));
           setChats(shaped);
-          // Focus back on this chat if it’s really restored
-          if (shaped.some(c => c.id === id)) {
-            setCurrent(id);
-          } else {
-            // fallback to first if chat no longer found
-            setCurrent(shaped[0]?.id ?? null);
-          }
+          const found = shaped.find(c => c.id===id);
+          setCurrent(found ? found.id : shaped[0]?.id ?? null);
         }),
         afterDelete: () => {
-          // Move side effects out of return statement
           setChats(cs => {
-            const filtered = cs.filter(c => c.id !== id);
-            // If we just removed the open chat, pick next
-            if (anchorChatId === id) {
+            const filtered = cs.filter(c => c.id!==id);
+            if (anchorChatId===id) {
               if (filtered.length) setCurrent(filtered[0].id);
               else setCurrent(null);
             }
@@ -263,11 +401,9 @@ CONTEXT: ${form.developContext}`.trim();
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Message Deletion
-  // ─────────────────────────────────────────────────────────────────────────
+  // ───────────────────────────── handleDeleteMessage ────────────────────
   function handleDeleteMessage(id) {
-    if (id === editingId) {
+    if (id===editingId) {
       setEditing(null);
       setEditText('');
     }
@@ -275,257 +411,98 @@ CONTEXT: ${form.developContext}`.trim();
     const anchorChatId = currentChatId;
     runTask(() =>
       undoableDelete({
-        itemLabel: 'Message',
+        itemLabel:'Message',
         deleteFn: () => deleteMessage(id),
         undoFn: () => runTask(async () => {
           await undoDeleteMessage(id);
           const msgs = await fetchMessages(anchorChatId);
-          setChats(cs =>
-            cs.map(c =>
-              c.id === anchorChatId
-                ? { ...c, messages: msgs }
-                : c
-            )
-          );
+          setChats(cs => cs.map(c => c.id===anchorChatId?{...c,messages:msgs}:c));
         }),
         afterDelete: () => {
-          setChats(cs => {
-            const filteredMsgs = cs.map(c =>
-              c.id === anchorChatId
-                ? { ...c, messages: c.messages.filter(m => m.id !== id) }
-                : c
-            );
-            return filteredMsgs;
-          });
+          setChats(cs => cs.map(
+            c => c.id===anchorChatId
+              ? {...c,messages:c.messages.filter(m=>m.id!==id)}
+              : c
+          ));
         }
       })
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Inline EDIT
-  // ─────────────────────────────────────────────────────────────────────────
+  // ───────────────────────────── handleStartEdit / CancelEdit ───────────
   function handleStartEdit(m) {
     if (loadingSend) return;
     setEditing(m.id);
     const raw = Array.isArray(m.content)
-      ? m.content.filter(c => c.type === 'text').map(c => c.text).join('')
+      ? m.content.filter(b=>b.type==='text').map(b=>b.text).join('')
       : String(m.content);
     setEditText(raw);
   }
-
   function handleCancelEdit() {
     setEditing(null);
     setEditText('');
   }
 
-  function handleSaveEdit() {
-    if (!editingId || loadingSend) return;
-    const anchorChatId = currentChatId;
-    runTask(async () => {
-      // re-fetch so we have fresh messages
-      const msgsNow = await fetchMessages(anchorChatId);
-      const anchor  = msgsNow.find(x => x.id === editingId);
-      if (!anchor) throw new Error('Message not found for editing');
-
-      // 1) update the existing message
-      await updateMessage(editingId, editText);
-
-      // 2) archive anything after
-      await archiveMessagesAfter(anchorChatId, anchor.created_at);
-
-      // 3) re-fetch + LLM
-      const msgs = await fetchMessages(anchorChatId);
-      const { content, error } = await callApiForText({
-        apiKey  : settings.apiKey,
-        model   : settings.model,
-        messages: msgs
-      });
-
-      // 4) insert new assistant
-      const assistantMsg = await createMessage({
-        chat_id: anchorChatId,
-        role   : 'assistant',
-        content: [{ type: 'text', text: error ? `Error: ${error}` : content }]
-      });
-      const newAssistantId = assistantMsg.id;
-
-      // 5) local update
-      setChats(cs =>
-        cs.map(c =>
-          c.id === anchorChatId
-            ? { ...c, messages: [...msgs, assistantMsg] }
-            : c
-        )
-      );
-
-      // 6) Toast for undo
-      showToast('Archived messages. Undo?', () =>
-        runTask(async () => {
-          await undoArchiveMessagesAfter(anchorChatId, anchor.created_at);
-          await deleteMessage(newAssistantId);
-
-          const undone = await fetchMessages(anchorChatId);
-          setChats(cs =>
-            cs.map(cc =>
-              cc.id === anchorChatId
-                ? { ...cc, messages: undone }
-                : cc
-            )
-          );
-        })
-      );
-
-      setEditing(null);
-      setEditText('');
-    });
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // Resend
-  // ─────────────────────────────────────────────────────────────────────────
+  // ───────────────────────────── handleResendMessage ────────────────────
   function handleResendMessage(id) {
     if (loadingSend) return;
-    const anchorChatId = currentChatId;
-    runTask(async () => {
-      // re-fetch so we have fresh messages
-      const msgsNow = await fetchMessages(anchorChatId);
-      const anchor  = msgsNow.find(x => x.id === id);
-      if (!anchor) throw new Error('Message not found');
+    const anchorChatId=currentChatId;
+    runTask(async ()=>{
+      const msgs=await fetchMessages(anchorChatId);
+      const anchor=msgs.find(x=>x.id===id);
+      if(!anchor) throw new Error('Message not found');
 
       // 1) archive everything after anchor
       await archiveMessagesAfter(anchorChatId, anchor.created_at);
 
       // 2) re-fetch
-      const msgs = await fetchMessages(anchorChatId);
+      const trimmed=await fetchMessages(anchorChatId);
 
       // 3) LLM
-      const { content, error } = await callApiForText({
-        apiKey  : settings.apiKey,
-        model   : settings.model,
-        messages: msgs
+      const { content, error }=await callApiForText({
+        apiKey: settings.apiKey,
+        model : settings.model,
+        messages: trimmed
       });
 
-      // 4) new assistant
-      const assistantMsg = await createMessage({
-        chat_id: anchorChatId,
-        role   : 'assistant',
-        content: [{ type: 'text', text: error ? `Error: ${error}` : content }]
+      // 4) create assistant
+      const asst=await createMessage({
+        chat_id:anchorChatId, role:'assistant',
+        content:[{type:'text', text:error?`Error: ${error}`:content}]
       });
-      const newAssistantId = assistantMsg.id;
 
-      // 5) local update
-      setChats(cs =>
-        cs.map(c =>
-          c.id === anchorChatId
-            ? { ...c, messages: [...msgs, assistantMsg] }
-            : c
-        )
-      );
+      // 5) local
+      setChats(cs=> cs.map(c=>
+        c.id===anchorChatId?{...c,messages:[...trimmed, asst]}:c
+      ));
 
-      // 6) Toast for undo
-      showToast('Archived messages. Undo?', () =>
-        runTask(async () => {
+      // 6) toast for undo
+      showToast('Archived messages. Undo?', ()=>
+        runTask(async ()=>{
           await undoArchiveMessagesAfter(anchorChatId, anchor.created_at);
-          await deleteMessage(newAssistantId);
-
-          const undone = await fetchMessages(anchorChatId);
-          setChats(cs =>
-            cs.map(cc =>
-              cc.id === anchorChatId
-                ? { ...cc, messages: undone }
-                : cc
-            )
-          );
+          await deleteMessage(asst.id);
+          const undone=await fetchMessages(anchorChatId);
+          setChats(u=> u.map(cc=> cc.id===anchorChatId?{...cc,messages:undone}:cc));
         })
       );
     });
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // MAIN SEND from PromptBuilder
-  // ─────────────────────────────────────────────────────────────────────────
-  function handleSend() {
-    if (loadingSend) return;
-    if (mode === 'DEVELOP' && !form.developGoal.trim()) {
-      safeAlert('GOAL is required for DEVELOP mode.');
-      return;
-    }
-
-    const anchorChatId = currentChatId;
-    runTask(async () => {
-      const parts = [
-        ...pendingImages.map(img => ({
-          type: 'image_url',
-          image_url: { url: img.url, detail: 'auto' }
-        })),
-        { type: 'text', text: buildUserPrompt() }
-      ];
-
-      // user message
-      await createMessage({
-        chat_id: anchorChatId,
-        role   : 'user',
-        content: parts
-      });
-
-      // re-fetch + LLM
-      const msgs = await fetchMessages(anchorChatId);
-      const { content, error } = await callApiForText({
-        apiKey  : settings.apiKey,
-        model   : settings.model,
-        messages: msgs
-      });
-
-      // new assistant
-      const assistantMsg = await createMessage({
-        chat_id: anchorChatId,
-        role   : 'assistant',
-        content: [{ type: 'text', text: error ? `Error: ${error}` : content }]
-      });
-
-      // local update + reset form
-      setChats(cs =>
-        cs.map(c =>
-          c.id === anchorChatId ? { ...c, messages: [...msgs, assistantMsg] } : c
-        )
-      );
-      resetForm();
-    });
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // COPY ALL
-  // ─────────────────────────────────────────────────────────────────────────
-  function handleCopyAll() {
-    const txt = currentChat.messages
-      .map(m =>
-        Array.isArray(m.content)
-          ? m.content.map(c => (c.type === 'text' ? c.text : '')).join('')
-          : String(m.content)
-      )
-      .join('\n\n');
-    navigator.clipboard.writeText(txt);
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // RENDER
-  // ─────────────────────────────────────────────────────────────────────────
+  // ───────────────────────────── final render ───────────────────────────
   if (loadingChats) {
-    return <h2 style={{ textAlign:'center', marginTop:'20vh' }}>Loading…</h2>;
+    return <h2 style={{textAlign:'center',marginTop:'20vh'}}>Loading…</h2>;
   }
 
   return (
     <div className="app-container">
       <ChatPane
-        chats         ={chats}
-        currentChatId ={currentChatId}
-        onSelectChat  ={setCurrent}
-        onNewChat     ={handleNewChat}
-        onTitleUpdate ={handleRenameChat}
-        onDeleteChat  ={handleDeleteChatUI}
-        // disable chat switching & newChat if a queue task is in flight
-        disabled      ={loadingSend}
+        chats={chats}
+        currentChatId={currentChatId}
+        onSelectChat={setCurrent}
+        onNewChat={handleNewChat}
+        onTitleUpdate={handleRenameChat}
+        onDeleteChat={handleDeleteChatUI}
+        disabled={loadingSend}
       />
 
       <div className="main-content">
@@ -533,13 +510,14 @@ CONTEXT: ${form.developContext}`.trim();
         <div className="top-bar">
           <button
             className="button"
-            onClick={() => setSettings(s => ({ ...s, showSettings: !s.showSettings }))}
+            onClick={()=> setSettings(s=>({...s,showSettings:!s.showSettings}))}
           >
             {settings.showSettings ? 'Close Settings' : 'Open Settings'}
           </button>
-          <span style={{ margin:'0 1em', fontWeight:'bold' }}>konzuko-code</span>
-          <div style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:'0.5em' }}>
-            <div style={{ padding:'4px 12px', background:'#4f8eff', borderRadius:4 }}>
+          <span style={{margin:'0 1em',fontWeight:'bold'}}>konzuko-code</span>
+
+          <div style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:'0.5em'}}>
+            <div style={{padding:'4px 12px',background:'#4f8eff',borderRadius:4}}>
               Tokens: {tokenCount.toLocaleString()}
             </div>
             <button className="button" onClick={handleCopyAll}>
@@ -549,13 +527,13 @@ CONTEXT: ${form.developContext}`.trim();
         </div>
 
         {settings.showSettings && (
-          <div className="settings-panel">
+          <div className="settings-panel" style={{padding:'1em',borderBottom:'1px solid var(--border)'}}>
             <div className="form-group">
               <label>OpenAI API Key:</label>
               <input
                 className="form-input"
                 value={settings.apiKey}
-                onInput={e => setSettings(s => ({ ...s, apiKey: e.target.value }))}
+                onInput={e=> setSettings(s=>({...s, apiKey:e.target.value}))}
               />
             </div>
             <div className="form-group">
@@ -563,9 +541,9 @@ CONTEXT: ${form.developContext}`.trim();
               <select
                 className="form-select"
                 value={settings.model}
-                onChange={e => setSettings(s => ({ ...s, model: e.target.value }))}
+                onChange={e=> setSettings(s=>({...s, model:e.target.value}))}
               >
-                <option value="o4-mini-2025-04-16">o4-mini-2025-04-16 (default)</option>
+                <option value="o4-mini-2025-04-16">o4-mini-2025-04-16</option>
                 <option value="o1">o1</option>
                 <option value="o3-2025-04-16">o3-2025-04-16</option>
                 <option value="gpt-4.5-preview-2025-02-27">gpt-4.5-preview-2025-02-27</option>
@@ -574,29 +552,28 @@ CONTEXT: ${form.developContext}`.trim();
           </div>
         )}
 
-        <div className="content-container" style={{ display:'flex' }}>
-          {/* Chat area */}
-          <div className="chat-container">
-            {currentChat.messages.map((m, idx) => {
-              const isAssistant = (m.role === 'assistant');
-
+        <div className="content-container" style={{ display:'flex', flex:1 }}>
+          {/* chat messages */}
+          <div className="chat-container" style={{width:'50%', overflowY:'auto', padding:'16px', borderRight:'1px solid var(--border)'}}>
+            {currentChat.messages.map((m,idx)=>{
+              const isAssistant = (m.role==='assistant');
               const copyFull = () => {
-                let txt = '';
-                if (Array.isArray(m.content)) {
-                  txt = m.content
-                    .filter(c => c.type === 'text')
-                    .map(c => c.text)
+                if(Array.isArray(m.content)){
+                  const txt = m.content
+                    .filter(b=>b.type==='text')
+                    .map(b=>b.text)
                     .join('');
+                  navigator.clipboard.writeText(txt);
                 } else {
-                  txt = String(m.content);
+                  navigator.clipboard.writeText(String(m.content));
                 }
-                navigator.clipboard.writeText(txt);
               };
 
-              const isLastUser =
-                m.role === 'user' &&
-                idx === currentChat.messages.length - 1 &&
-                !editingId;
+              const isLastUser = (
+                m.role==='user' &&
+                idx===currentChat.messages.length-1 &&
+                !editingId
+              );
 
               return (
                 <div key={m.id} className={`message message-${m.role}`}>
@@ -607,46 +584,45 @@ CONTEXT: ${form.developContext}`.trim();
                       </button>
                     </div>
                   )}
+
                   <div className="message-header">
                     <span className="message-role">
-                      {isAssistant ? idx + ' assistant' : m.role}
+                      {isAssistant ? `assistant #${idx}` : m.role}
                     </span>
                     <div className="message-actions">
-                      {m.id === editingId ? (
+                      {m.id===editingId ? (
                         <>
                           <button
                             className="button"
-                            disabled={loadingSend}
+                            disabled={loadingSend || savingEdit}
                             onClick={handleSaveEdit}
                           >
-                            Save
+                            {savingEdit ? 'Saving…' : 'Save'}
                           </button>
                           <button
                             className="button"
                             disabled={loadingSend}
-                            onClick={handleCancelEdit}
+                            onClick={()=>{setEditing(null); setEditText('');}}
                           >
                             Cancel
                           </button>
                         </>
                       ) : (
                         <>
-                          <button className="button icon-button" onClick={copyFull}>
-                            Copy
-                          </button>
+                          <button className="button icon-button" onClick={copyFull}>Copy</button>
                           {isLastUser && (
                             <>
                               <button
                                 className="button icon-button"
                                 disabled={loadingSend}
-                                onClick={() => handleStartEdit(m)}
+                                onClick={()=>handleStartEdit(m)}
                               >
                                 Edit
                               </button>
                               <button
                                 className="button icon-button"
                                 disabled={loadingSend}
-                                onClick={() => handleResendMessage(m.id)}
+                                onClick={()=>handleResendMessage(m.id)}
                               >
                                 Resend
                               </button>
@@ -654,8 +630,8 @@ CONTEXT: ${form.developContext}`.trim();
                           )}
                           <button
                             className="button icon-button"
-                            onClick={() => handleDeleteMessage(m.id)}
                             disabled={loadingSend}
+                            onClick={()=>handleDeleteMessage(m.id)}
                           >
                             Del
                           </button>
@@ -663,27 +639,36 @@ CONTEXT: ${form.developContext}`.trim();
                       )}
                     </div>
                   </div>
+
                   <div className="message-content">
-                    {m.id === editingId ? (
+                    {m.id===editingId ? (
                       <textarea
                         rows={4}
-                        style={{ width:'100%' }}
+                        style={{width:'100%'}}
                         value={editText}
-                        onInput={e => setEditText(e.target.value)}
+                        onInput={e=>setEditText(e.target.value)}
                       />
                     ) : Array.isArray(m.content) ? (
-                      m.content.map((c, j) =>
-                        c.type === 'text'
-                          ? <div key={j}>{c.text}</div>
-                          : <img
+                      m.content.map((c, j)=>{
+                        if(c.type==='text'){
+                          return <div key={j}>{renderWithCodeButtons(c.text)}</div>;
+                        }
+                        if(c.type==='image_url'){
+                          return (
+                            <img
                               key={j}
-                              src={c.image_url.url}
+                              src={c.image_url?.url||''}
                               alt="img"
-                              style={{ maxWidth:200, margin:'8px 0' }}
+                              style={{maxWidth:'200px',margin:'8px 0'}}
                             />
-                      )
+                          );
+                        }
+                        return null;
+                      })
                     ) : (
-                      <div style={{ whiteSpace:'pre-wrap' }}>{m.content}</div>
+                      <div style={{whiteSpace:'pre-wrap'}}>
+                        {renderWithCodeButtons(String(m.content))}
+                      </div>
                     )}
                   </div>
                 </div>
@@ -691,8 +676,8 @@ CONTEXT: ${form.developContext}`.trim();
             })}
           </div>
 
-          {/* Right side: PromptBuilder */}
-          <div style={{ flex:'1', display:'flex', flexDirection:'column' }}>
+          {/* PromptBuilder side */}
+          <div style={{width:'50%', display:'flex', flexDirection:'column', overflowY:'auto'}}>
             <PromptBuilder
               mode={mode}
               setMode={setMode}
@@ -700,13 +685,8 @@ CONTEXT: ${form.developContext}`.trim();
               setForm={setForm}
               loadingSend={loadingSend}
               handleSend={handleSend}
-              handleCopyAll={handleCopyAll}
-              onImageDrop={(name, url) =>
-                setPendingImages(a => [...a, { name, url }])
-              }
-              onRemoveImage={i =>
-                setPendingImages(a => a.filter((_, j) => j !== i))
-              }
+              onImageDrop={(name,url)=>setPendingImages(a=>[...a,{name,url}])}
+              onRemoveImage={i=>setPendingImages(a=>a.filter((_,j)=>j!==i))}
               imagePreviews={pendingImages}
             />
           </div>
@@ -717,7 +697,7 @@ CONTEXT: ${form.developContext}`.trim();
         <Toast
           text={toast.text}
           onAction={toast.onUndo}
-          onClose={() => setToast(null)}
+          onClose={()=>setToast(null)}
         />
       )}
     </div>
