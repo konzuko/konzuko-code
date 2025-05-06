@@ -90,7 +90,7 @@ export default function PromptBuilder({
       onDrop={onDropImg}
     >
       <div className="mode-selector form-group">
-        {['DEVELOP','COMMIT','DIAGNOSE'].map(m=>(
+        {['DEVELOP','COMMIT','CODE CHECK'].map(m=>(
           <button
             key={m}
             className={mode===m?'button active':'button'}

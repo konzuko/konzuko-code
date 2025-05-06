@@ -164,8 +164,8 @@ CONTEXT: ${form.developContext}`.trim();
     if (mode === 'COMMIT') {
       return 'MODE: COMMIT\nPlease generate a git-style commit message.';
     }
-    if (mode === 'DIAGNOSE') {
-      return 'MODE: DIAGNOSE\nPlease analyze any errors or pitfalls.';
+    if (mode === 'CODE CHECK') {
+      return 'MODE: CODE CHECK\nPlease analyze any errors or pitfalls.';
     }
     return '';
   }

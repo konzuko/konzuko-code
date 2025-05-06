@@ -201,7 +201,7 @@ export function useFileDrop(onText) {
 }
 
 export function useMode() {
-  const ALLOWED = ['DEVELOP','COMMIT','DIAGNOSE']
+  const ALLOWED = ['DEVELOP','COMMIT','CODE CHECK']
   const stored  = localStorage.getItem('konzuko-mode')
   const initial = ALLOWED.includes(stored) ? stored : 'DEVELOP'
   const [mode, _setMode] = useState(initial)
