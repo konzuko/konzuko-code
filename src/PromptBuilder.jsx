@@ -1,3 +1,10 @@
+/* -------------------------------------------------------------------------
+   src/PromptBuilder.jsx
+   Handles the large DEVELOP fields + code textareas, plus an integrated
+   file-drop area.  Now images dropped anywhere in the right-hand pane
+   produce a thumbnail.  Text files get appended to whichever field the
+   user is dragging onto.
+---------------------------------------------------------------------------*/
 
 import { useState, useEffect } from 'preact/hooks';
 import { useFileDrop }         from './hooks.js';
@@ -12,7 +19,7 @@ export default function PromptBuilder({
   onRemoveImage,
   imagePreviews
 }) {
-  // File name trackers for each text field
+  // We track file names that got inserted into each text field
   const FIELD_KEYS = [
     'developGoal',
     'developFeatures',
@@ -23,7 +30,7 @@ export default function PromptBuilder({
   const emptyMap = FIELD_KEYS.reduce((o, k) => (o[k] = [], o), {});
   const [fileNames, setFileNames] = useState(emptyMap);
 
-  // Reset fileNames if all fields are blank
+  // If user cleared all fields, reset fileNames as well
   useEffect(() => {
     if (
       !form.developGoal &&
@@ -44,21 +51,22 @@ export default function PromptBuilder({
 
   // For each text field, create a drop handler that appends triple-quoted code
   function makeDrop(key) {
-    const { dragOver, drop } = useFileDrop(async (text, file) => {
-      const block =
-        `${file.name}\n` +
-        '```\n' +
-        text.trim() +
-        '\n```\n';
-      setForm(f => ({
-        ...f,
-        [key]: (f[key] ? f[key] + '\n\n' : '') + block
-      }));
-      setFileNames(f => ({
-        ...f,
-        [key]: [...f[key], file.name]
-      }));
-    });
+    const { dragOver, drop } = useFileDrop(
+      // If a text file
+      async (text, file) => {
+        const block = `${file.name}\n\`\`\`\n${text.trim()}\n\`\`\`\n`;
+        setForm(f => ({
+          ...f,
+          [key]: (f[key] ? f[key] + '\n\n' : '') + block
+        }));
+        setFileNames(f => ({
+          ...f,
+          [key]: [...f[key], file.name]
+        }));
+      },
+      // If an image
+      onImageDrop
+    );
     return { dragOver, drop };
   }
 
@@ -67,6 +75,12 @@ export default function PromptBuilder({
   FIELD_KEYS.forEach(k => {
     dropHandlers[k] = makeDrop(k);
   });
+
+  // Container-level drop for images: anywhere in the template column
+  const { dragOver: containerOver, drop: containerDrop } = useFileDrop(
+    () => { /* ignore text at container-level */ },
+    onImageDrop
+  );
 
   // The text field definitions
   const fields = [
@@ -78,7 +92,11 @@ export default function PromptBuilder({
   ];
 
   return (
-    <div className="template-container">
+    <div
+      className="template-container"
+      onDragOver={containerOver}
+      onDrop={containerDrop}
+    >
       {/* Mode tabs */}
       <div className="mode-selector form-group">
         {['DEVELOP', 'COMMIT', 'CODE CHECK'].map(m => (
@@ -103,20 +121,20 @@ export default function PromptBuilder({
             onInput={e => setForm(f => ({ ...f, [key]: e.target.value }))}
             onDragOver={dropHandlers[key].dragOver}
             onDrop={e => {
-              e.preventDefault();    // ADDED
-              e.stopPropagation();   // existing
+              e.preventDefault();
+              e.stopPropagation();
               dropHandlers[key].drop(e);
             }}
           />
           {fileNames[key].length > 0 && (
-            <div style={{ fontSize: '0.8rem', color:'#aaa', marginTop:4 }}>
+            <div style={{ fontSize: '0.8rem', color: '#aaa', marginTop: 4 }}>
               Files: {fileNames[key].join(', ')}
             </div>
           )}
         </div>
       ))}
 
-      {/* Additional file drop UI */}
+      {/* Additional file drop UI (FilePane) */}
       {mode === 'DEVELOP' && (
         <FilePane
           form={form}
@@ -127,25 +145,27 @@ export default function PromptBuilder({
 
       {/* Image previews */}
       {imagePreviews.length > 0 && (
-        <div style={{ display:'flex', gap:8, flexWrap:'wrap', margin:'8px 0' }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '8px 0' }}>
           {imagePreviews.map((img, i) => (
-            <div key={i} style={{ position:'relative' }}>
+            <div key={i} style={{ position: 'relative' }}>
               <img
                 src={img.url}
                 alt={img.name}
-                style={{ width:100, borderRadius:4 }}
+                style={{ width: 100, borderRadius: 4 }}
               />
               <div
                 style={{
-                  position:'absolute',
-                  top:2, right:2,
-                  background:'rgba(0,0,0,0.6)',
-                  color:'#fff',
-                  width:20, height:20,
-                  borderRadius:'50%',
-                  textAlign:'center',
-                  lineHeight:'20px',
-                  cursor:'pointer'
+                  position       : 'absolute',
+                  top            : 2,
+                  right          : 2,
+                  background     : 'rgba(0,0,0,0.6)',
+                  color          : '#fff',
+                  width          : 20,
+                  height         : 20,
+                  borderRadius   : '50%',
+                  textAlign      : 'center',
+                  lineHeight     : '20px',
+                  cursor         : 'pointer'
                 }}
                 onClick={() => onRemoveImage(i)}
                 title="Remove image"
@@ -153,14 +173,14 @@ export default function PromptBuilder({
                 ×
               </div>
               <div style={{
-                fontSize:'0.7rem',
-                color:'#ccc',
-                textAlign:'center',
-                marginTop:2,
-                width:100,
-                overflow:'hidden',
-                textOverflow:'ellipsis',
-                whiteSpace:'nowrap'
+                fontSize      : '0.7rem',
+                color         : '#ccc',
+                textAlign     : 'center',
+                marginTop     : 2,
+                width         : 100,
+                overflow      : 'hidden',
+                textOverflow  : 'ellipsis',
+                whiteSpace    : 'nowrap'
               }}>
                 {img.name}
               </div>

@@ -1,10 +1,23 @@
+
+/* -------------------------------------------------------------------------
+   src/FilePane.jsx
+   Manages “Project Files” region with:
+   - “+ Add Files”
+   - “+ Add Folder”
+   - scanning directories
+   - appending code to developContext
+
+   CHANGES:
+   - We skip non-text with isTextLike()
+   - If needed, show skip counts in an alert
+---------------------------------------------------------------------------*/
+
 import { h } from 'preact';
 import { useState, useCallback } from 'preact/hooks';
-import { asciiTree, dedupe }     from './lib/textUtils.js';  // NEW import
 
-/* ------------------------------------------------------------------------
-   Reuse your existing scanning helpers. FILE_LIMIT remains local here.
------------------------------------------------------------------------- */
+import { asciiTree, dedupe }     from './lib/textUtils.js';
+import { isTextLike }            from './lib/fileTypeGuards.js';
+
 const FILE_LIMIT = 500;
 
 /* Recursively scan a directory handle (File System Access API) */
@@ -15,21 +28,23 @@ async function scanDir(dirHandle, out, remaining, path = '') {
     if (handle.kind === 'file') {
       if (out.length >= FILE_LIMIT) return;
       const file = await handle.getFile();
+      if (!isTextLike(file)) continue;  // skip non-text
       file.fullPath = full;
       out.push(file);
-    } else if (handle.kind === 'directory') {
+    }
+    else if (handle.kind === 'directory') {
       await scanDir(handle, out, FILE_LIMIT - out.length, full);
       if (out.length >= FILE_LIMIT) return;
     }
   }
 }
 
-/* File → text Promise */
+/* Convert a File to text (async) */
 function fileToText(file) {
-  return new Promise((res, rej) => {
+  return new Promise((resolve, reject) => {
     const r = new FileReader();
-    r.onload = () => res(String(r.result));
-    r.onerror = () => rej(r.error);
+    r.onload = () => resolve(String(r.result));
+    r.onerror = () => reject(r.error);
     r.readAsText(file);
   });
 }
@@ -42,12 +57,12 @@ export default function FilePane({
   const [pendingFiles, setPendingFiles] = useState([]);
   const [adding, setAdding]             = useState(false);
 
-  // Merge new batch into pendingFiles
+  // Merge a new batch of files into pending
   const mergeBatch = useCallback((batch) => {
     setPendingFiles(prev => dedupe([...prev, ...batch]).slice(0, FILE_LIMIT));
   }, []);
 
-  // Append batch details to developContext
+  // Actually append batch code to developContext
   const appendBatchToContext = useCallback(async (batch) => {
     if (!batch.length) return;
 
@@ -60,10 +75,9 @@ export default function FilePane({
         (prevCtx.match(/File structure \(added batch/gi) || []).length + 1;
 
       let block = `\n\n/* File structure (added batch ${batchNum}):\n${tree}\n*/\n`;
-      batch.forEach((file, idx) => {
-        block += `\n/* ${file.fullPath} */\n\n${texts[idx]}\n`;
-      });
-
+      for (let i = 0; i < batch.length; i++) {
+        block += `\n/* ${batch[i].fullPath} */\n\n${texts[i]}\n`;
+      }
       return { ...prev, developContext: prevCtx + block };
     });
   }, [setForm]);
@@ -71,23 +85,34 @@ export default function FilePane({
   /* “+ Add Files” */
   const handleAddFiles = useCallback(async () => {
     if (!window.showOpenFilePicker) {
-      alert('Your browser lacks showOpenFilePicker (Chrome 86+, Edge 86+).');
+      alert('Your browser does not support showOpenFilePicker.');
       return;
     }
     try {
       setAdding(true);
       const handles = await window.showOpenFilePicker({ multiple: true });
       const batch   = [];
+      let skipped   = 0;
+
       for (const h of handles) {
         if (batch.length + pendingFiles.length >= FILE_LIMIT) break;
         const f = await h.getFile();
+        if (!isTextLike(f)) { skipped++; continue; }
         f.fullPath = f.name;
         batch.push(f);
       }
       await mergeBatch(batch);
       await appendBatchToContext(batch);
-    } catch (err) {
-      if (err.name !== 'AbortError') console.warn('AddFiles error', err);
+
+      if (skipped) {
+        alert(`${skipped} file${skipped>1?'s':''} were skipped. `
+            + `If needed, drag them in individually.`);
+      }
+    }
+    catch (err) {
+      if (err.name !== 'AbortError') {
+        console.warn('AddFiles error', err);
+      }
     } finally {
       setAdding(false);
     }
@@ -96,7 +121,7 @@ export default function FilePane({
   /* “+ Add Folder” */
   const handleAddFolder = useCallback(async () => {
     if (!window.showDirectoryPicker) {
-      alert('Your browser lacks showDirectoryPicker (Chrome 86+).');
+      alert('Your browser does not support showDirectoryPicker.');
       return;
     }
     try {
@@ -106,26 +131,29 @@ export default function FilePane({
       await scanDir(dirHandle, batch, FILE_LIMIT - pendingFiles.length);
       await mergeBatch(batch);
       await appendBatchToContext(batch);
-    } catch (err) {
-      if (err.name !== 'AbortError') console.warn('AddFolder error', err);
+
+      if (!batch.length) {
+        alert('No valid text/code files found in that folder.');
+      }
+    }
+    catch (err) {
+      if (err.name !== 'AbortError') {
+        console.warn('AddFolder error', err);
+      }
     } finally {
       setAdding(false);
     }
   }, [mergeBatch, appendBatchToContext, pendingFiles.length]);
 
-  /* Clear all */
+  /* Clear everything & remove from the prompt. */
   const handleClearAll = useCallback(() => {
-    if (
-      !confirm(
-        'Remove all files from the list and erase their code from the prompt?'
-      )
-    ) return;
-
+    if (!confirm('Remove all files from the list and also erase from the prompt?'))
+      return;
     setPendingFiles([]);
     setForm(prev => ({ ...prev, developContext: '' }));
   }, [setForm]);
 
-  /* “Paste Image” button */
+  /* For “Paste Image” button (unchanged from original) */
   const handlePasteClipboard = useCallback(async () => {
     if (!navigator.clipboard || !navigator.clipboard.read) {
       alert('Clipboard API not supported');
@@ -154,52 +182,45 @@ export default function FilePane({
     }
   }, [onPasteImage]);
 
-  /* UI ------------------------------------------------------------------- */
+  /* ───────────────────────────────────────── Render ───────────────────────────────────── */
   return (
     <div className="file-pane-container">
       <h2>Project Files</h2>
 
-      {/* notice if persisted code present */}
       {/File structure \(added batch/i.test(form.developContext) && (
-        <div
-          style={{
-            marginBottom: '1rem',
-            padding: '0.75rem 1rem',
-            background: '#114411',
-            color: '#ccffcc',
-            borderRadius: 4,
-            fontSize: '0.9rem',
-          }}
-        >
+        <div style={{
+          marginBottom: '1rem',
+          padding      : '0.75rem 1rem',
+          background   : '#114411',
+          color        : '#ccffcc',
+          borderRadius : 4,
+          fontSize     : '0.9rem',
+        }}>
           Already appended file code to your prompt. “Clear List” removes them
           from memory and also erases them from the prompt.
         </div>
       )}
 
       {pendingFiles.length > 0 && (
-        <div
-          style={{
-            marginBottom: '1rem',
-            padding: '0.75rem 1rem',
-            background: '#442200',
-            color: '#ffe7cc',
-            borderRadius: 4,
-            fontSize: '0.9rem',
-          }}
-        >
+        <div style={{
+          marginBottom: '1rem',
+          padding      : '0.75rem 1rem',
+          background   : '#442200',
+          color        : '#ffe7cc',
+          borderRadius : 4,
+          fontSize     : '0.9rem',
+        }}>
           {pendingFiles.length} / {FILE_LIMIT} files in memory. Clear List wipes
           them from the prompt.
         </div>
       )}
 
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'flex-start',
-          gap: 8
-        }}
-      >
+      <div style={{
+        display       : 'flex',
+        justifyContent: 'space-between',
+        alignItems    : 'flex-start',
+        gap           : 8
+      }}>
         <div style={{ display: 'flex', gap: 8 }}>
           <button className="button" onClick={handleAddFiles} disabled={adding}>
             + Add Files
@@ -211,25 +232,21 @@ export default function FilePane({
             className="button"
             onClick={handleClearAll}
             disabled={adding && pendingFiles.length === 0}
-            style={
-              pendingFiles.length
-                ? { background: '#b71c1c', color: '#fff', borderColor: '#7f0000' }
-                : {}
+            style={pendingFiles.length
+              ? { background: '#b71c1c', color: '#fff', borderColor: '#7f0000' }
+              : {}
             }
           >
             Clear List
           </button>
         </div>
 
-        {/* Right side: OS shortcuts + a "Paste Image" button */}
-        <div
-          style={{
-            textAlign: 'right',
-            fontSize: '0.8rem',
-            lineHeight: 1.2,
-            color: '#ccc'
-          }}
-        >
+        <div style={{
+          textAlign : 'right',
+          fontSize  : '0.8rem',
+          lineHeight: 1.2,
+          color     : '#ccc'
+        }}>
           <div><strong>Mac</strong>: Cmd+Ctrl+Shift+3 or 4 → copies screenshot</div>
           <div><strong>Win</strong>: Win+Shift+S → copies screenshot</div>
           <div><strong>Linux</strong>: PrtSc w/ Flameshot → to clipboard</div>
@@ -247,6 +264,7 @@ export default function FilePane({
         <strong>
           {pendingFiles.length} / {FILE_LIMIT} files selected
         </strong>
+
         {pendingFiles.length > 0 && (
           <ul className="file-pane-filelist">
             {pendingFiles.map(f => (
