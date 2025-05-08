@@ -1,42 +1,40 @@
 /* -------------------------------------------------------------------------
    src/hooks.js
 
-   - Maintains user settings in localStorage (useSettings, useFormData)
-   - BFS directory scanning for dropped files
-   - useFileDrop(onText, onImage) now supports text vs. images.
-   - useMode, useTokenCount, useUndoableDelete remain unchanged.
+   - Persistence:
+       useSettings(), useFormData()
+   - BFS directory scanning:
+       gatherAllDroppedFiles() w/ max limit
+   - useFileDrop(onText, onImage)
+   - useMode, useTokenCount, useUndoableDelete
 ---------------------------------------------------------------------------*/
 
 import {
   useState,
   useEffect,
   useCallback,
-  useRef,
+  useRef
 } from 'preact/hooks';
 import { encodingForModel } from 'js-tiktoken';
 import { LOCALSTORAGE_DEBOUNCE } from './config.js';
+import { isTextLike, isImage }   from './lib/fileTypeGuards.js';
 
-// NEW: we now import isTextLike & isImage for gating
-import { isTextLike, isImage } from './lib/fileTypeGuards.js';
+/* ─────────────────────────── constants ────────────────────────── */
+const MAX_TOTAL_DROPPED_FILES = 2000;
 
-/*────────────────────────────  Local-Storage w/ Debounce  ───────────────────
-   Minimizes frequent writes by waiting <delay> ms before persisting to localStorage.
-*/
+/* ───────────────────── localStorage hooks ─────────────────────── */
 function useDebouncedLocalStorage(key, initial, delay = LOCALSTORAGE_DEBOUNCE) {
   const [value, setValue] = useState(() => {
-    try {
-      return JSON.parse(localStorage.getItem(key)) ?? initial;
-    } catch {
-      return initial;
-    }
+    try { return JSON.parse(localStorage.getItem(key)) ?? initial; }
+    catch { return initial; }
   });
 
   useEffect(() => {
     const id = setTimeout(() => {
       try {
         localStorage.setItem(key, JSON.stringify(value));
-      } catch (err) {
-        console.warn('localStorage error', err);
+      } catch (e) {
+        console.warn('localStorage error', e);
       }
     }, delay);
     return () => clearTimeout(id);
@@ -45,17 +43,15 @@ function useDebouncedLocalStorage(key, initial, delay = LOCALSTORAGE_DEBOUNCE) {
   return [value, setValue];
 }
 
-/*────────────────────────────  useSettings  ────────────────────────────────*/
 export function useSettings() {
   return useDebouncedLocalStorage('konzuko-settings', {
     apiKey       : '',
     model        : 'gpt-3.5-turbo',
     codeType     : 'javascript',
-    showSettings : false,
+    showSettings : false
   });
 }
 
-/*────────────────────────────  useFormData  ────────────────────────────────*/
 export function useFormData() {
   return useDebouncedLocalStorage('konzuko-form-data', {
     developGoal         : '',
@@ -69,140 +65,122 @@ export function useFormData() {
   });
 }
 
-/*────────────────────────────  BFS file scanning  ──────────────────────────
-   gatherAllDroppedFiles:  handle directories + files from DataTransferItems
-*/
-async function readEntriesPromise(dirReader) {
-  return new Promise((resolve, reject) => {
-    dirReader.readEntries(resolve, reject);
-  });
+/* ───────────────────── BFS dir scanning ───────────────────────── */
+async function readEntriesPromise(reader) {
+  return new Promise((res, rej) => reader.readEntries(res, rej));
 }
 
-async function bfsTraverseWebkitEntry(rootEntry, outEntries = []) {
-  const queue = [rootEntry];
-  while (queue.length) {
-    const entry = queue.shift();
-    if (!entry) continue;
-    if (entry.isFile) {
-      outEntries.push(entry);
-    } else if (entry.isDirectory) {
-      const reader = entry.createReader();
-      let batch = await readEntriesPromise(reader);
-      while (batch.length > 0) {
-        for (const e of batch) queue.push(e);
-        batch = await readEntriesPromise(reader);
+async function bfsTraverseWebkitEntry(rootEntry, out = [], max = MAX_TOTAL_DROPPED_FILES) {
+  const q = [rootEntry];
+  while (q.length && out.length < max) {
+    const e = q.shift();
+    if (e.isFile) out.push(e);
+    else if (e.isDirectory) {
+      const rdr = e.createReader();
+      let batch = await readEntriesPromise(rdr);
+      while (batch.length && out.length < max) {
+        q.push(...batch);
+        batch = await readEntriesPromise(rdr);
       }
     }
   }
-  return outEntries;
+  return out;
 }
-function fileEntryToFile(entry) {
-  return new Promise((resolve, reject) => {
+
+function entryToFile(entry) {
+  return new Promise((res, rej) => {
     entry.file(
-      file => {
-        file.fullPath = entry.fullPath || file.name;
-        resolve(file);
+      f => {
+        f.fullPath = entry.fullPath || f.name;
+        res(f);
       },
-      err => reject(err)
+      err => rej(err)
     );
   });
 }
 
-async function bfsTraverseFsHandle(rootHandle, outFiles = []) {
-  const queue = [rootHandle];
-  while (queue.length) {
-    const handle = queue.shift();
-    if (handle.kind === 'file') {
-      const file = await handle.getFile();
-      file.fullPath = file.fullPath || file.name;
-      outFiles.push(file);
-    } else if (handle.kind === 'directory') {
-      for await (const [, child] of handle.entries()) {
-        queue.push(child);
+async function bfsTraverseFsHandle(rootHandle, out = [], max = MAX_TOTAL_DROPPED_FILES) {
+  const q = [rootHandle];
+  while (q.length && out.length < max) {
+    const h = q.shift();
+    if (h.kind === 'file') {
+      const f = await h.getFile();
+      f.fullPath = f.fullPath || f.name;
+      out.push(f);
+    } else if (h.kind === 'directory') {
+      for await (const [, child] of h.entries()) {
+        if (out.length >= max) break;
+        q.push(child);
       }
     }
   }
-  return outFiles;
+  return out;
 }
 
-async function gatherAllDroppedFiles(dataTransferItems) {
-  const allFiles = [];
+async function gatherAllDroppedFiles(items) {
+  const out = [];
+  for (let i = 0; i < items.length && out.length < MAX_TOTAL_DROPPED_FILES; i++) {
+    const it = items[i];
+    if (it.kind !== 'file') continue;
 
-  for (let i = 0; i < dataTransferItems.length; i++) {
-    const item = dataTransferItems[i];
-    if (item.kind !== 'file') continue;
-
-    // 1) Attempt File System Access BFS
-    if (item.getAsFileSystemHandle) {
+    // 1) FS Access BFS
+    if (it.getAsFileSystemHandle) {
       try {
-        const handle = await item.getAsFileSystemHandle();
-        const fsFiles = await bfsTraverseFsHandle(handle);
-        allFiles.push(...fsFiles);
+        const h = await it.getAsFileSystemHandle();
+        await bfsTraverseFsHandle(h, out, MAX_TOTAL_DROPPED_FILES);
         continue;
-      } catch (err) {
-        console.warn('FS Access BFS error, fallback to webkit:', err);
-        // fall through to webkit below
-      }
+      } catch {}
     }
 
-    // 2) Attempt webkitGetAsEntry BFS
-    if (item.webkitGetAsEntry) {
-      const entry = item.webkitGetAsEntry();
-      if (entry) {
-        const entries = await bfsTraverseWebkitEntry(entry);
-        const realFiles = await Promise.all(entries.map(e => fileEntryToFile(e)));
-        allFiles.push(...realFiles);
+    // 2) webkit BFS
+    if (it.webkitGetAsEntry) {
+      const ent = it.webkitGetAsEntry();
+      if (ent) {
+        const entries = await bfsTraverseWebkitEntry(ent, [], MAX_TOTAL_DROPPED_FILES - out.length);
+        const files   = await Promise.all(entries.map(entryToFile));
+        out.push(...files.slice(0, MAX_TOTAL_DROPPED_FILES - out.length));
         continue;
       }
     }
 
-    // 3) Fallback single file read
-    const file = item.getAsFile();
+    // 3) fallback single
+    const file = it.getAsFile();
     if (file) {
       file.fullPath = file.name;
-      allFiles.push(file);
+      out.push(file);
     }
   }
-
-  return allFiles;
+  return out.slice(0, MAX_TOTAL_DROPPED_FILES);
 }
 
-/**
- * useFileDrop:
- *   onText(text, file) → for any accepted “text-like” file
- *   onImage?(name, dataUrl) → if dropped file is an image
- */
+/* ───────────────────── useFileDrop ───────────────────────────── */
 export function useFileDrop(onText, onImage) {
-  // Must prevent default to enable drop
-  const dragOver = useCallback(e => {
-    e.preventDefault();
-  }, []);
+  const dragOver = useCallback(e => e.preventDefault(), []);
 
   const drop = useCallback(async e => {
     e.preventDefault();
-    const dtItems = e.dataTransfer.items;
-    if (!dtItems) return;
+    const files = await gatherAllDroppedFiles(e.dataTransfer.items);
 
-    const files = await gatherAllDroppedFiles(dtItems);
     for (const f of files) {
-      // 1) If image, produce thumbnail
+      // A) image
       if (isImage(f)) {
         if (onImage) {
-          const url = URL.createObjectURL(f);
-          onImage(f.name, url);
+          const url    = URL.createObjectURL(f);
+          const revoke = () => URL.revokeObjectURL(url);
+          onImage(f.name, url, revoke);
         }
         continue;
       }
-      // 2) If not text, skip
+      // B) non-text skip
       if (!isTextLike(f)) continue;
-      // 3) For text-likes, read as text
-      await new Promise(resolve => {
-        const reader = new FileReader();
-        reader.onload = () => {
-          onText(reader.result, f);
-          resolve();
+      // C) text
+      await new Promise(res => {
+        const r = new FileReader();
+        r.onload = () => {
+          onText(String(r.result), f);
+          res();
         };
-        reader.readAsText(f);
+        r.readAsText(f);
       });
     }
   }, [onText, onImage]);
@@ -210,29 +188,23 @@ export function useFileDrop(onText, onImage) {
   return { dragOver, drop };
 }
 
-/*────────────────────────────  mode  ───────────────────────────────────────*/
+/* ───────────────────── useMode, useTokenCount, useUndoableDelete ───────── */
 export function useMode() {
   const ALLOWED = ['DEVELOP','COMMIT','CODE CHECK'];
   const stored  = localStorage.getItem('konzuko-mode');
   const initial = ALLOWED.includes(stored) ? stored : 'DEVELOP';
   const [mode, _setMode] = useState(initial);
 
-  const setMode = val => {
-    if (!ALLOWED.includes(val)) {
-      console.warn('Ignoring illegal mode:', val);
-      return;
-    }
-    _setMode(val);
-  };
-
   useEffect(() => {
     localStorage.setItem('konzuko-mode', mode);
   }, [mode]);
 
+  const setMode = val => {
+    if (ALLOWED.includes(val)) _setMode(val);
+  };
   return [mode, setMode];
 }
 
-/*────────────────────────────  token counting  ─────────────────────────────*/
 export function useTokenCount(messages = [], model = 'gpt-3.5-turbo') {
   const [count, setCount] = useState(0);
   const encRef            = useRef({});
@@ -255,7 +227,7 @@ export function useTokenCount(messages = [], model = 'gpt-3.5-turbo') {
         const enc = await getEncoder();
         const total = messages.reduce((sum, m) => {
           const txt = Array.isArray(m.content)
-            ? m.content.map(c => (c.type==='text' ? c.text : '')).join('')
+            ? m.content.filter(b => b.type==='text').map(b => b.text).join('')
             : String(m.content);
           return sum + enc.encode(txt).length;
         }, 0);
@@ -271,7 +243,6 @@ export function useTokenCount(messages = [], model = 'gpt-3.5-turbo') {
   return count;
 }
 
-/*──────────────────────────── Undoable Delete  ─────────────────────────────*/
 export function useUndoableDelete(showToast) {
   return useCallback(async ({
     itemLabel,
@@ -288,7 +259,6 @@ export function useUndoableDelete(showToast) {
     try {
       await deleteFn();
       afterDelete?.();
-      // Provide 30s to 1min window to click “Undo”:
       showToast(`${itemLabel} deleted.`, () => undoFn());
     } catch (err) {
       alert(`Delete failed: ${err.message}`);
