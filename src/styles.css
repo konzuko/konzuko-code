@@ -113,6 +113,7 @@ html, body {
   flex-direction: column;
   gap: var(--space-xs);
   z-index: 30;
+  width: 2rem;
 }
 .chat-nav-rail .button {
   padding: var(--space-xs);
