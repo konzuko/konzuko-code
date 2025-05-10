@@ -1,4 +1,3 @@
-
 import { useState, useEffect, useCallback, useRef } from 'preact/hooks';
 import ChatPane        from './chatpane.jsx';
 import PromptBuilder   from './PromptBuilder.jsx';
@@ -30,7 +29,7 @@ import {
 
 import { queue } from './lib/TaskQueue.js';
 
-/* fallback alert if blocked */
+// Fallback alert if blocked
 function safeAlert(msg) {
   try {
     alert(msg);
@@ -39,12 +38,11 @@ function safeAlert(msg) {
   }
 }
 
-/* let queueSetLoading = () => {}; we assign it below */
+// We'll toggle this to show/hide loading while tasks run
 let queueSetLoading = () => {};
 
 /**
- * Enqueue an async function (taskFn) that returns a Promise,
- * so we can show “loadingSend” while it runs.
+ * Enqueue an async function so we can show loadingSend while it runs.
  */
 async function runTask(taskFn) {
   queueSetLoading(true);
@@ -59,34 +57,8 @@ async function runTask(taskFn) {
   }
 }
 
-/**
- * Split any ```fenced code``` block and show a copy button.
- */
-function renderWithCodeButtons(text) {
-  const parts = text.split(/(```[\s\S]*?```)/g);
-  return parts.map((block, i) => {
-    if (block.startsWith('```') && block.endsWith('```')) {
-      const code = block.slice(3, -3).trim();
-      return (
-        <div key={i} style={{ position: 'relative', margin: '8px 0' }}>
-          <button
-            className="copy-snippet"
-            onClick={() => navigator.clipboard.writeText(code)}
-          >
-            📋
-          </button>
-          <pre className="code-block">{code}</pre>
-        </div>
-      );
-    } else {
-      return (
-        <div key={i} style={{ whiteSpace: 'pre-wrap' }}>
-          {block}
-        </div>
-      );
-    }
-  });
-}
+// (NEW) We import the full MarkdownRenderer instead of renderWithCodeButtons
+import MarkdownRenderer from './components/MarkdownRenderer.jsx';
 
 /** Revoke an image blob URL exactly once. */
 function revokeOnce(img) {
@@ -117,13 +89,13 @@ export default function App() {
   const [form,     setForm]     = useFormData();
   const [mode,     setMode]     = useMode();
 
-  // token count for display
+  // token count in the current chat
   const tokenCount = useTokenCount(
     chats.find(c => c.id === currentChatId)?.messages ?? [],
     settings.model
   );
 
-  // to show ephemeral toast
+  // ephemeral toast
   const showToast      = useCallback((text, onUndo) => setToast({ text, onUndo }), []);
   const undoableDelete = useUndoableDelete(showToast);
 
@@ -131,21 +103,15 @@ export default function App() {
   const chatContainerRef = useRef(null);
 
   // ─────────────────────────────────────────────────────────────
-  // NAV-RAIL SCROLL LOGIC: “prev” or “next” message
+  // NAV-RAIL SCROLL LOGIC: scrollToPrev / scrollToNext
   // ─────────────────────────────────────────────────────────────
-  /**
-   * Jump to the message that appears immediately “above” the current scroll.
-   * If none, we jump to the top (scrollTop=0).
-   */
-  const scrollToPrev = () => {
+  function scrollToPrev() {
     const box = chatContainerRef.current;
     if (!box) return;
 
-    // gather .message DOM nodes
     const msgs = Array.from(box.querySelectorAll('.message'));
     if (!msgs.length) return;
 
-    // find the highest message whose offsetTop < current position
     const curTop = box.scrollTop;
     let target   = null;
     for (let i = msgs.length - 1; i >= 0; i--) {
@@ -155,13 +121,9 @@ export default function App() {
       }
     }
     box.scrollTop = target ? target.offsetTop : 0;
-  };
+  }
 
-  /**
-   * Jump to the message that appears immediately “below” the current scroll.
-   * If none, jump to the bottom (scrollHeight).
-   */
-  const scrollToNext = () => {
+  function scrollToNext() {
     const box = chatContainerRef.current;
     if (!box) return;
 
@@ -177,7 +139,7 @@ export default function App() {
       }
     }
     box.scrollTop = target ? target.offsetTop : box.scrollHeight;
-  };
+  }
 
   // ─────────────────────────────────────────────────────────────
   // queue-runner setup
@@ -187,7 +149,7 @@ export default function App() {
   }, []);
 
   // ─────────────────────────────────────────────────────────────
-  // discard unsent images when switching chats
+  // When switching chats, discard unsent images from memory
   // ─────────────────────────────────────────────────────────────
   useEffect(() => {
     setPendingImages(prev => {
@@ -231,7 +193,9 @@ export default function App() {
     }).finally(() => {
       if (alive) setLC(false);
     });
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+    };
   }, [settings.codeType]);
 
   // ─────────────────────────────────────────────────────────────
@@ -249,10 +213,12 @@ export default function App() {
         ));
       })
       .catch(err => safeAlert('Failed to fetch msgs: ' + err.message));
-    return () => { live = false; };
+    return () => {
+      live = false;
+    };
   }, [currentChatId]);
 
-  // find the active chat object
+  // currently active chat
   const currentChat = chats.find(c => c.id === currentChatId) ?? { messages: [] };
 
   // ─────────────────────────────────────────────────────────────
@@ -317,7 +283,7 @@ export default function App() {
   }
 
   // ─────────────────────────────────────────────────────────────
-  // Send the user → assistant flow
+  // handleSend
   // ─────────────────────────────────────────────────────────────
   function handleSend() {
     if (loadingSend) return;
@@ -339,7 +305,7 @@ export default function App() {
           : c
       ));
 
-      // 2) re-fetch messages so we have the final array
+      // 2) re-fetch messages
       const freshMsg = await fetchMessages(currentChatId);
       let finalMsgs = [...freshMsg];
 
@@ -386,19 +352,19 @@ export default function App() {
           : c
       ));
 
-      // 5) reset the form fields
+      // 5) reset form
       resetForm();
     });
   }
 
-  /**
-   * Edit → user modifies text → saves → we re-run from that anchor
-   */
+  // ─────────────────────────────────────────────────────────────
+  // handleSaveEdit
+  // ─────────────────────────────────────────────────────────────
   function handleSaveEdit() {
     if (!editingId || loadingSend || savingEdit) return;
     setSaving(true);
     runTask(async () => {
-      // 1) retrieve fresh messages to get correct ordering
+      // 1) retrieve fresh messages
       let msgs = await fetchMessages(currentChatId);
       const idx = msgs.findIndex(x => x.id === editingId);
       if (idx === -1) throw new Error('Message not found for editing');
@@ -407,10 +373,10 @@ export default function App() {
       await updateMessage(editingId, editText);
       msgs[idx] = { ...msgs[idx], content: [{ type: 'text', text: editText }] };
 
-      // 3) archive everything after that anchor
+      // 3) archive everything after
       await archiveMessagesAfter(currentChatId, msgs[idx].created_at);
 
-      // 4) re-run from the truncated array
+      // 4) re-run from truncated
       const trimmed = msgs.slice(0, idx + 1);
       const { content, error } = await callApiForText({
         apiKey: settings.apiKey,
@@ -418,7 +384,7 @@ export default function App() {
         messages: trimmed
       });
 
-      // 5) store asst row
+      // 5) store assistant row
       await createMessage({
         chat_id: currentChatId,
         role: 'assistant',
@@ -427,7 +393,9 @@ export default function App() {
 
       // 6) fetch updated
       const updated = await fetchMessages(currentChatId);
-      setChats(cs => cs.map(c => c.id === currentChatId ? { ...c, messages: updated } : c));
+      setChats(cs => cs.map(c =>
+        c.id === currentChatId ? { ...c, messages: updated } : c
+      ));
       setEditing(null);
       setEditText('');
     }).finally(() => setSaving(false));
@@ -475,7 +443,7 @@ export default function App() {
           : c
       ));
 
-      // 6) show toast with “undo” → undoArchive + delete that asst
+      // 6) show toast with “undo”
       showToast('Archived messages. Undo?', () =>
         runTask(async () => {
           await undoArchiveMessagesAfter(anchorId, anchor.created_at);
@@ -507,7 +475,7 @@ export default function App() {
   }
 
   /**
-   * rename a chat
+   * Rename a chat
    */
   async function handleRenameChat(id, newTitle) {
     setChats(cs => cs.map(c => c.id === id ? { ...c, title: newTitle } : c));
@@ -529,7 +497,7 @@ export default function App() {
   }
 
   /**
-   * soft-delete a chat, with undo
+   * Soft-delete a chat, with undo
    */
   function handleDeleteChatUI(id) {
     if (loadingSend) return;
@@ -567,7 +535,7 @@ export default function App() {
   }
 
   /**
-   * soft-delete a single message, with undo
+   * Soft-delete a single message, with undo
    */
   function handleDeleteMessage(id) {
     if (id === editingId) {
@@ -596,6 +564,18 @@ export default function App() {
         }
       })
     );
+  }
+
+  /**
+   * (NEW) Enable editing a user message again
+   */
+  function handleStartEdit(msg) {
+    setEditing(msg.id);
+    // Pull plain text out so user can edit
+    const txt = Array.isArray(msg.content)
+      ? msg.content.filter(b => b.type === 'text').map(b => b.text).join('')
+      : String(msg.content);
+    setEditText(txt);
   }
 
   // ─────────────────────────────────────────────────────────────
@@ -630,7 +610,7 @@ export default function App() {
           >
             {settings.showSettings ? 'Close Settings' : 'Open Settings'}
           </button>
-          <span style={{ margin: '0 1em', fontWeight: 'bold' }}>konzukoCODE</span>
+          <span style={{ margin: '0 1em', fontWeight: 'bold' }}>konzuko-code</span>
 
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.5em' }}>
             <div style={{ padding: '4px 12px', background: '#4f8eff', borderRadius: 4 }}>
@@ -679,7 +659,7 @@ export default function App() {
             className="chat-container"
             ref={chatContainerRef}
           >
-            {/*  The “nav rail” is absolutely or sticky-positioned here */}
+            {/* The “nav rail” (scroll up/down) */}
             <div className="chat-nav-rail">
               <button
                 className="button icon-button"
@@ -700,7 +680,9 @@ export default function App() {
             </div>
 
             {currentChat.messages.map((m, idx) => {
-              const isAsst   = (m.role === 'assistant');
+              const isAsst = (m.role === 'assistant');
+
+              // Helper to copy entire message text
               const copyFull = () => {
                 if (Array.isArray(m.content)) {
                   const txt = m.content
@@ -713,6 +695,7 @@ export default function App() {
                 }
               };
 
+              // Only the last user message is "editable"
               const isLastUser = (
                 m.role === 'user' &&
                 idx === currentChat.messages.length - 1 &&
@@ -721,7 +704,7 @@ export default function App() {
 
               return (
                 <div key={m.id} className={`message message-${m.role}`}>
-                  {/* floating controls no longer have up/down arrows, just copy, edit, etc. */}
+                  {/* floating controls: copy, edit, resend, etc. */}
                   <div className="floating-controls">
                     {isAsst && (
                       <button
@@ -797,6 +780,7 @@ export default function App() {
 
                   <div className="message-content">
                     {m.id === editingId ? (
+                      // user is editing this message
                       <textarea
                         rows={4}
                         style={{ width: '100%' }}
@@ -804,11 +788,12 @@ export default function App() {
                         onInput={e => setEditText(e.target.value)}
                       />
                     ) : Array.isArray(m.content) ? (
+                      // each block -> either text or image
                       m.content.map((c, j) => {
                         if (c.type === 'text') {
                           return (
-                            <div key={j}>
-                              {renderWithCodeButtons(c.text)}
+                            <div key={j} style={{ width: '100%' }}>
+                              <MarkdownRenderer>{c.text}</MarkdownRenderer>
                             </div>
                           );
                         } else if (c.type === 'image_url') {
@@ -824,8 +809,9 @@ export default function App() {
                         return null;
                       })
                     ) : (
+                      // single string fallback
                       <div style={{ whiteSpace: 'pre-wrap' }}>
-                        {renderWithCodeButtons(String(m.content))}
+                        <MarkdownRenderer>{String(m.content)}</MarkdownRenderer>
                       </div>
                     )}
                   </div>
@@ -857,6 +843,7 @@ export default function App() {
         </div>
       </div>
 
+      {/* ephemeral toast */}
       {toast && (
         <Toast
           text={toast.text}
@@ -867,3 +854,4 @@ export default function App() {
     </div>
   );
 }
+
