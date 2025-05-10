@@ -630,7 +630,7 @@ export default function App() {
           >
             {settings.showSettings ? 'Close Settings' : 'Open Settings'}
           </button>
-          <span style={{ margin: '0 1em', fontWeight: 'bold' }}>konzuko-code</span>
+          <span style={{ margin: '0 1em', fontWeight: 'bold' }}>konzukoCODE</span>
 
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.5em' }}>
             <div style={{ padding: '4px 12px', background: '#4f8eff', borderRadius: 4 }}>
