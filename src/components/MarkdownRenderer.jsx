@@ -1,65 +1,45 @@
+import { useMemo } from 'preact/hooks'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import rehypeRaw from 'rehype-raw'
+import rehypeHighlight from 'rehype-highlight'
+import rehypeSanitize, { defaultSchema as githubSchema } from 'rehype-sanitize'
 
-import { useState, useEffect }  from 'preact/hooks';
-import ReactMarkdown            from 'react-markdown';
-import remarkGfm                from 'remark-gfm';
-import rehypeRaw                from 'rehype-raw';
-import rehypeSanitize           from 'rehype-sanitize';
-import rehypeHighlight          from 'rehype-highlight';
-
-import CodeBlock                from './CodeBlock.jsx';
+import CodeBlock from './CodeBlock.jsx'
 
 export default function MarkdownRenderer({ children }) {
-  const [schema, setSchema] = useState(null);
+  // create one memoized schema: start from GitHub's rules,
+  // then allow `class` on span/code/pre for syntax highlighting
+  const schema = useMemo(() => ({
+    ...githubSchema,
+    attributes: {
+      ...githubSchema.attributes,
+      span: [...(githubSchema.attributes?.span || []), 'class'],
+      code: [...(githubSchema.attributes?.code || []), 'class'],
+      pre: [...(githubSchema.attributes?.pre || []), 'class'],
+    },
+  }), [])
 
-  // 1) Lazy-load GitHub’s full sanitize rules, then allow class on code/span/pre:
-  useEffect(() => {
-    import('hast-util-sanitize/lib/github.json')
-      .then(mod => {
-        const githubSchema = mod.default || mod; // works whether ESM or CJS
-        setSchema({
-          ...githubSchema,
-          attributes: {
-            ...githubSchema.attributes,
-            span: [...(githubSchema.attributes?.span || []), 'class'],
-            code: [...(githubSchema.attributes?.code || []), 'class'],
-            pre : [...(githubSchema.attributes?.pre  || []), 'class'],
-          },
-        });
-      })
-      .catch(err => console.error('Failed to load GitHub schema', err));
-  }, []);
-
-  // 2) Fallback until schema loads (no rehypeRaw or sanitization):
-  if (!schema) {
-    return (
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>
-        {String(children)}
-      </ReactMarkdown>
-    );
-  }
-
-  // 3) Once loaded, we do the full pipeline:
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
       rehypePlugins={[
-        rehypeRaw,                      // parse raw HTML
-        [rehypeSanitize, schema],       // then sanitize
-        rehypeHighlight                 // add <span class="hljs-...">
+        rehypeRaw,                // parse any embedded HTML
+        [rehypeSanitize, schema], // sanitize it using GitHub's rules + our tweaks
+        rehypeHighlight           // syntax‐highlight code blocks
       ]}
       components={{
-        // only override <pre> to inject our copy button wrapper:
+        // wrap every <pre> so CodeBlock can inject a "Copy" button
         pre({ node, children, ...props }) {
           return (
             <CodeBlock preProps={props}>
               {children}
             </CodeBlock>
-          );
+          )
         },
       }}
     >
       {String(children)}
     </ReactMarkdown>
-  );
+  )
 }
-
