@@ -1,19 +1,16 @@
-import { memo } from 'preact/compat'
-import MarkdownRenderer from './MarkdownRenderer.jsx'
+import { memo } from 'preact/compat';
+import { getHtml } from '../lib/htmlCache.js';
 
-
-function MessageItem ({ m }) {
-return (
-<div className={message message-${m.role}} data-id={m.id}>
-{m.plainText ?? ''}
-
-)
+/* Renders pre-sanitised HTML for the text part of a message. */
+function MessageItem({ m }) {
+  const html = getHtml(m.checksum, m.plainText);
+  return (
+    <div
+      className={`message message-${m.role}`}
+      data-id={m.id}
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  );
 }
 
-
-export default memo(MessageItem, (a, b) =>
-a.m.id        === b.m.id &&
-a.m.updated_at === b.m.updated_at &&
-a.m.checksum   === b.m.checksum
-)
-
+export default memo(MessageItem, (a, b) => a.m.checksum === b.m.checksum);
