@@ -1,81 +1,47 @@
-/*
-   Updated so if the undo fails we don’t close the toast immediately.
-   The user sees the error from safeAlert and can possibly retry.
-*/
 
-import { useEffect, useState } from 'preact/hooks';
+import { render } from 'preact'
 
-function safeAlert(msg) {
-  try {
-    alert(msg);
-  } catch (e) {
-    console.error('Alert blocked in toast, fallback console error:', msg, e);
-  }
+let hostEl = null
+
+function ensureRoot() {
+  if (hostEl) return hostEl
+  hostEl = document.createElement('div')
+  hostEl.style.position = 'fixed'
+  hostEl.style.bottom = '20px'
+  hostEl.style.left = '50%'
+  hostEl.style.transform = 'translateX(-50%)'
+  hostEl.style.zIndex = 9999
+  document.body.appendChild(hostEl)
+  return hostEl
 }
 
-export default function Toast({
-  text,
-  onAction,   // async fn for “Undo” or retry
-  onClose,
-  duration = 30000
-}) {
-  const [dismissed, setDismissed] = useState(false);
-
-  // Auto‐dismiss after <duration> if user doesn’t click “Undo”
-  useEffect(() => {
-    const id = setTimeout(() => {
-      setDismissed(true);
-      onClose();
-    }, duration);
-    return () => clearTimeout(id);
-  }, [onClose, duration]);
-
-  // We only close after a successful undo action
-  const handleAction = async () => {
-    if (!onAction) {
-      // if no action, just close
-      onClose();
-      return;
-    }
-    try {
-      await onAction();
-      onClose();
-    } catch (err) {
-      // show error, but keep toast open
-      safeAlert(err.message || 'Unknown error');
-      console.error('Undo failed:', err);
-    }
-  };
-
-  if (dismissed) return null;
-
-  return (
+/**
+ * Displays a toast message for ms milliseconds (defaults to 4000).
+ * 
+ * Usage:
+ *   import Toast from './Toast.jsx'
+ *   Toast('Hello from my app!', 3000)
+ */
+export default function Toast(msg, ms = 4000) {
+  const root = ensureRoot()
+  
+  // Render the toast DOM
+  render(
     <div
       style={{
-        position: 'fixed',
-        bottom:   20,
-        left:     '50%',
-        transform:'translateX(-50%)',
-        background:  '#333',
-        color:       '#fff',
-        padding:     '10px 18px',
-        borderRadius: 4,
-        display:     'flex',
-        gap:         12,
-        zIndex:      9999
+        background: '#333',
+        color: '#fff',
+        padding: '8px 16px',
+        borderRadius: 4
       }}
     >
-      <span>{text}</span>
+      {msg}
+    </div>,
+    root
+  )
 
-      {onAction && (
-        <button className="button" onClick={handleAction}>
-          Undo
-        </button>
-      )}
-
-      <button className="button icon-button" onClick={() => { setDismissed(true); onClose(); }}>
-        ✕
-      </button>
-    </div>
-  );
+  // Automatically clear the toast after the specified time
+  setTimeout(() => {
+    render(null, root)
+  }, ms)
 }
