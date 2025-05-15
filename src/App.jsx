@@ -1,11 +1,7 @@
-/* ──────────────────────────────────────────────────────────────────
-   src/App.jsx            —  FULL FILE, NO OMISSIONS
-   • Replaces the big .map() loop with <ChatArea> (memoised)
-   • Keeps all business-logic helpers (send / edit / delete / undo)
-   • Leaves nav-rail DOM math untouched (works because all rows exist)
-   • Clipboard “Copy-all” failure now calls safeAlert (non-blocking)
-   • Uses the original Toast (undo) mechanics exactly as before
-─────────────────────────────────────────────────────────────────── */
+/* --------------------------------------------------------------------
+   src/App.jsx  –  Toast is now used purely in its imperative style.
+   The former <Toast …/> JSX and toast state have been removed.
+---------------------------------------------------------------------*/
 import {
   useState,
   useEffect,
@@ -15,8 +11,8 @@ import {
 
 import ChatPane        from './chatpane.jsx';
 import PromptBuilder   from './PromptBuilder.jsx';
-import Toast           from './components/Toast.jsx';      // undo-toast helper
-import ChatArea        from './components/ChatArea.jsx';   // NEW
+import Toast           from './components/Toast.jsx';   // imperative helper
+import ChatArea        from './components/ChatArea.jsx';
 
 import {
   callApiForText,
@@ -81,7 +77,6 @@ export default function App() {
   const [editText,      setEditText]      = useState('');
   const [savingEdit,    setSaving]        = useState(false);
 
-  const [toast,         setToast]         = useState(null);   // undo toast
   const [pendingImages, setPendingImages] = useState([]);
 
   /* user settings & draft form */
@@ -95,9 +90,9 @@ export default function App() {
     settings.model
   );
 
-  /* showToast(text, onUndo?)  – handshake around the Toast helper */
+  /* showToast(text, undoFn?) – 100 % imperative now */
   const showToast = useCallback((text, onUndo) => {
-    setToast({ text, onUndo });
+    Toast(text, 6000, onUndo);           // 6-second default
   }, []);
 
   const undoableDelete = useUndoableDelete(showToast);
@@ -203,8 +198,6 @@ export default function App() {
 
   /* =================================================================
      Business-logic helpers (send / edit / delete / undo)
-     These are copied verbatim from your original file, only whitespace
-     touched where ESLint yelled.
   ================================================================== */
 
   /* ---------- buildUserPrompt ---------- */
@@ -356,8 +349,8 @@ export default function App() {
       await archiveMessagesAfter(currentChatId, msgs[idx].created_at);
 
       /* 4) call LLM with trimmed list */
-      const trimmed              = msgs.slice(0, idx + 1);
-      const { content, error }   = await callApiForText({
+      const trimmed            = msgs.slice(0, idx + 1);
+      const { content, error } = await callApiForText({
         apiKey:   settings.apiKey,
         model:    settings.model,
         messages: trimmed
@@ -674,15 +667,6 @@ export default function App() {
           </div>
         </div>
       </div>
-
-      {/* toast (undo) */}
-      {toast && (
-        <Toast
-          text    ={toast.text}
-          onAction={toast.onUndo}
-          onClose ={() => setToast(null)}
-        />
-      )}
     </div>
   );
 }
