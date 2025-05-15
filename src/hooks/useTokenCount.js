@@ -1,24 +1,44 @@
-/* -----------------------------------------------------------------------
-   useTokenCount – chat-pane token counter (no debounce)
-   • Uses the shared worker + Promise RPC
-   • Guards against out-of-order replies
------------------------------------------------------------------------- */
-import { useEffect, useRef, useState } from 'preact/hooks';
-import { countTokens }                 from '../lib/tokenWorkerClient.js';
+/* --------------------------------------------------------------------------
+   useTokenCount – chat-pane + prompt token counter (no debounce)
 
-export default function useTokenCount(messages = [], model = 'gpt-3.5-turbo') {
+   • Accepts raw Supabase rows:  [{ id, role, content:[{type,text},…] }]
+   • Internally flattens → { ck , text } for the worker.
+   • Uses shared Promise-RPC client so only ONE Worker exists.
+---------------------------------------------------------------------------*/
+import { useEffect, useRef, useState } from 'preact/hooks';
+import { countTokens } from '../lib/tokenWorkerClient.js';
+import { checksum32 }  from '../lib/checksum.js';
+
+export default function useTokenCount(
+  messages = [],
+  model     = 'gpt-3.5-turbo'
+) {
   const [count, setCount] = useState(0);
-  const cancelled         = useRef(false);
-  const versionRef        = useRef(0);
+  const cancelled  = useRef(false);
+  const versionRef = useRef(0);
+
+  /* Convert Supabase rows → payload for worker */
+  function buildList() {
+    return messages.map(row => {
+      const txt = Array.isArray(row.content)
+        ? row.content
+            .filter(b => b.type === 'text')
+            .map(b => b.text)
+            .join('')
+        : String(row.content);
+      return { ck: checksum32(txt), text: txt };
+    });
+  }
 
   useEffect(() => {
-    if (!messages.length) { setCount(0); return; }
+    cancelled.current = false;
 
-    const list = messages.map(m => ({
-      ck  : m.checksum,
-      text: m.plainText
-    }));
+    if (!messages.length) {
+      setCount(0);
+      return;
+    }
 
+    const list      = buildList();
     const myVersion = ++versionRef.current;
 
     (async () => {
@@ -34,7 +54,9 @@ export default function useTokenCount(messages = [], model = 'gpt-3.5-turbo') {
       }
     })();
 
-    return () => { cancelled.current = true; };
+    return () => {
+      cancelled.current = true;
+    };
   }, [messages, model]);
 
   return count;

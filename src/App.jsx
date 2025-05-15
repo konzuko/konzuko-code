@@ -1,26 +1,13 @@
-/* --------------------------------------------------------------------
-   src/App.jsx  —  FULL FILE (no omissions)
 
-   Refactor summary
-   ----------------
-   • Introduced single `busy` flag = loadingSend || savingEdit
-     so *all* UI widgets share one notion of “something async is
-     happening – disable buttons”.
-   • Passed `busy` to ChatPane, ChatArea and PromptBuilder.
-   • ChatArea comparator already watches loadingSend and savingEdit
-     separately, so we keep savingEdit as-is and feed `busy`
-     through the existing `loadingSend` prop slot.
----------------------------------------------------------------------*/
 import {
   useState,
   useEffect,
-  useCallback,
-  useRef
+  useCallback
 } from 'preact/hooks';
 
 import ChatPane        from './chatpane.jsx';
 import PromptBuilder   from './PromptBuilder.jsx';
-import Toast           from './components/Toast.jsx';     // imperative helper
+import Toast           from './components/Toast.jsx';
 import ChatArea        from './components/ChatArea.jsx';
 
 import {
@@ -55,17 +42,24 @@ import { queue } from './lib/TaskQueue.js';
 let queueSetLoading = () => {};
 async function runTask(taskFn) {
   queueSetLoading(true);
-  try   { await queue.push(taskFn); }
-  catch (err) { console.error(err); safeAlert(err?.message || 'Unknown error'); }
-  finally { queueSetLoading(false); }
+  try {
+    await queue.push(taskFn);
+  } catch (err) {
+    console.error(err);
+    safeAlert(err?.message || 'Unknown error');
+  } finally {
+    queueSetLoading(false);
+  }
 }
 
 function safeAlert(msg) {
-  try { alert(msg); }
-  catch (e) { console.error('alert blocked', msg, e); }
+  try {
+    alert(msg);
+  } catch (e) {
+    console.error('alert blocked', msg, e);
+  }
 }
 
-/* revoke an image blob URL exactly once */
 function revokeOnce(img) {
   if (img?.revoke) {
     img.revoke();
@@ -81,7 +75,10 @@ export default function App() {
   const [chats,         setChats]         = useState([]);
   const [currentChatId, setCurrent]       = useState(null);
   const [loadingChats,  setLC]            = useState(true);
+
   const [loadingSend,   setLoadingSend]   = useState(false);
+  // Make queueSetLoading live from the start:
+  queueSetLoading = setLoadingSend;
 
   const [editingId,     setEditing]       = useState(null);
   const [editText,      setEditText]      = useState('');
@@ -89,21 +86,21 @@ export default function App() {
 
   const [pendingImages, setPendingImages] = useState([]);
 
-  /* user settings & draft form */
+  /* user settings & draft form data */
   const [settings, setSettings] = useSettings();
   const [form,     setForm]     = useFormData();
   const [mode,     setMode]     = useMode();
 
-  /* live token counter */
-  const tokenCount = useTokenCount(
-    chats.find(c => c.id === currentChatId)?.messages ?? [],
-    settings.model
-  );
-
-  /* unified busy flag (used by UI elements for disabling) */
+  /* unify busy states */
   const busy = loadingSend || savingEdit;
 
-  /* showToast(text, undoFn?) – 100 % imperative */
+  /* direct reference to the chat messages for the active ID */
+  const currentChat = chats.find(c => c.id === currentChatId) ?? { messages: [] };
+
+  /* token count just passes the “messages” array + model */
+  const tokenCount = useTokenCount(currentChat.messages, settings.model);
+
+  /* showToast(text, undoFn?) – 100% imperative */
   const showToast = useCallback(
     (text, onUndo) => Toast(text, 6000, onUndo),
     []
@@ -111,9 +108,6 @@ export default function App() {
 
   /* confirm-delete + undo helper */
   const undoableDelete = useUndoableDelete(showToast);
-
-  /* hook queue runner to global setter */
-  useEffect(() => { queueSetLoading = setLoadingSend; }, []);
 
   /* ─────────── LOAD chat list once ─────────── */
   useEffect(() => {
@@ -146,7 +140,9 @@ export default function App() {
         setChats(shaped);
         setCurrent(shaped[0].id);
       }
-    }).finally(() => { if (live) setLC(false); });
+    }).finally(() => {
+      if (live) setLC(false);
+    });
 
     return () => { live = false; };
   }, [settings.codeType]);
@@ -168,65 +164,37 @@ export default function App() {
     return () => { live = false; };
   }, [currentChatId]);
 
-  const currentChat = chats.find(c => c.id === currentChatId) ?? { messages: [] };
-
-  /* ─────────── nav-rail scroll helpers ─────────── */
-  const chatBoxRef = useRef(null);
-  const scrollToPrev = () => {
-    const box = chatBoxRef.current;
-    if (!box) return;
-    const msgs = Array.from(box.querySelectorAll('.message'));
-    if (!msgs.length) return;
-
-    const curTop = box.scrollTop;
-    let target = null;
-    for (let i = msgs.length - 1; i >= 0; i--) {
-      if (msgs[i].offsetTop < curTop - 1) { target = msgs[i]; break; }
-    }
-    box.scrollTop = target ? target.offsetTop : 0;
-  };
-  const scrollToNext = () => {
-    const box = chatBoxRef.current;
-    if (!box) return;
-    const msgs = Array.from(box.querySelectorAll('.message'));
-    if (!msgs.length) return;
-
-    const curTop = box.scrollTop;
-    let target = null;
-    for (let i = 0; i < msgs.length; i++) {
-      if (msgs[i].offsetTop > curTop + 1) { target = msgs[i]; break; }
-    }
-    box.scrollTop = target ? target.offsetTop : box.scrollHeight;
-  };
-
-  /* =================================================================
-     Business-logic helpers
-  ================================================================== */
-
-  /* ---------- rename chat ---------- */
+  /* ─────────── rename chat ─────────── */
   function handleRenameChat(id, newTitle) {
     setChats(cs => cs.map(c => c.id === id ? { ...c, title: newTitle } : c));
     runTask(() => updateChatTitle(id, newTitle)
       .catch(err => safeAlert('Rename failed: ' + err.message)));
   }
 
-  /* ---------- buildUserPrompt ---------- */
+  /* buildUserPrompt from mode/develop data */
   function buildUserPrompt() {
     if (mode === 'DEVELOP') {
       const lines = ['MODE: DEVELOP'];
-      if (form.developGoal.trim())         lines.push(`GOAL: ${form.developGoal.trim()}`);
-      if (form.developFeatures.trim())     lines.push(`FEATURES: ${form.developFeatures.trim()}`);
-      if (form.developReturnFormat.trim()) lines.push(`RETURN FORMAT: ${form.developReturnFormat.trim()}`);
-      if (form.developWarnings.trim())     lines.push(`THINGS TO REMEMBER/WARNINGS: ${form.developWarnings.trim()}`);
-      if (form.developContext.trim())      lines.push(`CONTEXT: ${form.developContext.trim()}`);
+      if (form.developGoal.trim())
+        lines.push(`GOAL: ${form.developGoal.trim()}`);
+      if (form.developFeatures.trim())
+        lines.push(`FEATURES: ${form.developFeatures.trim()}`);
+      if (form.developReturnFormat.trim())
+        lines.push(`RETURN FORMAT: ${form.developReturnFormat.trim()}`);
+      if (form.developWarnings.trim())
+        lines.push(`THINGS TO REMEMBER/WARNINGS: ${form.developWarnings.trim()}`);
+      if (form.developContext.trim())
+        lines.push(`CONTEXT: ${form.developContext.trim()}`);
       return lines.join('\n');
     }
-    if (mode === 'COMMIT')     return 'MODE: COMMIT\nPlease generate a git-style commit message.';
-    if (mode === 'CODE CHECK') return 'MODE: CODE CHECK\nPlease analyze any errors or pitfalls.';
+    if (mode === 'COMMIT')
+      return 'MODE: COMMIT\nPlease generate a git-style commit message.';
+    if (mode === 'CODE CHECK')
+      return 'MODE: CODE CHECK\nPlease analyze any errors or pitfalls.';
     return '';
   }
 
-  /* ---------- resetForm ---------- */
+  /* resetForm */
   function resetForm() {
     pendingImages.forEach(revokeOnce);
     setForm({
@@ -241,7 +209,7 @@ export default function App() {
     setPendingImages([]);
   }
 
-  /* ---------- copy entire conversation ---------- */
+  /* copy entire conversation */
   function handleCopyAll() {
     const txt = currentChat.messages.map(m =>
       Array.isArray(m.content)
@@ -252,7 +220,7 @@ export default function App() {
       .catch(() => safeAlert('Copy failed (clipboard API)'));
   }
 
-  /* ---------- handleSend ---------- */
+  /* ---------- handleSend  (with local build & final fetch) ---------- */
   function handleSend() {
     if (busy) return;
     if (mode === 'DEVELOP' && !form.developGoal.trim()) {
@@ -261,7 +229,7 @@ export default function App() {
     }
 
     runTask(async () => {
-      /* 1) build prompt & store user row */
+      /* 1) build prompt & store user row in DB + local state */
       const prompt = buildUserPrompt();
       const userRow = await createMessage({
         chat_id: currentChatId,
@@ -272,12 +240,10 @@ export default function App() {
         c.id === currentChatId ? { ...c, messages: [...c.messages, userRow] } : c
       ));
 
-      /* 2) fetch fresh list */
-      const fresh = await fetchMessages(currentChatId);
-      const msgs  = [...fresh];
-
-      /* 3) inject pending images */
+      /* 2) build local array for LLM instead of immediate fetch */
+      const msgs = [...currentChat.messages, userRow];
       const lastIdx = msgs.length - 1;
+
       if (pendingImages.length && msgs[lastIdx]?.role === 'user') {
         async function convert(img) {
           const blob    = await fetch(img.url).then(r => r.blob());
@@ -296,28 +262,35 @@ export default function App() {
         };
       }
 
-      /* 4) call LLM */
+      /* 3) call LLM */
       const { content, error } = await callApiForText({
         apiKey:   settings.apiKey,
         model:    settings.model,
         messages: msgs
       });
 
-      /* 5) assistant row */
+      /* 4) store assistant row in DB + local state */
       const asstRow = await createMessage({
-        chat_id: currentChatId,
-        role:    'assistant',
-        content: [{ type: 'text', text: error ? `Error: ${error}` : content }]
+        chat_id : currentChatId,
+        role    : 'assistant',
+        content : [{ type: 'text', text: error ? `Error: ${error}` : content }]
       });
       setChats(cs => cs.map(c =>
         c.id === currentChatId ? { ...c, messages: [...c.messages, asstRow] } : c
       ));
 
+      /* 5) reset local form fields */
       resetForm();
+
+      /* 6) final refresh from DB */
+      const updated = await fetchMessages(currentChatId);
+      setChats(cs => cs.map(c =>
+        c.id === currentChatId ? { ...c, messages: updated } : c
+      ));
     });
   }
 
-  /* ---------- edit helpers ---------- */
+  /* ---------- editing ---------- */
   function handleStartEdit(msg) {
     setEditing(msg.id);
     const txt = Array.isArray(msg.content)
@@ -325,10 +298,11 @@ export default function App() {
       : String(msg.content);
     setEditText(txt);
   }
-  const handleCancelEdit = () => {
+  function handleCancelEdit() {
     setEditing(null);
     setEditText('');
-  };
+  }
+
   async function handleSaveEdit() {
     if (!editingId || busy) return;
     setSaving(true);
@@ -350,7 +324,7 @@ export default function App() {
       await archiveMessagesAfter(currentChatId, msgs[idx].created_at);
 
       /* 4) call LLM */
-      const trimmed            = msgs.slice(0, idx + 1);
+      const trimmed            = msgs.slice(0, idx+1);
       const { content, error } = await callApiForText({
         apiKey:   settings.apiKey,
         model:    settings.model,
@@ -361,7 +335,7 @@ export default function App() {
       await createMessage({
         chat_id: currentChatId,
         role:    'assistant',
-        content: [{ type: 'text', text: error ? `Error: ${error}` : content }]
+        content: [{ type:'text', text:error?`Error: ${error}`:content }]
       });
 
       /* 6) refresh */
@@ -377,38 +351,30 @@ export default function App() {
   /* ---------- resend (archive + regenerate) ---------- */
   function handleResendMessage(id) {
     if (busy) return;
-
     runTask(async () => {
-      /* 1) find anchor */
       const msgs   = await fetchMessages(currentChatId);
       const anchor = msgs.find(x => x.id === id);
       if (!anchor) throw new Error('Message not found');
 
-      /* 2) archive newer */
       await archiveMessagesAfter(currentChatId, anchor.created_at);
-
-      /* 3) trimmed list */
       const trimmed = await fetchMessages(currentChatId);
 
-      /* 4) LLM */
       const { content, error } = await callApiForText({
         apiKey:   settings.apiKey,
         model:    settings.model,
         messages: trimmed
       });
 
-      /* 5) assistant row */
       const asst = await createMessage({
         chat_id: currentChatId,
         role:    'assistant',
-        content: [{ type: 'text', text: error ? `Error: ${error}` : content }]
+        content: [{ type:'text', text:error?`Error: ${error}`:content }]
       });
-
       setChats(cs => cs.map(c =>
         c.id === currentChatId ? { ...c, messages: [...trimmed, asst] } : c
       ));
 
-      /* 6) toast w/ undo */
+      /* toast w/ undo */
       showToast('Archived messages. Undo?', () =>
         runTask(async () => {
           await undoArchiveMessagesAfter(currentChatId, anchor.created_at);
@@ -445,7 +411,7 @@ export default function App() {
     undoableDelete({
       itemLabel: 'Chat',
       deleteFn: () => runTask(() => deleteChat(id)),
-      undoFn: () => runTask(async () => {
+      undoFn:   () => runTask(async () => {
         await undoDeleteChat(id);
         const rows = await fetchChats();
         const shaped = rows.map(r => ({
@@ -482,8 +448,8 @@ export default function App() {
 
     undoableDelete({
       itemLabel: 'Message',
-      deleteFn: () => runTask(() => deleteMessage(id)),
-      undoFn: () => runTask(async () => {
+      deleteFn:  () => runTask(() => deleteMessage(id)),
+      undoFn:    () => runTask(async () => {
         await undoDeleteMessage(id);
         const msgs = await fetchMessages(currentChatId);
         setChats(cs => cs.map(c =>
@@ -595,26 +561,7 @@ export default function App() {
 
         <div className="content-container" style={{ display: 'flex', flex: 1 }}>
           {/* ───── chat (memoised) ───── */}
-          <div className="chat-container" ref={chatBoxRef}>
-            {/* nav-rail */}
-            <div className="chat-nav-rail">
-              <button
-                className="button icon-button"
-                onClick={scrollToPrev}
-                title="Scroll to previous message"
-              >
-                ↑
-              </button>
-              <button
-                className="button icon-button"
-                onClick={scrollToNext}
-                title="Scroll to next message"
-              >
-                ↓
-              </button>
-            </div>
-
-            {/* ChatArea → no re-render on keystrokes */}
+          <div className="chat-container">
             <ChatArea
               messages           ={currentChat.messages}
               editingId          ={editingId}
