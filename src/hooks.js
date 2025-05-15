@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
    src/hooks.js
 
-   - Persistence:
+   - Persistence helpers:
        useSettings(), useFormData()
    - BFS directory scanning:
        gatherAllDroppedFiles() w/ max limit
@@ -15,9 +15,10 @@ import {
   useCallback,
   useRef
 } from 'preact/hooks';
-import { encodingForModel } from 'js-tiktoken';
-import { LOCALSTORAGE_DEBOUNCE } from './config.js';
-import { isTextLike, isImage }   from './lib/fileTypeGuards.js';
+
+import { encodingForModel }       from 'js-tiktoken';
+import { LOCALSTORAGE_DEBOUNCE }  from './config.js';
+import { isTextLike, isImage }    from './lib/fileTypeGuards.js';
 
 /* ─────────────────────────── constants ────────────────────────── */
 const MAX_TOTAL_DROPPED_FILES = 2000;
@@ -25,8 +26,11 @@ const MAX_TOTAL_DROPPED_FILES = 2000;
 /* ───────────────────── localStorage hooks ─────────────────────── */
 function useDebouncedLocalStorage(key, initial, delay = LOCALSTORAGE_DEBOUNCE) {
   const [value, setValue] = useState(() => {
-    try { return JSON.parse(localStorage.getItem(key)) ?? initial; }
-    catch { return initial; }
+    try {
+      return JSON.parse(localStorage.getItem(key)) ?? initial;
+    } catch {
+      return initial;
+    }
   });
 
   useEffect(() => {
@@ -61,7 +65,7 @@ export function useFormData() {
     developWarnings     : '',
     developContext      : '',
     fixCode             : '',
-    fixErrors           : '',
+    fixErrors           : ''
   });
 }
 
@@ -123,7 +127,7 @@ async function gatherAllDroppedFiles(items) {
     const it = items[i];
     if (it.kind !== 'file') continue;
 
-    // 1) FS Access BFS
+    /* 1) File-System Access API BFS */
     if (it.getAsFileSystemHandle) {
       try {
         const h = await it.getAsFileSystemHandle();
@@ -132,7 +136,7 @@ async function gatherAllDroppedFiles(items) {
       } catch {}
     }
 
-    // 2) webkit BFS
+    /* 2) WebKit directory BFS */
     if (it.webkitGetAsEntry) {
       const ent = it.webkitGetAsEntry();
       if (ent) {
@@ -143,7 +147,7 @@ async function gatherAllDroppedFiles(items) {
       }
     }
 
-    // 3) fallback single
+    /* 3) Fallback single file */
     const file = it.getAsFile();
     if (file) {
       file.fullPath = file.name;
@@ -153,7 +157,7 @@ async function gatherAllDroppedFiles(items) {
   return out.slice(0, MAX_TOTAL_DROPPED_FILES);
 }
 
-/* ───────────────────── useFileDrop ───────────────────────────── */
+/* ───────────────────── useFileDrop ────────────────────────────── */
 export function useFileDrop(onText, onImage) {
   const dragOver = useCallback(e => e.preventDefault(), []);
 
@@ -162,7 +166,7 @@ export function useFileDrop(onText, onImage) {
     const files = await gatherAllDroppedFiles(e.dataTransfer.items);
 
     for (const f of files) {
-      // A) image
+      /* A) image */
       if (isImage(f)) {
         if (onImage) {
           const url    = URL.createObjectURL(f);
@@ -171,9 +175,9 @@ export function useFileDrop(onText, onImage) {
         }
         continue;
       }
-      // B) non-text skip
+      /* B) non-text skip */
       if (!isTextLike(f)) continue;
-      // C) text
+      /* C) text */
       await new Promise(res => {
         const r = new FileReader();
         r.onload = () => {
@@ -188,9 +192,9 @@ export function useFileDrop(onText, onImage) {
   return { dragOver, drop };
 }
 
-/* ───────────────────── useMode, useTokenCount, useUndoableDelete ───────── */
+/* ───────────────────── useMode, useTokenCount ─────────────────── */
 export function useMode() {
-  const ALLOWED = ['DEVELOP','COMMIT','CODE CHECK'];
+  const ALLOWED = ['DEVELOP', 'COMMIT', 'CODE CHECK'];
   const stored  = localStorage.getItem('konzuko-mode');
   const initial = ALLOWED.includes(stored) ? stored : 'DEVELOP';
   const [mode, _setMode] = useState(initial);
@@ -199,9 +203,7 @@ export function useMode() {
     localStorage.setItem('konzuko-mode', mode);
   }, [mode]);
 
-  const setMode = val => {
-    if (ALLOWED.includes(val)) _setMode(val);
-  };
+  const setMode = val => ALLOWED.includes(val) && _setMode(val);
   return [mode, setMode];
 }
 
@@ -227,13 +229,12 @@ export function useTokenCount(messages = [], model = 'gpt-3.5-turbo') {
         const enc = await getEncoder();
         const total = messages.reduce((sum, m) => {
           const txt = Array.isArray(m.content)
-            ? m.content.filter(b => b.type==='text').map(b => b.text).join('')
+            ? m.content.filter(b => b.type === 'text').map(b => b.text).join('')
             : String(m.content);
           return sum + enc.encode(txt).length;
         }, 0);
         if (!cancelled) setCount(total);
-      }
-      catch {
+      } catch {
         if (!cancelled) setCount(0);
       }
     })();
@@ -243,6 +244,19 @@ export function useTokenCount(messages = [], model = 'gpt-3.5-turbo') {
   return count;
 }
 
+/* ───────────────────── useUndoableDelete ──────────────────────── */
+/**
+ * Confirmation + toast wrapper for deleting things.
+ *
+ * Usage:
+ *   const undoableDelete = useUndoableDelete(showToast);
+ *   undoableDelete({
+ *     itemLabel   : 'Message',
+ *     deleteFn    : () => runTask(() => deleteMessage(id)),
+ *     undoFn      : () => runTask(() => undoDeleteMessage(id)),
+ *     afterDelete : () => setState(...)
+ *   });
+ */
 export function useUndoableDelete(showToast) {
   return useCallback(async ({
     itemLabel,
@@ -251,15 +265,20 @@ export function useUndoableDelete(showToast) {
     undoFn,
     afterDelete
   }) => {
-    if (!confirm(confirmMessage ||
-      `Delete this ${itemLabel.toLowerCase()}? You can undo for ~30 min.`))
-    {
-      return;
-    }
+    /* 1) Ask synchronously while we are still in the user-gesture call-stack */
+    const ok = confirm(
+      confirmMessage ??
+      `Delete this ${itemLabel.toLowerCase()}? You can undo for ~30 min.`
+    );
+    if (!ok) return;
+
+    /* 2) Perform the actual delete (can be async) */
     try {
       await deleteFn();
       afterDelete?.();
-      showToast(`${itemLabel} deleted.`, () => undoFn());
+
+      /* 3) Show toast with Undo button */
+      showToast(`${itemLabel} deleted.`, undoFn);
     } catch (err) {
       alert(`Delete failed: ${err.message}`);
     }

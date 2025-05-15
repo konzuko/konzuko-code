@@ -1,6 +1,7 @@
 /* --------------------------------------------------------------------
-   src/App.jsx  –  Toast is now used purely in its imperative style.
-   The former <Toast …/> JSX and toast state have been removed.
+   src/App.jsx  —  full file, no omissions
+   Toast is used imperatively; ChatView / useMessages are gone; and the
+   missing handleRenameChat is restored.
 ---------------------------------------------------------------------*/
 import {
   useState,
@@ -11,7 +12,7 @@ import {
 
 import ChatPane        from './chatpane.jsx';
 import PromptBuilder   from './PromptBuilder.jsx';
-import Toast           from './components/Toast.jsx';   // imperative helper
+import Toast           from './components/Toast.jsx';     // imperative helper
 import ChatArea        from './components/ChatArea.jsx';
 
 import {
@@ -40,7 +41,9 @@ import {
 
 import { queue } from './lib/TaskQueue.js';
 
-/* ───────── helper so we can show loading while queue runs ───────── */
+/* ──────────────────────────────────────────────────────────────────
+   helpers
+─────────────────────────────────────────────────────────────────── */
 let queueSetLoading = () => {};
 async function runTask(taskFn) {
   queueSetLoading(true);
@@ -49,13 +52,12 @@ async function runTask(taskFn) {
   finally { queueSetLoading(false); }
 }
 
-/* Fallback alert if blocked (mobile Safari, etc.) */
 function safeAlert(msg) {
   try { alert(msg); }
   catch (e) { console.error('alert blocked', msg, e); }
 }
 
-/* Revoke an image blob URL exactly once */
+/* revoke an image blob URL exactly once */
 function revokeOnce(img) {
   if (img?.revoke) {
     img.revoke();
@@ -90,14 +92,16 @@ export default function App() {
     settings.model
   );
 
-  /* showToast(text, undoFn?) – 100 % imperative now */
-  const showToast = useCallback((text, onUndo) => {
-    Toast(text, 6000, onUndo);           // 6-second default
-  }, []);
+  /* showToast(text, undoFn?) – 100 % imperative */
+  const showToast = useCallback(
+    (text, onUndo) => Toast(text, 6000, onUndo),
+    []
+  );
 
+  /* confirm-delete + undo helper */
   const undoableDelete = useUndoableDelete(showToast);
 
-  /* plug queue runner */
+  /* hook queue runner to global setter */
   useEffect(() => { queueSetLoading = setLoadingSend; }, []);
 
   /* ─────────── LOAD chat list once ─────────── */
@@ -136,7 +140,7 @@ export default function App() {
     return () => { live = false; };
   }, [settings.codeType]);
 
-  /* ─────────── LOAD messages for the active chat ─────────── */
+  /* ─────────── LOAD messages for active chat ─────────── */
   useEffect(() => {
     if (!currentChatId) return;
     let live = true;
@@ -157,48 +161,43 @@ export default function App() {
 
   /* ─────────── nav-rail scroll helpers ─────────── */
   const chatBoxRef = useRef(null);
-
   const scrollToPrev = () => {
-    const box  = chatBoxRef.current;
+    const box = chatBoxRef.current;
     if (!box) return;
-
     const msgs = Array.from(box.querySelectorAll('.message'));
-    if (msgs.length === 0) return;
+    if (!msgs.length) return;
 
     const curTop = box.scrollTop;
-    let target   = null;
-
+    let target = null;
     for (let i = msgs.length - 1; i >= 0; i--) {
-      if (msgs[i].offsetTop < curTop - 1) {
-        target = msgs[i];
-        break;
-      }
+      if (msgs[i].offsetTop < curTop - 1) { target = msgs[i]; break; }
     }
     box.scrollTop = target ? target.offsetTop : 0;
   };
-
   const scrollToNext = () => {
-    const box  = chatBoxRef.current;
+    const box = chatBoxRef.current;
     if (!box) return;
-
     const msgs = Array.from(box.querySelectorAll('.message'));
-    if (msgs.length === 0) return;
+    if (!msgs.length) return;
 
     const curTop = box.scrollTop;
-    let target   = null;
-
+    let target = null;
     for (let i = 0; i < msgs.length; i++) {
-      if (msgs[i].offsetTop > curTop + 1) {
-        target = msgs[i];
-        break;
-      }
+      if (msgs[i].offsetTop > curTop + 1) { target = msgs[i]; break; }
     }
     box.scrollTop = target ? target.offsetTop : box.scrollHeight;
   };
 
   /* =================================================================
-     Business-logic helpers (send / edit / delete / undo)
+     Business-logic helpers
   ================================================================== */
+
+  /* ---------- rename chat (restored) ---------- */
+  function handleRenameChat(id, newTitle) {
+    setChats(cs => cs.map(c => c.id === id ? { ...c, title: newTitle } : c));
+    runTask(() => updateChatTitle(id, newTitle)
+      .catch(err => safeAlert('Rename failed: ' + err.message)));
+  }
 
   /* ---------- buildUserPrompt ---------- */
   function buildUserPrompt() {
@@ -238,7 +237,6 @@ export default function App() {
         ? m.content.filter(b => b.type === 'text').map(b => b.text).join('')
         : String(m.content)
     ).join('\n\n');
-
     navigator.clipboard.writeText(txt)
       .catch(() => safeAlert('Copy failed (clipboard API)'));
   }
@@ -252,29 +250,26 @@ export default function App() {
     }
 
     runTask(async () => {
-      /* 1) build prompt and insert USER row */
-      const prompt  = buildUserPrompt();
+      /* 1) build prompt & store user row */
+      const prompt = buildUserPrompt();
       const userRow = await createMessage({
         chat_id: currentChatId,
         role:    'user',
         content: [{ type: 'text', text: prompt }]
       });
-
       setChats(cs => cs.map(c =>
-        c.id === currentChatId
-          ? { ...c, messages: [...c.messages, userRow] }
-          : c
+        c.id === currentChatId ? { ...c, messages: [...c.messages, userRow] } : c
       ));
 
-      /* 2) re-fetch for safety */
+      /* 2) fetch fresh list */
       const fresh = await fetchMessages(currentChatId);
       const msgs  = [...fresh];
 
-      /* 3) inject any pending images into the last user row */
+      /* 3) inject pending images */
       const lastIdx = msgs.length - 1;
       if (pendingImages.length && msgs[lastIdx]?.role === 'user') {
         async function convert(img) {
-          const blob = await fetch(img.url).then(r => r.blob());
+          const blob    = await fetch(img.url).then(r => r.blob());
           const dataUrl = await new Promise(res => {
             const fr = new FileReader();
             fr.onloadend = () => res(fr.result);
@@ -297,24 +292,21 @@ export default function App() {
         messages: msgs
       });
 
-      /* 5) insert ASSISTANT reply */
+      /* 5) assistant row */
       const asstRow = await createMessage({
         chat_id: currentChatId,
         role:    'assistant',
         content: [{ type: 'text', text: error ? `Error: ${error}` : content }]
       });
-
       setChats(cs => cs.map(c =>
-        c.id === currentChatId
-          ? { ...c, messages: [...c.messages, asstRow] }
-          : c
+        c.id === currentChatId ? { ...c, messages: [...c.messages, asstRow] } : c
       ));
 
       resetForm();
     });
   }
 
-  /* ---------- editing helpers ---------- */
+  /* ---------- edit helpers ---------- */
   function handleStartEdit(msg) {
     setEditing(msg.id);
     const txt = Array.isArray(msg.content)
@@ -322,18 +314,16 @@ export default function App() {
       : String(msg.content);
     setEditText(txt);
   }
-
-  function handleCancelEdit() {
+  const handleCancelEdit = () => {
     setEditing(null);
     setEditText('');
-  }
-
+  };
   async function handleSaveEdit() {
     if (!editingId || loadingSend || savingEdit) return;
     setSaving(true);
 
     runTask(async () => {
-      /* 1) fetch fresh msgs */
+      /* 1) fetch fresh list */
       let msgs = await fetchMessages(currentChatId);
       const idx = msgs.findIndex(x => x.id === editingId);
       if (idx === -1) throw new Error('Message not found for editing');
@@ -345,10 +335,10 @@ export default function App() {
         content: [{ type: 'text', text: editText }]
       };
 
-      /* 3) archive everything after */
+      /* 3) archive after */
       await archiveMessagesAfter(currentChatId, msgs[idx].created_at);
 
-      /* 4) call LLM with trimmed list */
+      /* 4) call LLM */
       const trimmed            = msgs.slice(0, idx + 1);
       const { content, error } = await callApiForText({
         apiKey:   settings.apiKey,
@@ -373,29 +363,30 @@ export default function App() {
     }).finally(() => setSaving(false));
   }
 
+  /* ---------- resend (archive + regenerate) ---------- */
   function handleResendMessage(id) {
     if (loadingSend) return;
 
     runTask(async () => {
-      /* 1) get latest msgs and find anchor */
+      /* 1) find anchor */
       const msgs   = await fetchMessages(currentChatId);
       const anchor = msgs.find(x => x.id === id);
       if (!anchor) throw new Error('Message not found');
 
-      /* 2) archive newer ones */
+      /* 2) archive newer */
       await archiveMessagesAfter(currentChatId, anchor.created_at);
 
-      /* 3) re-fetch trimmed list */
+      /* 3) trimmed list */
       const trimmed = await fetchMessages(currentChatId);
 
-      /* 4) call API again */
+      /* 4) LLM */
       const { content, error } = await callApiForText({
         apiKey:   settings.apiKey,
         model:    settings.model,
         messages: trimmed
       });
 
-      /* 5) add assistant reply */
+      /* 5) assistant row */
       const asst = await createMessage({
         chat_id: currentChatId,
         role:    'assistant',
@@ -403,9 +394,7 @@ export default function App() {
       });
 
       setChats(cs => cs.map(c =>
-        c.id === currentChatId
-          ? { ...c, messages: [...trimmed, asst] }
-          : c
+        c.id === currentChatId ? { ...c, messages: [...trimmed, asst] } : c
       ));
 
       /* 6) toast w/ undo */
@@ -422,10 +411,9 @@ export default function App() {
     });
   }
 
-  /* ---------- chat CRUD ---------- */
+  /* ---------- new / delete chat ---------- */
   function handleNewChat() {
     if (loadingSend) return;
-
     runTask(async () => {
       const c = await createChat({ title: 'New Chat', model: settings.codeType });
       setChats(cs => [{
@@ -439,61 +427,41 @@ export default function App() {
     });
   }
 
-  async function handleRenameChat(id, newTitle) {
-    setChats(cs => cs.map(c => c.id === id ? { ...c, title: newTitle } : c));
-    try {
-      await updateChatTitle(id, newTitle);
-    } catch (err) {
-      safeAlert('Rename failed: ' + err.message);
-      /* reload list from DB */
-      const rows = await fetchChats();
-      const shaped = rows.map(r => ({
-        id:       r.id,
-        title:    r.title,
-        started:  r.created_at,
-        model:    r.code_type,
-        messages: []
-      }));
-      setChats(shaped);
-    }
-  }
-
   function handleDeleteChatUI(id) {
     if (loadingSend) return;
-
     const anchorId = currentChatId;
-    runTask(() =>
-      undoableDelete({
-        itemLabel: 'Chat',
-        deleteFn:  () => deleteChat(id),
-        undoFn:    () => runTask(async () => {
-          await undoDeleteChat(id);
-          const rows = await fetchChats();
-          const shaped = rows.map(r => ({
-            id:       r.id,
-            title:    r.title,
-            started:  r.created_at,
-            model:    r.code_type,
-            messages: []
-          }));
-          setChats(shaped);
-          const found = shaped.find(c => c.id === id);
-          setCurrent(found ? found.id : shaped[0]?.id ?? null);
-        }),
-        afterDelete: () => {
-          setChats(cs => {
-            const filtered = cs.filter(x => x.id !== id);
-            if (anchorId === id) {
-              if (filtered.length) setCurrent(filtered[0].id);
-              else setCurrent(null);
-            }
-            return filtered;
-          });
-        }
-      })
-    );
+
+    undoableDelete({
+      itemLabel: 'Chat',
+      deleteFn: () => runTask(() => deleteChat(id)),
+      undoFn: () => runTask(async () => {
+        await undoDeleteChat(id);
+        const rows = await fetchChats();
+        const shaped = rows.map(r => ({
+          id:       r.id,
+          title:    r.title,
+          started:  r.created_at,
+          model:    r.code_type,
+          messages: []
+        }));
+        setChats(shaped);
+        const found = shaped.find(c => c.id === id);
+        setCurrent(found ? found.id : shaped[0]?.id ?? null);
+      }),
+      afterDelete: () => {
+        setChats(cs => {
+          const filtered = cs.filter(x => x.id !== id);
+          if (anchorId === id) {
+            if (filtered.length) setCurrent(filtered[0].id);
+            else setCurrent(null);
+          }
+          return filtered;
+        });
+      }
+    });
   }
 
+  /* ---------- delete message ---------- */
   function handleDeleteMessage(id) {
     if (id === editingId) {
       setEditing(null);
@@ -501,31 +469,28 @@ export default function App() {
     }
     if (loadingSend) return;
 
-    const anchorId = currentChatId;
-    runTask(() =>
-      undoableDelete({
-        itemLabel: 'Message',
-        deleteFn:  () => deleteMessage(id),
-        undoFn:    () => runTask(async () => {
-          await undoDeleteMessage(id);
-          const msgs = await fetchMessages(anchorId);
-          setChats(cs => cs.map(c =>
-            c.id === anchorId ? { ...c, messages: msgs } : c
-          ));
-        }),
-        afterDelete: () => {
-          setChats(cs => cs.map(c =>
-            c.id === anchorId
-              ? { ...c, messages: c.messages.filter(m => m.id !== id) }
-              : c
-          ));
-        }
-      })
-    );
+    undoableDelete({
+      itemLabel: 'Message',
+      deleteFn: () => runTask(() => deleteMessage(id)),
+      undoFn: () => runTask(async () => {
+        await undoDeleteMessage(id);
+        const msgs = await fetchMessages(currentChatId);
+        setChats(cs => cs.map(c =>
+          c.id === currentChatId ? { ...c, messages: msgs } : c
+        ));
+      }),
+      afterDelete: () => {
+        setChats(cs => cs.map(c =>
+          c.id === currentChatId
+            ? { ...c, messages: c.messages.filter(m => m.id !== id) }
+            : c
+        ));
+      }
+    });
   }
 
   /* ============================================================== */
-  /*                              UI                                */
+  /*                               UI                               */
   /* ============================================================== */
   if (loadingChats) {
     return (
@@ -554,15 +519,23 @@ export default function App() {
         <div className="top-bar">
           <button
             className="button"
-            onClick={() => setSettings(s => ({ ...s, showSettings: !s.showSettings }))}
+            onClick={() =>
+              setSettings(s => ({ ...s, showSettings: !s.showSettings }))
+            }
           >
             {settings.showSettings ? 'Close Settings' : 'Open Settings'}
           </button>
 
-          <span style={{ margin: '0 1em', fontWeight: 'bold' }}>konzuko-code</span>
+          <span style={{ margin: '0 1em', fontWeight: 'bold' }}>
+            konzuko-code
+          </span>
 
           <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.5em' }}>
-            <div style={{ padding: '4px 12px', background: '#4f8eff', borderRadius: 4 }}>
+            <div style={{
+              padding: '4px 12px',
+              background: '#4f8eff',
+              borderRadius: 4
+            }}>
               Tokens: {tokenCount.toLocaleString()}
             </div>
             <button className="button" onClick={handleCopyAll}>
@@ -571,7 +544,7 @@ export default function App() {
           </div>
         </div>
 
-        {/* user settings panel (unchanged) */}
+        {/* settings panel */}
         {settings.showSettings && (
           <div
             className="settings-panel"
@@ -582,7 +555,9 @@ export default function App() {
               <input
                 className="form-input"
                 value={settings.apiKey}
-                onInput={e => setSettings(s => ({ ...s, apiKey: e.target.value }))}
+                onInput={e =>
+                  setSettings(s => ({ ...s, apiKey: e.target.value }))
+                }
               />
             </div>
 
@@ -591,12 +566,16 @@ export default function App() {
               <select
                 className="form-select"
                 value={settings.model}
-                onChange={e => setSettings(s => ({ ...s, model: e.target.value }))}
+                onChange={e =>
+                  setSettings(s => ({ ...s, model: e.target.value }))
+                }
               >
                 <option value="o4-mini-2025-04-16">o4-mini-2025-04-16</option>
                 <option value="o1">o1</option>
                 <option value="o3-2025-04-16">o3-2025-04-16</option>
-                <option value="gpt-4.5-preview-2025-02-27">gpt-4.5-preview-2025-02-27</option>
+                <option value="gpt-4.5-preview-2025-02-27">
+                  gpt-4.5-preview-2025-02-27
+                </option>
                 <option value="gpt-3.5-turbo">gpt-3.5-turbo</option>
               </select>
             </div>
