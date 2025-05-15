@@ -1,14 +1,15 @@
 /* ------------------------------------------------------------------
-   MessageItem
-   • Renders cached, pre-sanitised HTML (one-time Markdown → cached HTML)
-   • If a row is missing .plainText / .checksum (older DB rows), we
-     compute them on the fly once.
+   MessageItem – cached Markdown → HTML renderer
+   • still uses htmlCache so Markdown is parsed only once
+   • on mount, decorates each <pre> with an inline “Copy” button
 -------------------------------------------------------------------*/
-import { memo }          from 'preact/compat';
-import { getHtml }       from '../lib/htmlCache.js';
-import { checksum32 }    from '../lib/checksum.js';
+import { memo }        from 'preact/compat';
+import { useRef, useEffect } from 'preact/hooks';
+import { getHtml }     from '../lib/htmlCache.js';
+import { checksum32 }  from '../lib/checksum.js';
+import Toast           from './Toast.jsx';
 
-/* quick plain-text extractor – same rules as useMessages.js */
+/* plain-text extractor (same rules as useMessages.js) */
 function toPlain(content) {
   if (Array.isArray(content)) {
     return content
@@ -18,18 +19,74 @@ function toPlain(content) {
   return String(content ?? '');
 }
 
-function ensureFields(m) {
+function ensureMeta(m) {
   if (!m.plainText)  m.plainText = toPlain(m.content);
-  if (m.checksum == null) m.checksum  = checksum32(m.plainText);
+  if (m.checksum == null) m.checksum = checksum32(m.plainText);
 }
 
-/* --------------------------------------------------------------- */
+/* ---------------------------------------------------------------- */
 function MessageItem({ m }) {
-  ensureFields(m);
-  const html = getHtml(m.checksum, m.plainText);
+  ensureMeta(m);
+  const html  = getHtml(m.checksum, m.plainText);
+  const ref   = useRef(null);
+
+  /* add “Copy” buttons to code blocks exactly once */
+  useEffect(() => {
+    const host = ref.current;
+    if (!host) return;
+
+    const pres = host.querySelectorAll('pre');
+    pres.forEach(pre => {
+      if (pre.querySelector('.code-copy-btn')) return;    // already done
+
+      pre.style.position = 'relative';
+
+      const btn = document.createElement('button');
+      btn.className = 'code-copy-btn';
+      btn.textContent = 'Copy';
+      Object.assign(btn.style, {
+        position   : 'absolute',
+        top        : '4px',
+        right      : '4px',
+        padding    : '2px 8px',
+        fontSize   : '0.75rem',
+        background : '#444',
+        color      : '#fff',
+        border     : 'none',
+        borderRadius: '4px',
+        cursor     : 'pointer',
+        opacity    : '0.8'
+      });
+
+      btn.addEventListener('mouseenter', () => btn.style.opacity = '1');
+      btn.addEventListener('mouseleave', () => btn.style.opacity = '0.8');
+
+      btn.addEventListener('click', async e => {
+        e.stopPropagation();
+        try {
+          await navigator.clipboard.writeText(pre.innerText);
+          btn.textContent = 'Copied!';
+          setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
+        } catch {
+          Toast('Copy failed', 2000);
+        }
+      });
+
+      pre.appendChild(btn);
+    });
+
+    /* cleanup on unmount (HMR safety) */
+    return () => {
+      pres.forEach(pre => {
+        const b = pre.querySelector('.code-copy-btn');
+        b && b.remove();
+      });
+    };
+  }, []);
 
   return (
     <div
+      ref={ref}
       className="message-content-inner"
       dangerouslySetInnerHTML={{ __html: html }}
     />

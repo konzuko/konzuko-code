@@ -1,47 +1,117 @@
 
-import { render } from 'preact'
+/*
+  Toast   – stackable, HMR-safe, auto-cleaning
 
-let hostEl = null
+  Default call:
+      import Toast from './components/Toast.jsx'
+      Toast('Saved')                     // 4-second auto-dismiss
+      Toast('Deleted', 6000, undoFn)     // shows “Undo” button
 
+  • Each call appends a new toast <div> to a single fixed root.
+  • Root is removed when the last toast disappears (prevents orphan
+    elements across SPA navigations).
+  • HMR cleanup removes any stray root on module reload.
+  • Exports { showToast } alias for named-import style.
+*/
+
+import { h, render } from 'preact';
+
+/* ────────── root management ────────── */
+let rootEl = null;
 function ensureRoot() {
-  if (hostEl) return hostEl
-  hostEl = document.createElement('div')
-  hostEl.style.position = 'fixed'
-  hostEl.style.bottom = '20px'
-  hostEl.style.left = '50%'
-  hostEl.style.transform = 'translateX(-50%)'
-  hostEl.style.zIndex = 9999
-  document.body.appendChild(hostEl)
-  return hostEl
+  if (rootEl) return rootEl;
+
+  rootEl = document.createElement('div');
+  Object.assign(rootEl.style, {
+    position   : 'fixed',
+    bottom     : '20px',
+    left       : '50%',
+    transform  : 'translateX(-50%)',
+    display    : 'flex',
+    flexDirection: 'column',
+    gap        : '8px',
+    zIndex     : 9999
+  });
+  document.body.appendChild(rootEl);
+  return rootEl;
 }
 
-/**
- * Displays a toast message for ms milliseconds (defaults to 4000).
- * 
- * Usage:
- *   import Toast from './Toast.jsx'
- *   Toast('Hello from my app!', 3000)
- */
-export default function Toast(msg, ms = 4000) {
-  const root = ensureRoot()
-  
-  // Render the toast DOM
-  render(
+/* HMR: wipe root on module dispose to avoid dupes */
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    rootEl?.remove();
+    rootEl = null;
+  });
+}
+
+/* ────────── main helper ────────── */
+export default function Toast(msg, ms = 4000, onAction) {
+  const host = ensureRoot();
+
+  /* individual mount node */
+  const mount = document.createElement('div');
+  host.appendChild(mount);
+
+  /* disposer / clear fn */
+  function clear() {
+    render(null, mount);
+    if (mount.parentNode) host.removeChild(mount);
+
+    /* delete root if no more children */
+    if (!host.childElementCount) {
+      host.remove();
+      rootEl = null;
+    }
+  }
+
+  function handleUndo() {
+    try { onAction?.(); } finally { clear(); }
+  }
+
+  /* toast vnode */
+  const vnode = (
     <div
+      role="status" aria-live="polite"
       style={{
-        background: '#333',
-        color: '#fff',
-        padding: '8px 16px',
-        borderRadius: 4
+        background   : '#333',
+        color        : '#fff',
+        padding      : '8px 16px',
+        borderRadius : 4,
+        display      : 'inline-flex',
+        gap          : 12,
+        alignItems   : 'center',
+        fontSize     : '0.9rem',
+        boxShadow    : '0 2px 6px rgba(0,0,0,0.4)'
       }}
     >
-      {msg}
-    </div>,
-    root
-  )
+      <span>{msg}</span>
+      {onAction && (
+        <button
+          onClick={handleUndo}
+          style={{
+            background   : '#555',
+            border       : 'none',
+            color        : '#fff',
+            padding      : '4px 10px',
+            borderRadius : 4,
+            cursor       : 'pointer',
+            minWidth     : '48px'  /* avoid width jump */
+          }}
+        >
+          Undo
+        </button>
+      )}
+    </div>
+  );
 
-  // Automatically clear the toast after the specified time
-  setTimeout(() => {
-    render(null, root)
-  }, ms)
+  render(vnode, mount);
+
+  /* auto-clear timer */
+  const t = setTimeout(clear, ms);
+
+  /* return disposer to caller (optional) */
+  return () => { clearTimeout(t); clear(); };
 }
+
+/* named re-export for convenience */
+export const showToast = Toast;

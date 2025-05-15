@@ -1,10 +1,9 @@
 import { useState, useRef, useEffect } from 'preact/hooks';
 import 'highlight.js/styles/atom-one-dark.css';
-import Toast from './Toast.jsx';               // ← non-blocking notice
+import Toast from './Toast.jsx';
 
 /**
- * Wraps a <pre><code …>…</code></pre> from rehype-highlight and inserts a
- * Copy button.  Uses clipboard API; shows Toast on failure.
+ * Copy wrapper for MarkdownRenderer path (still used in edit mode)
  */
 export default function CodeBlock({ preProps, children }) {
   const [copied, setCopied] = useState(false);
@@ -30,8 +29,12 @@ export default function CodeBlock({ preProps, children }) {
       <button
         onClick={handleCopy}
         style={{
-          position: 'absolute', top: '0.3em', right: '0.3em',
-          fontSize: '0.8em', padding: '0.2em 0.6em',
+          position: 'absolute',
+          top:  '0.3em',
+          right:'0.3em',
+          fontSize: '0.75rem',
+          padding:  '0.2em 0.7em',     // widened for the word “Copy”
+          zIndex: 2
         }}
       >
         {copied ? 'Copied!' : 'Copy'}
