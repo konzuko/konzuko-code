@@ -1,7 +1,15 @@
 /* --------------------------------------------------------------------
-   src/App.jsx  —  full file, no omissions
-   Toast is used imperatively; ChatView / useMessages are gone; and the
-   missing handleRenameChat is restored.
+   src/App.jsx  —  FULL FILE (no omissions)
+
+   Refactor summary
+   ----------------
+   • Introduced single `busy` flag = loadingSend || savingEdit
+     so *all* UI widgets share one notion of “something async is
+     happening – disable buttons”.
+   • Passed `busy` to ChatPane, ChatArea and PromptBuilder.
+   • ChatArea comparator already watches loadingSend and savingEdit
+     separately, so we keep savingEdit as-is and feed `busy`
+     through the existing `loadingSend` prop slot.
 ---------------------------------------------------------------------*/
 import {
   useState,
@@ -91,6 +99,9 @@ export default function App() {
     chats.find(c => c.id === currentChatId)?.messages ?? [],
     settings.model
   );
+
+  /* unified busy flag (used by UI elements for disabling) */
+  const busy = loadingSend || savingEdit;
 
   /* showToast(text, undoFn?) – 100 % imperative */
   const showToast = useCallback(
@@ -192,7 +203,7 @@ export default function App() {
      Business-logic helpers
   ================================================================== */
 
-  /* ---------- rename chat (restored) ---------- */
+  /* ---------- rename chat ---------- */
   function handleRenameChat(id, newTitle) {
     setChats(cs => cs.map(c => c.id === id ? { ...c, title: newTitle } : c));
     runTask(() => updateChatTitle(id, newTitle)
@@ -243,7 +254,7 @@ export default function App() {
 
   /* ---------- handleSend ---------- */
   function handleSend() {
-    if (loadingSend) return;
+    if (busy) return;
     if (mode === 'DEVELOP' && !form.developGoal.trim()) {
       safeAlert('GOAL is required for DEVELOP mode.');
       return;
@@ -319,7 +330,7 @@ export default function App() {
     setEditText('');
   };
   async function handleSaveEdit() {
-    if (!editingId || loadingSend || savingEdit) return;
+    if (!editingId || busy) return;
     setSaving(true);
 
     runTask(async () => {
@@ -365,7 +376,7 @@ export default function App() {
 
   /* ---------- resend (archive + regenerate) ---------- */
   function handleResendMessage(id) {
-    if (loadingSend) return;
+    if (busy) return;
 
     runTask(async () => {
       /* 1) find anchor */
@@ -413,7 +424,7 @@ export default function App() {
 
   /* ---------- new / delete chat ---------- */
   function handleNewChat() {
-    if (loadingSend) return;
+    if (busy) return;
     runTask(async () => {
       const c = await createChat({ title: 'New Chat', model: settings.codeType });
       setChats(cs => [{
@@ -428,7 +439,7 @@ export default function App() {
   }
 
   function handleDeleteChatUI(id) {
-    if (loadingSend) return;
+    if (busy) return;
     const anchorId = currentChatId;
 
     undoableDelete({
@@ -467,7 +478,7 @@ export default function App() {
       setEditing(null);
       setEditText('');
     }
-    if (loadingSend) return;
+    if (busy) return;
 
     undoableDelete({
       itemLabel: 'Message',
@@ -510,7 +521,7 @@ export default function App() {
         onNewChat      ={handleNewChat}
         onTitleUpdate  ={handleRenameChat}
         onDeleteChat   ={handleDeleteChatUI}
-        disabled       ={loadingSend}
+        disabled       ={busy}
       />
 
       {/* ────────── main column ────────── */}
@@ -608,7 +619,7 @@ export default function App() {
               messages           ={currentChat.messages}
               editingId          ={editingId}
               editText           ={editText}
-              loadingSend        ={loadingSend}
+              loadingSend        ={busy}
               savingEdit         ={savingEdit}
               setEditText        ={setEditText}
               handleSaveEdit     ={handleSaveEdit}
@@ -631,7 +642,7 @@ export default function App() {
               setMode       ={setMode}
               form          ={form}
               setForm       ={setForm}
-              loadingSend   ={loadingSend}
+              loadingSend   ={busy}
               handleSend    ={handleSend}
               showToast     ={showToast}
               onImageDrop   ={setPendingImages}

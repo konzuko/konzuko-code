@@ -1,13 +1,14 @@
 /* ------------------------------------------------------------------
    MessageItem – cached Markdown → HTML renderer
-   • still uses htmlCache so Markdown is parsed only once
-   • on mount, decorates each <pre> with an inline “Copy” button
+   • Still adds inline “Copy” buttons to each <pre>, but now uses the
+     shared copyToClipboard() helper for robust fallback support.
 -------------------------------------------------------------------*/
 import { memo }        from 'preact/compat';
 import { useRef, useEffect } from 'preact/hooks';
 import { getHtml }     from '../lib/htmlCache.js';
 import { checksum32 }  from '../lib/checksum.js';
 import Toast           from './Toast.jsx';
+import { copyToClipboard } from '../lib/copy.js';
 
 /* plain-text extractor (same rules as useMessages.js) */
 function toPlain(content) {
@@ -63,11 +64,11 @@ function MessageItem({ m }) {
 
       btn.addEventListener('click', async e => {
         e.stopPropagation();
-        try {
-          await navigator.clipboard.writeText(pre.innerText);
+        const ok = await copyToClipboard(pre.innerText);
+        if (ok) {
           btn.textContent = 'Copied!';
           setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
-        } catch {
+        } else {
           Toast('Copy failed', 2000);
         }
       });

@@ -1,12 +1,14 @@
 /* --------------------------------------------------------------------
    ChatArea – controlled full-DOM renderer
-   • Uses <MessageItem> for cached HTML so Markdown is not re-parsed.
-   • Wrapped in memo(); re-renders only when messages reference,
-     editingId or editText change.
+   • Uses <MessageItem> to display cached Markdown→HTML.
+   • Memoised with a comparator that is now resilient against accidental
+     in-place mutation of the messages array and also watches loadingSend
+     & savingEdit so the action buttons enable/disable instantly.
 ---------------------------------------------------------------------*/
-import { memo }      from 'preact/compat';
-import MessageItem   from './MessageItem.jsx';
-import Toast         from './Toast.jsx';
+import { memo }          from 'preact/compat';
+import MessageItem       from './MessageItem.jsx';
+import Toast             from './Toast.jsx';
+import { copyToClipboard } from '../lib/copy.js';
 
 function ChatArea({
   messages = [],
@@ -23,14 +25,14 @@ function ChatArea({
   handleResendMessage,
   handleDeleteMessage
 }) {
-  /* helper to copy entire msg text */
-  function copyMessage(m) {
+  /* helper: copy entire plain-text message */
+  async function copyMessage(m) {
     const txt = Array.isArray(m.content)
       ? m.content.filter(b => b.type === 'text').map(b => b.text).join('')
       : String(m.content);
-    navigator.clipboard.writeText(txt).catch(() => {
-      Toast('Copy failed', 2000);
-    });
+
+    const ok = await copyToClipboard(txt);
+    if (!ok) Toast('Copy failed', 2000);
   }
 
   return (
@@ -66,6 +68,7 @@ function ChatArea({
 
               <div className="message-actions">
                 {m.id === editingId ? (
+                  /* ── edit mode ── */
                   <>
                     <button
                       className="button"
@@ -83,6 +86,7 @@ function ChatArea({
                     </button>
                   </>
                 ) : (
+                  /* ── normal mode ── */
                   <>
                     <button
                       className="button icon-button"
@@ -142,9 +146,28 @@ function ChatArea({
   );
 }
 
-/* comparator – re-render only when these primitives actually change */
-export default memo(ChatArea, (a, b) =>
-  a.messages   === b.messages   &&
-  a.editingId  === b.editingId  &&
-  a.editText   === b.editText
-);
+/* ------------------------------------------------------------------
+   Custom memo comparator:
+   • First checks primitive props.
+   • Then cheap O(1) check on messages – if lengths differ OR last
+     message id / checksum differ we re-render.
+-------------------------------------------------------------------*/
+function areEqual(prev, next) {
+  if (prev.editingId   !== next.editingId)   return false;
+  if (prev.editText    !== next.editText)    return false;
+  if (prev.loadingSend !== next.loadingSend) return false;
+  if (prev.savingEdit  !== next.savingEdit)  return false;
+
+  const a = prev.messages;
+  const b = next.messages;
+  if (a === b) return true;          // identical reference
+
+  if (a.length !== b.length) return false;
+  if (a.length === 0)        return true;
+
+  const al = a[a.length - 1];
+  const bl = b[b.length - 1];
+  return al.id === bl.id && al.checksum === bl.checksum;
+}
+
+export default memo(ChatArea, areEqual);

@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'preact/hooks';
 import 'highlight.js/styles/atom-one-dark.css';
 import Toast from './Toast.jsx';
+import { copyToClipboard } from '../lib/copy.js';
 
 /**
  * Copy wrapper for MarkdownRenderer path (still used in edit mode)
@@ -13,13 +14,14 @@ export default function CodeBlock({ preProps, children }) {
   useEffect(() => () => clearTimeout(timerRef.current), []);
 
   async function handleCopy() {
-    try {
-      const text = preRef.current?.innerText || '';
-      await navigator.clipboard.writeText(text);
+    const text = preRef.current?.innerText || '';
+    const ok   = await copyToClipboard(text);
+
+    if (ok) {
       setCopied(true);
       clearTimeout(timerRef.current);
       timerRef.current = setTimeout(() => setCopied(false), 1500);
-    } catch {
+    } else {
       Toast('Copy failed', 2000);
     }
   }
@@ -33,7 +35,7 @@ export default function CodeBlock({ preProps, children }) {
           top:  '0.3em',
           right:'0.3em',
           fontSize: '0.75rem',
-          padding:  '0.2em 0.7em',     // widened for the word “Copy”
+          padding:  '0.2em 0.7em',
           zIndex: 2
         }}
       >
