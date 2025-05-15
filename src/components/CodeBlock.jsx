@@ -1,35 +1,27 @@
-
 import { useState, useRef, useEffect } from 'preact/hooks';
 import 'highlight.js/styles/atom-one-dark.css';
+import Toast from './Toast.jsx';               // ← non-blocking notice
 
 /**
- * Wraps a <pre><code class="hljs…">…</code></pre> from rehype-highlight
- * and inserts a Copy button. On copy, we read preRef.current.innerText
- * to get the fully highlighted text (minus the HTML tags).
+ * Wraps a <pre><code …>…</code></pre> from rehype-highlight and inserts a
+ * Copy button.  Uses clipboard API; shows Toast on failure.
  */
 export default function CodeBlock({ preProps, children }) {
   const [copied, setCopied] = useState(false);
   const timerRef            = useRef(null);
   const preRef              = useRef(null);
 
-  useEffect(() => {
-    return () => {
-      if (timerRef.current) {
-        clearTimeout(timerRef.current);
-      }
-    };
-  }, []);
+  useEffect(() => () => clearTimeout(timerRef.current), []);
 
   async function handleCopy() {
     try {
-      // Grab the text from the <pre> itself
       const text = preRef.current?.innerText || '';
       await navigator.clipboard.writeText(text);
       setCopied(true);
-      if (timerRef.current) clearTimeout(timerRef.current);
+      clearTimeout(timerRef.current);
       timerRef.current = setTimeout(() => setCopied(false), 1500);
     } catch {
-      alert('Failed to copy');
+      Toast('Copy failed', 2000);
     }
   }
 
@@ -38,14 +30,11 @@ export default function CodeBlock({ preProps, children }) {
       <button
         onClick={handleCopy}
         style={{
-          position: 'absolute',
-          top:      '0.3em',
-          right:    '0.3em',
-          fontSize: '0.8em',
-          padding:  '0.2em 0.6em',
+          position: 'absolute', top: '0.3em', right: '0.3em',
+          fontSize: '0.8em', padding: '0.2em 0.6em',
         }}
       >
-        {copied ? 'Copied!' : '📋'}
+        {copied ? 'Copied!' : 'Copy'}
       </button>
 
       <pre ref={preRef} {...preProps} style={{ margin: 0 }}>
