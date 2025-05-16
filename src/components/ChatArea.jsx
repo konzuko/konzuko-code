@@ -1,18 +1,17 @@
+// src/components/ChatArea.jsx
 /* --------------------------------------------------------------------
    ChatArea – renders the conversation list
 ---------------------------------------------------------------------*/
-import { memo }            from 'preact/compat';
-import MessageItem         from './MessageItem.jsx';
-import useCopyToClipboard  from '../hooks/useCopyToClipboard.js';
-import { checksum32 }      from '../lib/checksum.js';
+import { memo }             from 'preact/compat';
+import MessageItem          from './MessageItem.jsx';
+import useCopyToClipboard   from '../hooks/useCopyToClipboard.js';
+import { getChecksum }      from '../lib/checksumCache.js';
 
-/* helpers */
+/* flatten helper */
 const flatten = c =>
   Array.isArray(c)
     ? c.filter(b => b.type === 'text').map(b => b.text).join('')
     : String(c ?? '');
-
-const getCk = m => (m.checksum ??= checksum32(flatten(m.content)));
 
 function ChatArea({
   messages = [],
@@ -136,7 +135,7 @@ function ChatArea({
   );
 }
 
-/* memo comparator using checksum */
+/* memo comparator using WeakMap checksum */
 function areEqual(prev, next) {
   if (prev.editingId   !== next.editingId)   return false;
   if (prev.editText    !== next.editText)    return false;
@@ -152,7 +151,7 @@ function areEqual(prev, next) {
 
   const al = a[a.length - 1];
   const bl = b[b.length - 1];
-  return al.id === bl.id && getCk(al) === getCk(bl);
+  return al.id === bl.id && getChecksum(al) === getChecksum(bl);
 }
 
 export default memo(ChatArea, areEqual);

@@ -1,14 +1,21 @@
 /* ------------------------------------------------------------------
    copyToClipboard(text) – async, returns true on success.
-   1) Tries modern navigator.clipboard
-   2) Falls back to execCommand('copy') with a hidden <textarea>
+   Behaviour update:
+   • If the modern Clipboard API throws `NotAllowedError`, we re-throw it
+     so callers (hooks/useCopyToClipboard) can show a specific message.
 -------------------------------------------------------------------*/
 export async function copyToClipboard(text = '') {
     /* A) modern API */
-    try {
-      await navigator.clipboard.writeText(text);
-      return true;
-    } catch {}
+    if (navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(text);
+        return true;
+      } catch (err) {
+        // Explicitly surface permission errors
+        if (err?.name === 'NotAllowedError') throw err;
+        /* any other failure falls through to legacy path */
+      }
+    }
   
     /* B) legacy fallback */
     try {
@@ -22,10 +29,12 @@ export async function copyToClipboard(text = '') {
       const ok = document.execCommand('copy');
       document.body.removeChild(ta);
       return ok;
-    } catch {
+    } catch (err) {
+      if (err?.name === 'NotAllowedError') throw err;
       return false;
     }
   }
   
   /* optional default export */
   export default copyToClipboard;
+  

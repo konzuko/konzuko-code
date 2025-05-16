@@ -1,11 +1,12 @@
+// src/components/MessageItem.jsx
 /* ------------------------------------------------------------------
-   MessageItem – markdown renderer with fast memo
+   MessageItem – markdown renderer with WeakMap checksum memo
 -------------------------------------------------------------------*/
-import { memo }          from 'preact/compat';
-import MarkdownRenderer  from './MarkdownRenderer.jsx';
-import { checksum32 }    from '../lib/checksum.js';
+import { memo }             from 'preact/compat';
+import MarkdownRenderer     from './MarkdownRenderer.jsx';
+import { getChecksum }      from '../lib/checksumCache.js';
 
-/* helpers */
+/* flatten helper (text-only) */
 function flatten(content) {
   if (Array.isArray(content)) {
     return content
@@ -16,15 +17,7 @@ function flatten(content) {
   return String(content ?? '');
 }
 
-/* ensure we have a checksum on the message object */
-function ensureChecksum(m) {
-  if (m.checksum == null) {
-    m.checksum = checksum32(flatten(m.content));
-  }
-}
-
 function MessageItem({ m }) {
-  ensureChecksum(m);
   const text = flatten(m.content);
 
   return (
@@ -34,7 +27,8 @@ function MessageItem({ m }) {
   );
 }
 
+/* O(1) WeakMap checksum compare */
 export default memo(
   MessageItem,
-  (a, b) => a.m.id === b.m.id && a.m.checksum === b.m.checksum
+  (a, b) => a.m.id === b.m.id && getChecksum(a.m) === getChecksum(b.m)
 );
