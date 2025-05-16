@@ -333,6 +333,12 @@ html, body {
   background: var(--accent);
   color: #fff;
 }
+/* new state when copy succeeded */
+.copy-snippet--copied {
+  background: var(--success);
+  color: #fff;
+  opacity: 1;
+}
 
 /* responsive layout adjustments */
 @media (max-width: 768px) {
@@ -350,7 +356,7 @@ html, body {
   }
 }
 
-/* FilePane container etc. (unchanged from original) */
+/* FilePane container etc. */
 .file-pane-container {
   border: 1px solid var(--border);
   background-color: var(--bg-secondary);

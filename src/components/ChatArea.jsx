@@ -1,14 +1,22 @@
+// src/components/ChatArea.jsx
 /* --------------------------------------------------------------------
-   ChatArea – controlled full-DOM renderer
-   • Uses <MessageItem> to display cached Markdown→HTML.
-   • Memoised with a comparator that is now resilient against accidental
-     in-place mutation of the messages array and also watches loadingSend
-     & savingEdit so the action buttons enable/disable instantly.
+   ChatArea – controlled renderer for the whole conversation.
+   Copy buttons now use the shared useCopyToClipboard hook.
 ---------------------------------------------------------------------*/
-import { memo }          from 'preact/compat';
-import MessageItem       from './MessageItem.jsx';
-import Toast             from './Toast.jsx';
-import { copyToClipboard } from '../lib/copy.js';
+import { memo }       from 'preact/compat';
+import MessageItem    from './MessageItem.jsx';
+import useCopyToClipboard from '../hooks/useCopyToClipboard.js';
+
+/* flatten block array → plain text */
+function flattenContent(content) {
+  if (Array.isArray(content)) {
+    return content
+      .filter(b => b.type === 'text')
+      .map(b => b.text)
+      .join('');
+  }
+  return String(content ?? '');
+}
 
 function ChatArea({
   messages = [],
@@ -25,15 +33,13 @@ function ChatArea({
   handleResendMessage,
   handleDeleteMessage
 }) {
-  /* helper: copy entire plain-text message */
-  async function copyMessage(m) {
-    const txt = Array.isArray(m.content)
-      ? m.content.filter(b => b.type === 'text').map(b => b.text).join('')
-      : String(m.content);
-
-    const ok = await copyToClipboard(txt);
-    if (!ok) Toast('Copy failed', 2000);
-  }
+  /* copy helper wired to global toast */
+  const [copyMessage] = useCopyToClipboard({
+    successMsg: 'Copied!',
+    errorMsg:   'Copy failed',
+    successMs:  1500,
+    errorMs:    2000
+  });
 
   return (
     <>
@@ -45,6 +51,8 @@ function ChatArea({
           !editingId
         );
 
+        const handleCopy = () => copyMessage(flattenContent(m.content));
+
         return (
           <div key={m.id} className={`message message-${m.role}`}>
             {/* floating Copy for assistant rows */}
@@ -53,7 +61,7 @@ function ChatArea({
                 <button
                   className="button icon-button"
                   title="Copy entire message"
-                  onClick={() => copyMessage(m)}
+                  onClick={handleCopy}
                 >
                   Copy
                 </button>
@@ -86,11 +94,11 @@ function ChatArea({
                     </button>
                   </>
                 ) : (
-                  /* ── normal mode ── */
+                  /* ── normal mode ─ */
                   <>
                     <button
                       className="button icon-button"
-                      onClick={() => copyMessage(m)}
+                      onClick={handleCopy}
                     >
                       Copy
                     </button>
@@ -149,8 +157,8 @@ function ChatArea({
 /* ------------------------------------------------------------------
    Custom memo comparator:
    • First checks primitive props.
-   • Then cheap O(1) check on messages – if lengths differ OR last
-     message id / checksum differ we re-render.
+   • Then O(1) check on messages – if lengths differ OR last
+     message id / content differ we re-render.
 -------------------------------------------------------------------*/
 function areEqual(prev, next) {
   if (prev.editingId   !== next.editingId)   return false;
@@ -167,7 +175,10 @@ function areEqual(prev, next) {
 
   const al = a[a.length - 1];
   const bl = b[b.length - 1];
-  return al.id === bl.id && al.checksum === bl.checksum;
+  return (
+    al.id === bl.id &&
+    JSON.stringify(al.content) === JSON.stringify(bl.content)
+  );
 }
 
 export default memo(ChatArea, areEqual);

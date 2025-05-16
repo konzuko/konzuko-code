@@ -1,43 +1,32 @@
-import { useState, useRef, useEffect } from 'preact/hooks';
+// src/components/CodeBlock.jsx
+import { useRef } from 'preact/hooks';
+import useCopyToClipboard from '../hooks/useCopyToClipboard.js';
 import 'highlight.js/styles/atom-one-dark.css';
-import Toast from './Toast.jsx';
-import { copyToClipboard } from '../lib/copy.js';
 
 /**
- * Copy wrapper for MarkdownRenderer path (still used in edit mode)
+ * CodeBlock – wraps a <pre> produced by MarkdownRenderer,
+ * injects a “Copy” button in a declarative way.
  */
 export default function CodeBlock({ preProps, children }) {
-  const [copied, setCopied] = useState(false);
-  const timerRef            = useRef(null);
-  const preRef              = useRef(null);
+  const preRef = useRef(null);
 
-  useEffect(() => () => clearTimeout(timerRef.current), []);
+  const [copy, copied] = useCopyToClipboard({
+    successMsg: 'Copied!',
+    errorMsg:   'Copy failed',
+    successMs:  1500,
+    errorMs:    2000
+  });
 
-  async function handleCopy() {
-    const text = preRef.current?.innerText || '';
-    const ok   = await copyToClipboard(text);
-
-    if (ok) {
-      setCopied(true);
-      clearTimeout(timerRef.current);
-      timerRef.current = setTimeout(() => setCopied(false), 1500);
-    } else {
-      Toast('Copy failed', 2000);
-    }
+  function handleCopy(e) {
+    e.stopPropagation();
+    copy(preRef.current?.innerText || '');
   }
 
   return (
-    <div style={{ position: 'relative', margin: '1em 0' }}>
+    <div className="code-wrapper">
       <button
+        className={copied ? 'copy-snippet copy-snippet--copied' : 'copy-snippet'}
         onClick={handleCopy}
-        style={{
-          position: 'absolute',
-          top:  '0.3em',
-          right:'0.3em',
-          fontSize: '0.75rem',
-          padding:  '0.2em 0.7em',
-          zIndex: 2
-        }}
       >
         {copied ? 'Copied!' : 'Copy'}
       </button>
