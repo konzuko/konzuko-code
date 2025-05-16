@@ -2,7 +2,8 @@
 import {
   useState,
   useEffect,
-  useCallback
+  useCallback,
+  useRef
 } from 'preact/hooks';
 
 import ChatPane        from './chatpane.jsx';
@@ -163,6 +164,40 @@ export default function App() {
 
     return () => { live = false; };
   }, [currentChatId]);
+
+  /* ─────────── nav-rail scroll helpers ─────────── */
+  const chatBoxRef = useRef(null);
+  const scrollToPrev = () => {
+    const box = chatBoxRef.current;
+    if (!box) return;
+    const msgs = Array.from(box.querySelectorAll('.message'));
+    if (!msgs.length) return;
+
+    const curTop = box.scrollTop;
+    let target = null;
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      if (msgs[i].offsetTop < curTop - 1) { target = msgs[i]; break; }
+    }
+    box.scrollTop = target ? target.offsetTop : 0;
+  };
+  const scrollToNext = () => {
+    const box = chatBoxRef.current;
+    if (!box) return;
+    const msgs = Array.from(box.querySelectorAll('.message'));
+    if (!msgs.length) return;
+
+    const curTop = box.scrollTop;
+    let target = null;
+    for (let i = 0; i < msgs.length; i++) {
+      if (msgs[i].offsetTop > curTop + 1) { target = msgs[i]; break; }
+    }
+    box.scrollTop = target ? target.offsetTop : box.scrollHeight;
+  };
+
+  /* =================================================================
+     Business-logic helpers
+  ================================================================== */
+
 
   /* ─────────── rename chat ─────────── */
   function handleRenameChat(id, newTitle) {
@@ -561,7 +596,26 @@ export default function App() {
 
         <div className="content-container" style={{ display: 'flex', flex: 1 }}>
           {/* ───── chat (memoised) ───── */}
-          <div className="chat-container">
+          <div className="chat-container" ref={chatBoxRef}>
+            {/* nav-rail */}
+            <div className="chat-nav-rail">
+              <button
+                className="button icon-button"
+                onClick={scrollToPrev}
+                title="Scroll to previous message"
+              >
+                ↑
+              </button>
+              <button
+                className="button icon-button"
+                onClick={scrollToNext}
+                title="Scroll to next message"
+              >
+                ↓
+              </button>
+            </div>
+
+            {/* ChatArea → no re-render on keystrokes */}
             <ChatArea
               messages           ={currentChat.messages}
               editingId          ={editingId}

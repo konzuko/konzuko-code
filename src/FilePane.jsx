@@ -1,9 +1,8 @@
-// src/FilePane.jsx
 
 import { h } from 'preact';
 import { useState, useCallback } from 'preact/hooks';
 import { asciiTree, dedupe } from './lib/textUtils.js';
-import { isTextLike }        from './lib/fileTypeGuards.js';
+import { isTextLike } from './lib/fileTypeGuards.js';
 
 const FILE_LIMIT = 500;
 
@@ -51,7 +50,7 @@ function fileToText(f) {
       console.log('[FilePane] fileToText success for:', f.fullPath);
       res(String(r.result));
     };
-    r.onerror= (err) => {
+    r.onerror = (err) => {
       console.error('[FilePane] fileToText error for:', f.fullPath, r.error);
       rej(r.error);
     };
@@ -62,11 +61,11 @@ function fileToText(f) {
 export default function FilePane({
   form,
   setForm,
-  // onPasteImage, // Assuming this is not used based on previous simplifications
+  onPasteImage, // re-added so that pasteImg can properly call it
   onSkip
 }) {
   const [pending, setPending] = useState([]);
-  const [adding,  setAdding ] = useState(false);
+  const [adding, setAdding] = useState(false);
 
   const merge = useCallback(batch => {
     console.log('[FilePane] merge called with batch size:', batch.length);
@@ -84,7 +83,7 @@ export default function FilePane({
       return;
     }
     try {
-      const tree  = asciiTree(batch.map(f => f.fullPath));
+      const tree = asciiTree(batch.map(f => f.fullPath));
       console.log('[FilePane] appendContext generated tree:', tree);
       const texts = await Promise.all(batch.map(fileToText));
       console.log('[FilePane] appendContext got texts, count:', texts.length);
@@ -95,7 +94,7 @@ export default function FilePane({
         const n = (prevCtx.match(/File structure \(added batch/gi) || []).length + 1;
         let block = `\n\n/* File structure (added batch ${n}):\n${tree}\n*/\n`;
 
-        batch.forEach((f,i) => {
+        batch.forEach((f, i) => {
           block += `\n/* ${f.fullPath} */\n\n${texts[i]}\n`;
         });
         const newDevelopContext = prevCtx + block;
@@ -117,10 +116,10 @@ export default function FilePane({
     }
     try {
       setAdding(true);
-      const handles = await window.showOpenFilePicker({ multiple:true });
+      const handles = await window.showOpenFilePicker({ multiple: true });
       console.log('[FilePane] addFiles picker returned handles:', handles.length);
-      const batch   = [];
-      let skipped   = 0;
+      const batch = [];
+      let skipped = 0;
 
       for (const h of handles) {
         const f = await h.getFile();
@@ -163,7 +162,7 @@ export default function FilePane({
       const dirHandle = await window.showDirectoryPicker();
       console.log('[FilePane] addFolder picker returned dirHandle:', dirHandle.name);
       const batch = [];
-      const stats = { skipped:0 };
+      const stats = { skipped: 0 };
       await scanDir(dirHandle, batch, stats, dirHandle.name); // Pass initial path
       console.log('[FilePane] addFolder scanDir completed. Batch size:', batch.length, 'Skipped:', stats.skipped);
       await merge(batch);
@@ -183,7 +182,7 @@ export default function FilePane({
       setAdding(false);
       console.log('[FilePane] addFolder finished.');
     }
-  }, [merge, appendContext, onSkip]); // Removed pending.length as it's not directly used here, merge handles it
+  }, [merge, appendContext, onSkip]);
 
   const clearAll = useCallback(() => {
     console.log('[FilePane] clearAll clicked');
@@ -193,14 +192,38 @@ export default function FilePane({
     console.log('[FilePane] clearAll: cleared pending and developContext.');
   }, [setForm]);
 
-  // ... rest of the component (UI) ...
+  const pasteImg = useCallback(async () => {
+    if (!navigator.clipboard?.read) {
+      alert('Clipboard API not supported');
+      return;
+    }
+    try {
+      const items = await navigator.clipboard.read();
+      for (const it of items) {
+        for (const t of it.types) {
+          if (t.startsWith('image/')) {
+            const blob = await it.getType(t);
+            const url = URL.createObjectURL(blob);
+            const revoke = () => URL.revokeObjectURL(url);
+            onPasteImage?.('Clipboard Image', url, revoke);
+            return;
+          }
+        }
+      }
+      alert('No image found in clipboard');
+    } catch (err) {
+      console.error(err);
+      alert('Failed to read clipboard: ' + err.message);
+    }
+  }, [onPasteImage]);
+
   return (
     <div className="file-pane-container">
       <h2>Project Files</h2>
 
       {/File structure \(added batch/i.test(form.developContext) && (
         <div
-          className="info-hint ok" // Make sure these CSS classes exist
+          className="info-hint ok"
           style={{ marginBottom: '1rem' }}
         >
           Already appended file code. “Clear List” removes it.
@@ -208,12 +231,12 @@ export default function FilePane({
       )}
 
       {pending.length > 0 && (
-        <div className="info-hint warn" style={{ marginBottom:'1rem' }}> {/* Make sure these CSS classes exist */}
+        <div className="info-hint warn" style={{ marginBottom: '1rem' }}>
           {pending.length} / {FILE_LIMIT} files in memory.
         </div>
       )}
 
-      <div style={{ display:'flex', gap:8, marginBottom:'1rem' }}>
+      <div style={{ display: 'flex', gap: 8, marginBottom: '1rem' }}>
         <button className="button" onClick={addFiles} disabled={adding}>
           + Add Files
         </button>
@@ -224,31 +247,45 @@ export default function FilePane({
           className="button"
           onClick={clearAll}
           disabled={adding || !pending.length}
-          style={pending.length ? { background:'#b71c1c', color:'#fff' } : {}}
+          style={pending.length ? { background: '#b71c1c', color: '#fff' } : {}}
         >
           Clear List
         </button>
       </div>
 
-      <div>
+      <div style={{ textAlign: 'right', fontSize: '0.8rem', color: '#ccc' }}>
+        <div><strong>Mac</strong>: Cmd+Ctrl+Shift+3/4</div>
+        <div><strong>Win</strong>: Win+Shift+S</div>
+        <div><strong>Linux</strong>: Flameshot</div>
+        <button
+          className="button"
+          style={{ marginTop: 6, fontSize: '0.8rem' }}
+          onClick={pasteImg}
+        >
+          Paste Image
+        </button>
+      </div>
+
+      <div style={{ marginTop: '1rem' }}>
         <strong>{pending.length} / {FILE_LIMIT} files selected</strong>
         {!!pending.length && (
           <ul className="file-pane-filelist">
-            {pending.map((f,i) => (
-              <li key={`${f.fullPath}-${f.size}`} style={{ position:'relative' }}>
+            {pending.map((f, i) => (
+              <li key={`${f.fullPath}-${f.size}`} style={{ position: 'relative' }}>
                 {f.fullPath}
                 <button
-                  className="remove-file-btn" // Make sure this CSS class exists
+                  className="remove-file-btn"
                   style={{
-                    position:'absolute',
-                    top:2, right:4,
-                    background:'none',
-                    border:'none',
-                    color:'#ff7373',
-                    cursor:'pointer',
-                    fontWeight:'bold',
-                    fontSize:'1rem',
-                    lineHeight:'1rem'
+                    position: 'absolute',
+                    top: 2,
+                    right: 4,
+                    background: 'none',
+                    border: 'none',
+                    color: '#ff7373',
+                    cursor: 'pointer',
+                    fontWeight: 'bold',
+                    fontSize: '1rem',
+                    lineHeight: '1rem'
                   }}
                   title="Remove"
                   onClick={() => {
