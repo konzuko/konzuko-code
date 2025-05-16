@@ -1,27 +1,22 @@
-// src/components/ChatArea.jsx
 /* --------------------------------------------------------------------
-   ChatArea – controlled renderer for the whole conversation.
-   Copy buttons now use the shared useCopyToClipboard hook.
+   ChatArea – renders the conversation list
 ---------------------------------------------------------------------*/
-import { memo }       from 'preact/compat';
-import MessageItem    from './MessageItem.jsx';
-import useCopyToClipboard from '../hooks/useCopyToClipboard.js';
+import { memo }            from 'preact/compat';
+import MessageItem         from './MessageItem.jsx';
+import useCopyToClipboard  from '../hooks/useCopyToClipboard.js';
+import { checksum32 }      from '../lib/checksum.js';
 
-/* flatten block array → plain text */
-function flattenContent(content) {
-  if (Array.isArray(content)) {
-    return content
-      .filter(b => b.type === 'text')
-      .map(b => b.text)
-      .join('');
-  }
-  return String(content ?? '');
-}
+/* helpers */
+const flatten = c =>
+  Array.isArray(c)
+    ? c.filter(b => b.type === 'text').map(b => b.text).join('')
+    : String(c ?? '');
+
+const getCk = m => (m.checksum ??= checksum32(flatten(m.content)));
 
 function ChatArea({
   messages = [],
 
-  /* edit / delete helpers & state from App */
   editingId,
   editText,
   loadingSend,
@@ -33,25 +28,17 @@ function ChatArea({
   handleResendMessage,
   handleDeleteMessage
 }) {
-  /* copy helper wired to global toast */
-  const [copyMessage] = useCopyToClipboard({
-    successMsg: 'Copied!',
-    errorMsg:   'Copy failed',
-    successMs:  1500,
-    errorMs:    2000
-  });
+  const [copyMessage] = useCopyToClipboard();
 
   return (
     <>
       {messages.map((m, idx) => {
         const isAsst     = m.role === 'assistant';
-        const isLastUser = (
-          m.role === 'user' &&
-          idx === messages.length - 1 &&
-          !editingId
-        );
+        const isLastUser = m.role === 'user' &&
+                           idx === messages.length - 1 &&
+                           !editingId;
 
-        const handleCopy = () => copyMessage(flattenContent(m.content));
+        const doCopy = () => copyMessage(flatten(m.content));
 
         return (
           <div key={m.id} className={`message message-${m.role}`}>
@@ -61,7 +48,7 @@ function ChatArea({
                 <button
                   className="button icon-button"
                   title="Copy entire message"
-                  onClick={handleCopy}
+                  onClick={doCopy}
                 >
                   Copy
                 </button>
@@ -76,7 +63,6 @@ function ChatArea({
 
               <div className="message-actions">
                 {m.id === editingId ? (
-                  /* ── edit mode ── */
                   <>
                     <button
                       className="button"
@@ -94,12 +80,8 @@ function ChatArea({
                     </button>
                   </>
                 ) : (
-                  /* ── normal mode ─ */
                   <>
-                    <button
-                      className="button icon-button"
-                      onClick={handleCopy}
-                    >
+                    <button className="button icon-button" onClick={doCopy}>
                       Copy
                     </button>
 
@@ -154,12 +136,7 @@ function ChatArea({
   );
 }
 
-/* ------------------------------------------------------------------
-   Custom memo comparator:
-   • First checks primitive props.
-   • Then O(1) check on messages – if lengths differ OR last
-     message id / content differ we re-render.
--------------------------------------------------------------------*/
+/* memo comparator using checksum */
 function areEqual(prev, next) {
   if (prev.editingId   !== next.editingId)   return false;
   if (prev.editText    !== next.editText)    return false;
@@ -168,17 +145,14 @@ function areEqual(prev, next) {
 
   const a = prev.messages;
   const b = next.messages;
-  if (a === b) return true;          // identical reference
+  if (a === b) return true;
 
   if (a.length !== b.length) return false;
-  if (a.length === 0)        return true;
+  if (!a.length)             return true;
 
   const al = a[a.length - 1];
   const bl = b[b.length - 1];
-  return (
-    al.id === bl.id &&
-    JSON.stringify(al.content) === JSON.stringify(bl.content)
-  );
+  return al.id === bl.id && getCk(al) === getCk(bl);
 }
 
 export default memo(ChatArea, areEqual);

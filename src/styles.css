@@ -312,13 +312,16 @@ html, body {
   font-family: monospace;
   font-size: 0.9rem;
 }
-.code-wrapper {
+/* Code block styling + copy button */
+.code-wrapper {           /* single definition now */
   position: relative;
+  margin: 1em 0;
 }
+
 .copy-snippet {
   position: absolute;
-  top: 6px;
-  right: 6px;
+  top: 0.3em;
+  right: 0.3em;
   background: var(--bg-tertiary);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -333,7 +336,6 @@ html, body {
   background: var(--accent);
   color: #fff;
 }
-/* new state when copy succeeded */
 .copy-snippet--copied {
   background: var(--success);
   color: #fff;

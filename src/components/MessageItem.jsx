@@ -1,13 +1,12 @@
-// src/components/MessageItem.jsx
 /* ------------------------------------------------------------------
-   MessageItem – renders markdown via MarkdownRenderer
-   • Declarative; no manual DOM mutations.
+   MessageItem – markdown renderer with fast memo
 -------------------------------------------------------------------*/
-import { memo }           from 'preact/compat';
-import MarkdownRenderer   from './MarkdownRenderer.jsx';
+import { memo }          from 'preact/compat';
+import MarkdownRenderer  from './MarkdownRenderer.jsx';
+import { checksum32 }    from '../lib/checksum.js';
 
-/* flatten an array-of-blocks or arbitrary value → plain string */
-function flattenContent(content) {
+/* helpers */
+function flatten(content) {
   if (Array.isArray(content)) {
     return content
       .filter(b => b.type === 'text')
@@ -17,8 +16,16 @@ function flattenContent(content) {
   return String(content ?? '');
 }
 
+/* ensure we have a checksum on the message object */
+function ensureChecksum(m) {
+  if (m.checksum == null) {
+    m.checksum = checksum32(flatten(m.content));
+  }
+}
+
 function MessageItem({ m }) {
-  const text = flattenContent(m.content);
+  ensureChecksum(m);
+  const text = flatten(m.content);
 
   return (
     <div className="message-content-inner">
@@ -27,10 +34,7 @@ function MessageItem({ m }) {
   );
 }
 
-/* memo comparator: same id & identical content → skip re-render */
 export default memo(
   MessageItem,
-  (prev, next) =>
-    prev.m.id === next.m.id &&
-    JSON.stringify(prev.m.content) === JSON.stringify(next.m.content)
+  (a, b) => a.m.id === b.m.id && a.m.checksum === b.m.checksum
 );

@@ -1,21 +1,14 @@
-// src/components/CodeBlock.jsx
 import { useRef } from 'preact/hooks';
 import useCopyToClipboard from '../hooks/useCopyToClipboard.js';
 import 'highlight.js/styles/atom-one-dark.css';
 
 /**
- * CodeBlock – wraps a <pre> produced by MarkdownRenderer,
- * injects a “Copy” button in a declarative way.
+ * CodeBlock – wraps a <pre> and injects a copy button.
+ * The button sits OUTSIDE the <pre> so its text is never copied.
  */
 export default function CodeBlock({ preProps, children }) {
   const preRef = useRef(null);
-
-  const [copy, copied] = useCopyToClipboard({
-    successMsg: 'Copied!',
-    errorMsg:   'Copy failed',
-    successMs:  1500,
-    errorMs:    2000
-  });
+  const [copy, copied] = useCopyToClipboard();
 
   function handleCopy(e) {
     e.stopPropagation();

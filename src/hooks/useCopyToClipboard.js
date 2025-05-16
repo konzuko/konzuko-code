@@ -1,4 +1,3 @@
-// src/hooks/useCopyToClipboard.js
 import { useState, useRef, useEffect } from 'preact/hooks';
 import copyToClipboard                  from '../lib/copy.js';
 import Toast                            from '../components/Toast.jsx';
@@ -6,9 +5,6 @@ import Toast                            from '../components/Toast.jsx';
 /**
  * useCopyToClipboard()
  * Returns [copyFn, copiedBool]
- *
- * copyFn(text) copies the text and shows a Toast on success / failure.
- * `copiedBool` is true for `successMs` ms after a successful copy.
  */
 export default function useCopyToClipboard({
   successMsg = 'Copied!',
