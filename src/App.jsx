@@ -190,21 +190,44 @@ export default function App() {
   function buildUserPrompt() {
     if (mode === 'DEVELOP') {
       const L = ['MODE: DEVELOP'];
-      if (form.developGoal.trim())         L.push(`GOAL: ${form.developGoal.trim()}`);
-      if (form.developFeatures.trim())     L.push(`FEATURES: ${form.developFeatures.trim()}`);
-      if (form.developReturnFormat.trim()) L.push(`RETURN FORMAT: ${form.developReturnFormat.trim()}`);
-      if (form.developWarnings.trim())     L.push(`THINGS TO REMEMBER/WARNINGS: ${form.developWarnings.trim()}`);
-      if (form.developContext.trim())      L.push(`CONTEXT: ${form.developContext.trim()}`);
+      if (form.developGoal.trim())
+        L.push(`GOAL: ${form.developGoal.trim()}`);
+      if (form.developFeatures.trim())
+        L.push(`FEATURES: ${form.developFeatures.trim()}`);
+      if (form.developReturnFormat.trim())
+        L.push(`RETURN FORMAT: ${form.developReturnFormat.trim()}`);
+      if (form.developWarnings.trim())
+        L.push(`THINGS TO REMEMBER/WARNINGS: ${form.developWarnings.trim()}`);
+      if (form.developContext.trim())
+        L.push(`CONTEXT: ${form.developContext.trim()}`);
 
-      if (pendingFiles.length) {
-        const tree = asciiTree(pendingFiles.map(f => f.fullPath));
+      /* ───── file structure (only in-root files) */
+      const treePaths = pendingFiles
+        .filter(f => f.insideProject)
+        .map(f => f.fullPath);
+
+      if (treePaths.length) {
+        const tree = asciiTree(treePaths);
         L.push(`/* File structure:\n${tree}\n*/`);
-        pendingFiles.forEach(f =>
-          L.push(`/* ${f.fullPath} */\n${f.text}`)
-        );
       }
+
+      /* ───── individual files (all of them) */
+      pendingFiles.forEach(f => {
+        /* YAML header */
+        L.push('```yaml');
+        L.push(`file: ${f.fullPath}`);
+        if (f.note) L.push(`# ${f.note}`);
+        L.push('```');
+
+        /* code block */
+        L.push('```');
+        L.push(f.text);
+        L.push('```');
+      });
+
       return L.join('\n');
     }
+
     if (mode === 'COMMIT')
       return 'MODE: COMMIT\nPlease generate a git-style commit message.';
     if (mode === 'CODE CHECK')
