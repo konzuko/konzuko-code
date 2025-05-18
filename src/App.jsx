@@ -39,22 +39,10 @@ import {
 import { queue }      from './lib/TaskQueue.js';
 import { asciiTree }  from './lib/textUtils.js';
 
-/* ───────────────────── helper utils ───────────────────── */
-let queueSetLoading = () => {};
-async function runTask(fn) {
-  queueSetLoading(true);
-  try { await queue.push(fn); }
-  catch (err) {
-    console.error(err);
-    safeAlert(err?.message || 'Unknown error');
-  }
-  finally { queueSetLoading(false); }
-}
-
+/* ───────────────────── util helpers ───────────────────── */
 function safeAlert(msg) {
   try { alert(msg); } catch { console.error('alert blocked', msg); }
 }
-
 function revokeOnce(obj) {
   if (obj?.revoke) { obj.revoke(); obj.revoke = null; }
 }
@@ -69,14 +57,13 @@ export default function App() {
   const [loadingChats,  setLoadingChats]  = useState(true);
 
   const [loadingSend,   setLoadingSend]   = useState(false);
-  queueSetLoading = setLoadingSend;
 
   const [editingId,     setEditing]       = useState(null);
   const [editText,      setEditText]      = useState('');
   const [savingEdit,    setSaving]        = useState(false);
 
   const [pendingImages, setPendingImages] = useState([]);
-  const [pendingFiles,  setPendingFiles]  = useState([]);  // NEW
+  const [pendingFiles,  setPendingFiles]  = useState([]);
 
   const [settings, setSettings] = useSettings();
   const [form,     setForm]     = useFormData();
@@ -87,6 +74,19 @@ export default function App() {
   const tokenCount    = useTokenCount(currentChat.messages, settings.model);
   const showToast     = useCallback((txt, undo) => Toast(txt, 6000, undo), []);
   const undoableDelete = useUndoableDelete(showToast);
+
+  /* ─────────── queued task runner (fix #3) ─────────── */
+  const runTask = useCallback(async fn => {
+    setLoadingSend(true);
+    try {
+      await queue.push(fn);
+    } catch (err) {
+      console.error(err);
+      safeAlert(err?.message || 'Unknown error');
+    } finally {
+      setLoadingSend(false);
+    }
+  }, []);
 
   /* ─────────── load chat list ─────────── */
   useEffect(() => {
@@ -105,7 +105,7 @@ export default function App() {
       if (live) { setChats(shaped); setCurrent(shaped[0].id); }
     }).finally(() => live && setLoadingChats(false));
     return () => { live = false; };
-  }, [settings.codeType]);
+  }, [settings.codeType, runTask]);
 
   /* ─────────── load messages for active chat ─────────── */
   useEffect(() => {
@@ -247,7 +247,7 @@ export default function App() {
   }
 
   /* =========================================================
-     Send
+     Send  (fix #2 – fresh message list)
   ========================================================= */
   function handleSend() {
     if (busy) return;
@@ -256,6 +256,9 @@ export default function App() {
     }
 
     runTask(async () => {
+      /* fetch latest messages to avoid stale snapshot */
+      const existingMsgs = await fetchMessages(currentChatId);
+
       /* user row */
       const prompt  = buildUserPrompt();
       const userRow = await createMessage({
@@ -267,11 +270,11 @@ export default function App() {
         c.id === currentChatId ? { ...c, messages:[...c.messages, userRow] } : c
       ));
 
-      /* model messages array */
-      const msgs    = [...currentChat.messages, userRow];
+      /* build message array for model */
+      const msgs    = [...existingMsgs, userRow];
       const lastIdx = msgs.length - 1;
 
-      /* attach images */
+      /* attach images (captured at click time) */
       if (pendingImages.length && msgs[lastIdx]?.role === 'user') {
         const toBlock = async img => {
           const blob = await fetch(img.url).then(r => r.blob());
@@ -307,7 +310,7 @@ export default function App() {
 
       resetForm();
 
-      /* final refresh */
+      /* final refresh (keeps UI authoritative) */
       const refreshed = await fetchMessages(currentChatId);
       setChats(cs => cs.map(c =>
         c.id === currentChatId ? { ...c, messages: refreshed } : c
@@ -317,7 +320,6 @@ export default function App() {
 
   /* =========================================================
      Message-level helpers (edit / resend / delete)
-     — identical to original implementation
   ========================================================= */
   function handleStartEdit(msg) {
     setEditing(msg.id);
@@ -529,7 +531,6 @@ export default function App() {
               form          ={form}            setForm       ={setForm}
               loadingSend   ={busy}            handleSend    ={handleSend}
               showToast     ={showToast}
-              onImageDrop   ={setPendingImages}
               onRemoveImage ={i=>{
                 setPendingImages(a=>{
                   revokeOnce(a[i]);
