@@ -1,10 +1,12 @@
-/* src/App.jsx */
-
+/* ------------------------------------------------------------------
+   src/App.jsx  –  FULL, paste-ready file
+   (Scroll helpers restored)
+-------------------------------------------------------------------*/
 import {
   useState,
   useEffect,
   useCallback,
-  useRef
+  useRef  // <--- Restored useRef import
 } from 'preact/hooks';
 
 import ChatPane        from './chatpane.jsx';
@@ -14,44 +16,35 @@ import Toast           from './components/Toast.jsx';
 
 import {
   callApiForText,
-  fetchChats,
-  fetchMessages,
-  createChat,
-  createMessage,
-  updateMessage,
-  deleteMessage,
-  deleteChat,
+
+  fetchChats,          fetchMessages,
+  createChat,          createMessage,
+  updateMessage,       deleteMessage,
+  updateChatTitle,     deleteChat,
+
   archiveMessagesAfter,
   undoArchiveMessagesAfter,
   undoDeleteMessage,
-  undoDeleteChat,
-  updateChatTitle
+  undoDeleteChat
 } from './api.js';
 
 import {
-  useSettings,
-  useFormData,
-  useMode,
-  useTokenCount,
-  useUndoableDelete
+  useSettings, useFormData, useMode,
+  useTokenCount, useUndoableDelete
 } from './hooks.js';
 
-import { queue }      from './lib/TaskQueue.js';
-import { asciiTree }  from './lib/textUtils.js';
+import { queue }       from './lib/TaskQueue.js';
+import { asciiTree }   from './lib/textUtils.js';
 
-/* ───────────────────── util helpers ───────────────────── */
-function safeAlert(msg) {
-  try { alert(msg); } catch { console.error('alert blocked', msg); }
-}
-function revokeOnce(obj) {
-  if (obj?.revoke) { obj.revoke(); obj.revoke = null; }
-}
+/* ───────────────────────── helpers ───────────────────────── */
+const safeAlert  = msg => { try { alert(msg); } catch {} };
+const revokeOnce = obj => { if (obj?.revoke) { obj.revoke(); obj.revoke = null; } };
 
-/* =========================================================
+/* ============================================================
    APP COMPONENT
-========================================================= */
+============================================================ */
 export default function App() {
-  /* ───── state ───── */
+  /* ── primary state ─────────────────────────────────────── */
   const [chats,         setChats]         = useState([]);
   const [currentChatId, setCurrent]       = useState(null);
   const [loadingChats,  setLoadingChats]  = useState(true);
@@ -62,8 +55,9 @@ export default function App() {
   const [editText,      setEditText]      = useState('');
   const [savingEdit,    setSaving]        = useState(false);
 
-  const [pendingImages, setPendingImages] = useState([]);
-  const [pendingFiles,  setPendingFiles]  = useState([]);
+  const [pendingImages, setPendingImages] = useState([]); // [{name,url, revoke?}]
+  const [pendingPDFs,   setPendingPDFs]   = useState([]); // [{name,fileId}]
+  const [pendingFiles,  setPendingFiles]  = useState([]); // code/text files
 
   const [settings, setSettings] = useSettings();
   const [form,     setForm]     = useFormData();
@@ -75,39 +69,74 @@ export default function App() {
   const showToast     = useCallback((txt, undo) => Toast(txt, 6000, undo), []);
   const undoableDelete = useUndoableDelete(showToast);
 
-  /* ─────────── queued task runner (fix #3) ─────────── */
-  const runTask = useCallback(async fn => {
-    setLoadingSend(true);
-    try {
-      await queue.push(fn);
-    } catch (err) {
-      console.error(err);
-      safeAlert(err?.message || 'Unknown error');
-    } finally {
-      setLoadingSend(false);
-    }
-  }, []);
+  /* ── chat scroll ref and helpers ───────────────────────── */
+  const chatBoxRef = useRef(null); // <--- Restored chatBoxRef
 
-  /* ─────────── load chat list ─────────── */
+  const scrollToPrev = () => {
+    const box = chatBoxRef.current; if (!box) return;
+    const rows = Array.from(box.querySelectorAll('.message'));
+    const cur  = box.scrollTop;
+    let tgt = null;
+    for (let i = rows.length - 1; i >= 0; i--) {
+      if (rows[i].offsetTop < cur - 1) { tgt = rows[i]; break; }
+    }
+    box.scrollTop = tgt ? tgt.offsetTop : 0;
+  };
+
+  const scrollToNext = () => {
+    const box = chatBoxRef.current; if (!box) return;
+    const rows = Array.from(box.querySelectorAll('.message'));
+    const cur  = box.scrollTop;
+    let tgt = null;
+    for (let i = 0; i < rows.length; i++) {
+      if (rows[i].offsetTop > cur + 1) { tgt = rows[i]; break; }
+    }
+    box.scrollTop = tgt ? tgt.offsetTop : box.scrollHeight;
+  };
+
+  /* ── queued task helper (serialises API ops) ───────────── */
+  const runTask = useCallback(
+    async fn => {
+      setLoadingSend(true);
+      try { await queue.push(fn); }
+      catch (err) { console.error(err); safeAlert(err?.message || 'Unknown error'); }
+      finally { setLoadingSend(false); }
+    },
+    []
+  );
+
+  /* ── cleanup object-URLs when list changes / unmount ───── */
+  useEffect(() => () => {
+    pendingImages.forEach(revokeOnce);
+  }, [pendingImages]);
+
+  /* ── initial chat list load ────────────────────────────── */
   useEffect(() => {
     let live = true;
     runTask(async () => {
       setLoadingChats(true);
+
       const rows = await fetchChats();
       let shaped = rows.map(r => ({
         id: r.id, title: r.title, started: r.created_at,
         model: r.code_type, messages: []
       }));
+
       if (!shaped.length) {
-        const c = await createChat({ title:'New Chat', model:settings.codeType });
-        shaped = [{ id:c.id, title:c.title, started:c.created_at, model:c.code_type, messages:[] }];
+        const c = await createChat({ title: 'New Chat', model: settings.codeType });
+        shaped = [{
+          id: c.id, title: c.title, started: c.created_at,
+          model: c.code_type, messages: []
+        }];
       }
+
       if (live) { setChats(shaped); setCurrent(shaped[0].id); }
     }).finally(() => live && setLoadingChats(false));
+
     return () => { live = false; };
   }, [settings.codeType, runTask]);
 
-  /* ─────────── load messages for active chat ─────────── */
+  /* ── load messages when currentChatId changes ──────────── */
   useEffect(() => {
     if (!currentChatId) return;
     let live = true;
@@ -119,35 +148,17 @@ export default function App() {
     return () => { live = false; };
   }, [currentChatId]);
 
-  /* ─────────── chat scroll helpers ─────────── */
-  const chatBoxRef = useRef(null);
-  const scrollToPrev = () => {
-    const box = chatBoxRef.current; if (!box) return;
-    const rows = Array.from(box.querySelectorAll('.message'));
-    const cur  = box.scrollTop;
-    let tgt = null;
-    for (let i = rows.length-1; i >= 0; i--)
-      if (rows[i].offsetTop < cur-1) { tgt = rows[i]; break; }
-    box.scrollTop = tgt ? tgt.offsetTop : 0;
-  };
-  const scrollToNext = () => {
-    const box = chatBoxRef.current; if (!box) return;
-    const rows = Array.from(box.querySelectorAll('.message'));
-    const cur  = box.scrollTop;
-    let tgt = null;
-    for (let i = 0; i < rows.length; i++)
-      if (rows[i].offsetTop > cur+1) { tgt = rows[i]; break; }
-    box.scrollTop = tgt ? tgt.offsetTop : box.scrollHeight;
-  };
-
-  /* =========================================================
+  /* ========================================================
      Chat-level helpers
-  ========================================================= */
+  ======================================================== */
   function handleNewChat() {
     if (busy) return;
     runTask(async () => {
-      const c = await createChat({ title:'New Chat', model: settings.codeType });
-      setChats(cs => [{ id:c.id, title:c.title, started:c.created_at, model:c.code_type, messages:[] }, ...cs]);
+      const c = await createChat({ title: 'New Chat', model: settings.codeType });
+      setChats(cs => [
+        { id: c.id, title: c.title, started: c.created_at, model: c.code_type, messages: [] },
+        ...cs
+      ]);
       setCurrent(c.id);
     });
   }
@@ -158,159 +169,156 @@ export default function App() {
       .catch(err => safeAlert('Rename failed: ' + err.message)));
   }
 
-  function handleDeleteChatUI(id) {
+  function handleDeleteChat(id) {
     if (busy) return;
     const anchorId = currentChatId;
+
     undoableDelete({
       itemLabel  : 'Chat',
       deleteFn   : () => runTask(() => deleteChat(id)),
       undoFn     : () => runTask(async () => {
         await undoDeleteChat(id);
         const rows = await fetchChats();
-        const shaped = rows.map(r => ({
+        setChats(rows.map(r => ({
           id: r.id, title: r.title, started: r.created_at,
           model: r.code_type, messages: []
-        }));
-        setChats(shaped);
-        setCurrent(shaped.find(c => c.id === id)?.id ?? shaped[0]?.id ?? null);
+        })));
+        setCurrent(id); // Attempt to restore selection to the undeleted chat
       }),
       afterDelete: () => {
         setChats(cs => {
-          const filtered = cs.filter(c => c.id !== id);
-          if (anchorId === id) setCurrent(filtered[0]?.id ?? null);
-          return filtered;
+          const remaining = cs.filter(c => c.id !== id);
+          if (anchorId === id) setCurrent(remaining[0]?.id ?? null);
+          return remaining;
         });
       }
     });
   }
 
-  /* =========================================================
-     Prompt builder helpers
-  ========================================================= */
+  /* ========================================================
+     Prompt helpers
+  ======================================================== */
   function buildUserPrompt() {
     if (mode === 'DEVELOP') {
-      const L = ['MODE: DEVELOP'];
-      if (form.developGoal.trim())
-        L.push(`GOAL: ${form.developGoal.trim()}`);
-      if (form.developFeatures.trim())
-        L.push(`FEATURES: ${form.developFeatures.trim()}`);
-      if (form.developReturnFormat.trim())
-        L.push(`RETURN FORMAT: ${form.developReturnFormat.trim()}`);
-      if (form.developWarnings.trim())
-        L.push(`THINGS TO REMEMBER/WARNINGS: ${form.developWarnings.trim()}`);
-      if (form.developContext.trim())
-        L.push(`CONTEXT: ${form.developContext.trim()}`);
+      const out = ['MODE: DEVELOP'];
 
-      /* ───── file structure (only in-root files) */
-      const treePaths = pendingFiles
-        .filter(f => f.insideProject)
-        .map(f => f.fullPath);
+      if (form.developGoal.trim())         out.push(`GOAL: ${form.developGoal.trim()}`);
+      if (form.developFeatures.trim())     out.push(`FEATURES: ${form.developFeatures.trim()}`);
+      if (form.developReturnFormat.trim()) out.push(`RETURN FORMAT: ${form.developReturnFormat.trim()}`);
+      if (form.developWarnings.trim())     out.push(`THINGS TO REMEMBER/WARNINGS: ${form.developWarnings.trim()}`);
+      if (form.developContext.trim())      out.push(`CONTEXT: ${form.developContext.trim()}`);
 
+      /* tree */
+      const treePaths = pendingFiles.filter(f => f.insideProject).map(f => f.fullPath);
       if (treePaths.length) {
-        const tree = asciiTree(treePaths);
-        L.push(`/* File structure:\n${tree}\n*/`);
+        out.push(`/* File structure:\n${asciiTree(treePaths)}\n*/`);
       }
 
-      /* ───── individual files (all of them) */
+      /* individual files */
       pendingFiles.forEach(f => {
-        /* YAML header */
-        L.push('```yaml');
-        L.push(`file: ${f.fullPath}`);
-        if (f.note) L.push(`# ${f.note}`);
-        L.push('```');
+        out.push('```yaml');
+        out.push(`file: ${f.fullPath}`);
+        if (f.note) out.push(`# ${f.note}`);
+        out.push('```');
 
-        /* code block */
-        L.push('```');
-        L.push(f.text);
-        L.push('```');
+        out.push('```');
+        out.push(f.text);
+        out.push('```');
       });
 
-      return L.join('\n');
+      return out.join('\n');
     }
 
     if (mode === 'COMMIT')
       return 'MODE: COMMIT\nPlease generate a git-style commit message.';
+
     if (mode === 'CODE CHECK')
       return 'MODE: CODE CHECK\nPlease analyze any errors or pitfalls.';
+
     return '';
   }
 
   function resetForm() {
     pendingImages.forEach(revokeOnce);
-    setPendingFiles([]);
-    setForm({
-      developGoal:'', developFeatures:'', developReturnFormat:'',
-      developWarnings:'', developContext:'',
-      fixCode:'', fixErrors:''
-    });
     setPendingImages([]);
+    setPendingPDFs([]);
+    setPendingFiles([]);
+
+    setForm({
+      developGoal: '', developFeatures: '', developReturnFormat: '',
+      developWarnings: '', developContext: '',
+      fixCode: '', fixErrors: ''
+    });
   }
 
-  /* =========================================================
-     Send  (fix #2 – fresh message list)
-  ========================================================= */
+  /* ========================================================
+     SEND
+  ======================================================== */
   function handleSend() {
     if (busy) return;
-    if (mode === 'DEVELOP' && !form.developGoal.trim()) {
-      safeAlert('GOAL is required for DEVELOP mode.'); return;
-    }
-
+    /* The “GOAL required” guard sits in PromptBuilder's guardedSend */
     runTask(async () => {
-      /* fetch latest messages to avoid stale snapshot */
-      const existingMsgs = await fetchMessages(currentChatId);
+      /* 1) fetch fresh messages */
+      const existing = await fetchMessages(currentChatId);
 
-      /* user row */
+      /* 2) create user row */
       const prompt  = buildUserPrompt();
       const userRow = await createMessage({
         chat_id: currentChatId,
         role   : 'user',
         content: [{ type:'text', text: prompt }]
       });
+
+      /* optimistic UI */
       setChats(cs => cs.map(c =>
-        c.id === currentChatId ? { ...c, messages:[...c.messages, userRow] } : c
+        c.id === currentChatId
+          ? { ...c, messages:[...c.messages, userRow] }
+          : c
       ));
 
-      /* build message array for model */
-      const msgs    = [...existingMsgs, userRow];
+      /* 3) build complete list to send */
+      const msgs    = [...existing, userRow];
       const lastIdx = msgs.length - 1;
 
-      /* attach images (captured at click time) */
-      if (pendingImages.length && msgs[lastIdx]?.role === 'user') {
-        const toBlock = async img => {
-          const blob = await fetch(img.url).then(r => r.blob());
-          const dataUrl = await new Promise(res => {
-            const fr=new FileReader(); fr.onloadend=()=>res(fr.result); fr.readAsDataURL(blob);
-          });
-          revokeOnce(img);
-          return { type:'image_url', image_url:{ url:dataUrl, detail:'auto' } };
-        };
-        const imgBlocks = await Promise.all(pendingImages.map(toBlock));
-        msgs[lastIdx] = {
-          ...msgs[lastIdx],
-          content: [...imgBlocks, { type:'text', text: prompt }]
-        };
+      /* 4) append images + PDFs to last user message */
+      if (pendingImages.length || pendingPDFs.length) {
+        const blocks = [
+          ...pendingPDFs.map(p => ({
+            type:'file',
+            file:{ file_id: p.fileId }
+          })),
+          ...pendingImages.map(img => ({
+            type:'image_url',
+            image_url:{ url: img.url, detail:'auto' }
+          })),
+          { type:'text', text: prompt }
+        ];
+        msgs[lastIdx] = { ...msgs[lastIdx], content: blocks };
       }
 
-      /* call model */
+      /* 5) call OpenAI */
       const { content, error } = await callApiForText({
-        apiKey: settings.apiKey,
-        model : settings.model,
+        apiKey  : settings.apiKey,
+        model   : settings.model,
         messages: msgs
       });
 
-      /* assistant row */
-      const asst = await createMessage({
+      /* 6) assistant row */
+      const asstRow = await createMessage({
         chat_id: currentChatId,
         role   : 'assistant',
         content: [{ type:'text', text: error ? `Error: ${error}` : content }]
       });
       setChats(cs => cs.map(c =>
-        c.id === currentChatId ? { ...c, messages:[...c.messages, asst] } : c
+        c.id === currentChatId
+          ? { ...c, messages:[...c.messages, asstRow] }
+          : c
       ));
 
+      /* 7) cleanup local inputs */
       resetForm();
 
-      /* final refresh (keeps UI authoritative) */
+      /* 8) refresh messages to stay authoritative */
       const refreshed = await fetchMessages(currentChatId);
       setChats(cs => cs.map(c =>
         c.id === currentChatId ? { ...c, messages: refreshed } : c
@@ -318,13 +326,13 @@ export default function App() {
     });
   }
 
-  /* =========================================================
+  /* ========================================================
      Message-level helpers (edit / resend / delete)
-  ========================================================= */
+  ======================================================== */
   function handleStartEdit(msg) {
     setEditing(msg.id);
     const txt = Array.isArray(msg.content)
-      ? msg.content.filter(b=>b.type==='text').map(b=>b.text).join('')
+      ? msg.content.filter(b => b.type === 'text').map(b => b.text).join('')
       : String(msg.content);
     setEditText(txt);
   }
@@ -333,7 +341,6 @@ export default function App() {
   async function handleSaveEdit() {
     if (!editingId || busy) return;
     setSaving(true);
-
     runTask(async () => {
       const msgs = await fetchMessages(currentChatId);
       const idx  = msgs.findIndex(x => x.id === editingId);
@@ -346,7 +353,7 @@ export default function App() {
 
       const { content, error } = await callApiForText({
         apiKey: settings.apiKey, model: settings.model,
-        messages: msgs.slice(0, idx+1)
+        messages: msgs.slice(0, idx + 1)
       });
 
       await createMessage({
@@ -359,6 +366,7 @@ export default function App() {
       setChats(cs => cs.map(c =>
         c.id === currentChatId ? { ...c, messages: refreshed } : c
       ));
+
       setEditing(null); setEditText('');
     }).finally(() => setSaving(false));
   }
@@ -383,7 +391,9 @@ export default function App() {
         content: [{ type:'text', text: error ? `Error: ${error}` : content }]
       });
       setChats(cs => cs.map(c =>
-        c.id === currentChatId ? { ...c, messages:[...trimmed, asst] } : c
+        c.id === currentChatId
+          ? { ...c, messages:[...trimmed, asst] }
+          : c
       ));
 
       showToast('Archived messages. Undo?', () =>
@@ -402,6 +412,7 @@ export default function App() {
   function handleDeleteMessage(id) {
     if (id === editingId) { setEditing(null); setEditText(''); }
     if (busy) return;
+
     undoableDelete({
       itemLabel  : 'Message',
       deleteFn   : () => runTask(() => deleteMessage(id)),
@@ -422,9 +433,9 @@ export default function App() {
     });
   }
 
-  /* =========================================================
+  /* ========================================================
      Copy conversation helper
-  ========================================================= */
+  ======================================================== */
   function handleCopyAll() {
     const txt = currentChat.messages.map(m =>
       Array.isArray(m.content)
@@ -435,9 +446,9 @@ export default function App() {
       .catch(() => safeAlert('Copy failed (clipboard API)'));
   }
 
-  /* =========================================================
+  /* ========================================================
      UI
-  ========================================================= */
+  ======================================================== */
   if (loadingChats) {
     return <h2 style={{textAlign:'center',marginTop:'20vh'}}>Loading…</h2>;
   }
@@ -451,7 +462,7 @@ export default function App() {
         onSelectChat   ={setCurrent}
         onNewChat      ={handleNewChat}
         onTitleUpdate  ={handleRenameChat}
-        onDeleteChat   ={handleDeleteChatUI}
+        onDeleteChat   ={handleDeleteChat}
         disabled       ={busy}
       />
 
@@ -465,7 +476,9 @@ export default function App() {
           >
             {settings.showSettings ? 'Close Settings' : 'Open Settings'}
           </button>
+
           <span style={{margin:'0 1em',fontWeight:'bold'}}>konzuko-code</span>
+
           <div style={{marginLeft:'auto',display:'flex',gap:'0.5em'}}>
             <div style={{padding:'4px 12px',background:'#4f8eff',borderRadius:4}}>
               Tokens: {tokenCount.toLocaleString()}
@@ -474,7 +487,7 @@ export default function App() {
           </div>
         </div>
 
-        {/* settings panel (unchanged) */}
+        {/* settings panel */}
         {settings.showSettings && (
           <div className="settings-panel" style={{padding:'1em',borderBottom:'1px solid var(--border)'}}>
             <div className="form-group">
@@ -504,11 +517,13 @@ export default function App() {
 
         <div className="content-container" style={{display:'flex',flex:1}}>
           {/* chat column */}
-          <div className="chat-container" ref={chatBoxRef}>
+          <div className="chat-container" ref={chatBoxRef}> {/* <--- ref attached */}
+            {/* nav rail */}
             <div className="chat-nav-rail">
-              <button className="button icon-button" onClick={scrollToPrev}>↑</button>
-              <button className="button icon-button" onClick={scrollToNext}>↓</button>
+              <button className="button icon-button" onClick={scrollToPrev}>↑</button> {/* <--- scroll up */}
+              <button className="button icon-button" onClick={scrollToNext}>↓</button> {/* <--- scroll down */}
             </div>
+
             <ChatArea
               messages            ={currentChat.messages}
               editingId           ={editingId}
@@ -524,20 +539,23 @@ export default function App() {
             />
           </div>
 
-          {/* prompt builder column */}
+          {/* prompt builder */}
           <div style={{width:'50%',display:'flex',flexDirection:'column',overflowY:'auto'}}>
             <PromptBuilder
               mode          ={mode}            setMode       ={setMode}
               form          ={form}            setForm       ={setForm}
               loadingSend   ={busy}            handleSend    ={handleSend}
               showToast     ={showToast}
-              onRemoveImage ={i=>{
-                setPendingImages(a=>{
-                  revokeOnce(a[i]);
-                  return a.filter((_,j)=>j!==i);
-                });
-              }}
+
               imagePreviews ={pendingImages}
+              pdfPreviews   ={pendingPDFs}
+              onRemoveImage ={i => setPendingImages(a => {
+                revokeOnce(a[i]); return a.filter((_,j)=>j!==i);
+              })}
+
+              onAddImage    ={img => setPendingImages(a => [...a, img])}
+              onAddPDF      ={pdf => setPendingPDFs(a => [...a, pdf])}
+
               settings      ={settings}
               pendingFiles  ={pendingFiles}
               onFilesChange ={setPendingFiles}
