@@ -1,6 +1,5 @@
 /* ------------------------------------------------------------------
    src/App.jsx  –  FULL, paste-ready file
-   (Scroll helpers restored)
 -------------------------------------------------------------------*/
 import {
   useState,
@@ -37,8 +36,9 @@ import { queue }       from './lib/TaskQueue.js';
 import { asciiTree }   from './lib/textUtils.js';
 
 /* ───────────────────────── helpers ───────────────────────── */
-// Removed safeAlert as Toast is preferred
 const revokeOnce = obj => { if (obj?.revoke) { obj.revoke(); obj.revoke = null; } };
+const TARGET_GEMINI_MODEL = "gemini-2.5-pro-preview-05-06";
+
 
 /* ============================================================
    APP COMPONENT
@@ -56,7 +56,7 @@ export default function App() {
   const [savingEdit,    setSaving]        = useState(false);
 
   const [pendingImages, setPendingImages] = useState([]); // [{name,url, revoke?}]
-  const [pendingPDFs,   setPendingPDFs]   = useState([]); // [{name,fileId}]
+  const [pendingPDFs,   setPendingPDFs]   = useState([]); // [{name,fileId (Gemini URI), mimeType}]
   const [pendingFiles,  setPendingFiles]  = useState([]); // code/text files
 
   const [settings, setSettings] = useSettings();
@@ -122,12 +122,12 @@ export default function App() {
       const rows = await fetchChats();
       let shaped = rows.map(r => ({
         id: r.id, title: r.title, started: r.created_at,
-        model: r.code_type, messages: [] // code_type is the column name in DB
+        model: r.code_type || TARGET_GEMINI_MODEL,
+        messages: []
       }));
 
       if (!shaped.length) {
-        // Use settings.model for new chat creation consistency
-        const c = await createChat({ title: 'New Chat', model: settings.model });
+        const c = await createChat({ title: 'New Chat' });
         shaped = [{
           id: c.id, title: c.title, started: c.created_at,
           model: c.code_type, messages: []
@@ -138,7 +138,7 @@ export default function App() {
     }).finally(() => live && setLoadingChats(false));
 
     return () => { live = false; };
-  }, [settings.model, runTask]); // Changed dependency to settings.model
+  }, [runTask]);
 
   /* ── load messages when currentChatId changes ──────────── */
   useEffect(() => {
@@ -158,7 +158,7 @@ export default function App() {
   function handleNewChat() {
     if (busy) return;
     runTask(async () => {
-      const c = await createChat({ title: 'New Chat', model: settings.model });
+      const c = await createChat({ title: 'New Chat' });
       setChats(cs => [
         { id: c.id, title: c.title, started: c.created_at, model: c.code_type, messages: [] },
         ...cs
@@ -185,7 +185,7 @@ export default function App() {
         const rows = await fetchChats();
         setChats(rows.map(r => ({
           id: r.id, title: r.title, started: r.created_at,
-          model: r.code_type, messages: []
+          model: r.code_type || TARGET_GEMINI_MODEL, messages: []
         })));
         setCurrent(id);
       }),
@@ -245,6 +245,13 @@ export default function App() {
   ======================================================== */
   function handleSend() {
     if (busy) return;
+
+    if (!settings.apiKey) {
+      Toast("Gemini API Key is missing. Please set it in settings.", 5000);
+      setSettings(s => ({ ...s, showSettings: true }));
+      return;
+    }
+
     runTask(async () => {
       const existingMessages = await fetchMessages(currentChatId);
       const textPrompt = buildUserPrompt();
@@ -252,11 +259,15 @@ export default function App() {
       const userMessageContentBlocks = [
         ...pendingPDFs.map(p => ({
           type: 'file',
-          file: { file_id: p.fileId, original_name: p.name }
+          file: {
+            file_id: p.fileId,
+            original_name: p.name,
+            mime_type: p.mimeType
+          }
         })),
         ...pendingImages.map(img => ({
           type: 'image_url',
-          image_url: { url: img.url, detail: 'high', original_name: img.name } // Added original_name
+          image_url: { url: img.url, detail: 'high', original_name: img.name }
         })),
         { type: 'text', text: textPrompt }
       ];
@@ -274,17 +285,24 @@ export default function App() {
       ));
 
       const messagesForApi = [...existingMessages, userRow];
-
-      const { content: assistantContent, error: apiError } = await callApiForText({
+      
+      // console.log("API Key being sent to callApiForText:", settings.apiKey); // For debugging
+      const { content: assistantContent, error: apiError, details: apiErrorDetails } = await callApiForText({
         apiKey: settings.apiKey,
-        model: settings.model,
         messages: messagesForApi
       });
+      
+      let assistantText = assistantContent;
+      if (apiError) {
+        assistantText = `Error: ${apiError}`;
+        if (apiErrorDetails) assistantText += `\nDetails: ${apiErrorDetails}`;
+        Toast(assistantText, 8000);
+      }
 
       const assistantRow = await createMessage({
         chat_id: currentChatId,
         role: 'assistant',
-        content: [{ type: 'text', text: apiError ? `Error: ${apiError}` : assistantContent }]
+        content: [{ type: 'text', text: assistantText }]
       });
 
       setChats(cs => cs.map(c =>
@@ -294,11 +312,6 @@ export default function App() {
       ));
 
       resetForm();
-
-      const refreshedMessages = await fetchMessages(currentChatId);
-      setChats(cs => cs.map(c =>
-        c.id === currentChatId ? { ...c, messages: refreshedMessages } : c
-      ));
     });
   }
 
@@ -316,6 +329,13 @@ export default function App() {
 
   async function handleSaveEdit() {
     if (!editingId || busy) return;
+
+    if (!settings.apiKey) {
+      Toast("Gemini API Key is missing. Please set it in settings before saving edit.", 5000);
+      setSettings(s => ({ ...s, showSettings: true }));
+      return;
+    }
+
     setSaving(true);
     runTask(async () => {
       const msgs = await fetchMessages(currentChatId);
@@ -337,15 +357,22 @@ export default function App() {
 
       await archiveMessagesAfter(currentChatId, msgs[msgIndex].created_at);
 
-      const { content, error } = await callApiForText({
-        apiKey: settings.apiKey, model: settings.model,
+      const { content, error, details: apiErrorDetails } = await callApiForText({
+        apiKey: settings.apiKey,
         messages: msgs.slice(0, msgIndex + 1)
       });
+
+      let assistantText = content;
+      if (error) {
+        assistantText = `Error: ${error}`;
+        if (apiErrorDetails) assistantText += `\nDetails: ${apiErrorDetails}`;
+        Toast(assistantText, 8000);
+      }
 
       await createMessage({
         chat_id: currentChatId,
         role: 'assistant',
-        content: [{ type: 'text', text: error ? `Error: ${error}` : content }]
+        content: [{ type: 'text', text: assistantText }]
       });
 
       const refreshed = await fetchMessages(currentChatId);
@@ -359,6 +386,13 @@ export default function App() {
 
   function handleResendMessage(id) {
     if (busy) return;
+
+    if (!settings.apiKey) {
+      Toast("Gemini API Key is missing. Please set it in settings before resending.", 5000);
+      setSettings(s => ({ ...s, showSettings: true }));
+      return;
+    }
+
     runTask(async () => {
       const msgs = await fetchMessages(currentChatId);
       const anchorMsgIndex = msgs.findIndex(x => x.id === id);
@@ -368,14 +402,22 @@ export default function App() {
       await archiveMessagesAfter(currentChatId, anchor.created_at);
       const messagesForApi = msgs.slice(0, anchorMsgIndex + 1);
 
-      const { content, error } = await callApiForText({
-        apiKey: settings.apiKey, model: settings.model, messages: messagesForApi
+      const { content, error, details: apiErrorDetails } = await callApiForText({
+        apiKey: settings.apiKey,
+        messages: messagesForApi
       });
+
+      let assistantText = content;
+      if (error) {
+        assistantText = `Error: ${error}`;
+        if (apiErrorDetails) assistantText += `\nDetails: ${apiErrorDetails}`;
+        Toast(assistantText, 8000);
+      }
 
       const asst = await createMessage({
         chat_id: currentChatId,
         role: 'assistant',
-        content: [{ type: 'text', text: error ? `Error: ${error}` : content }]
+        content: [{ type: 'text', text: assistantText }]
       });
 
       const refreshedMessages = await fetchMessages(currentChatId);
@@ -462,8 +504,8 @@ export default function App() {
           </button>
           <span style={{margin:'0 1em',fontWeight:'bold'}}>konzuko-code</span>
           <div style={{marginLeft:'auto',display:'flex',gap:'0.5em'}}>
-            <div style={{padding:'4px 12px',background:'#4f8eff',borderRadius:4}}>
-              Tokens: {tokenCount.toLocaleString()}
+            <div style={{padding:'4px 12px',background:'#4f8eff',borderRadius:4, fontSize: '0.9em'}}>
+              Tokens: {tokenCount.toLocaleString()} (approx. OpenAI)
             </div>
             <button className="button" onClick={handleCopyAll}>Copy All Text</button>
           </div>
@@ -471,26 +513,22 @@ export default function App() {
         {settings.showSettings && (
           <div className="settings-panel" style={{padding:'1em',borderBottom:'1px solid var(--border)'}}>
             <div className="form-group">
-              <label>OpenAI API Key:</label>
+              <label>Gemini API Key (Google AI Studio):</label>
               <input
                 className="form-input"
                 value={settings.apiKey}
                 onInput={e => setSettings(s => ({ ...s, apiKey:e.target.value }))}
+                placeholder="Enter your Gemini API Key"
               />
             </div>
             <div className="form-group">
               <label>Model:</label>
-              <select
-                className="form-select"
-                value={settings.model}
-                onChange={e => setSettings(s => ({ ...s, model:e.target.value }))}
-              >
-                <option value="o4-mini-2025-04-16">o4-mini-2025-04-16</option>
-                <option value="o1">o1</option>
-                <option value="o3-2025-04-16">o3-2025-04-16</option>
-                <option value="gpt-4.5-preview-2025-02-27">gpt-4.5-preview-2025-02-27</option>
-                <option value="gpt-3.5-turbo">gpt-3.5-turbo</option>
-              </select>
+              <input
+                className="form-input"
+                value={TARGET_GEMINI_MODEL}
+                readOnly
+                style={{backgroundColor: 'var(--bg-tertiary)', color: 'var(--text-secondary)', cursor: 'default'}}
+              />
             </div>
           </div>
         )}

@@ -21,12 +21,23 @@ import { isTextLike, isImage }   from './lib/fileTypeGuards.js';
 
 /* ───────────────────────── constants ────────────────────────── */
 const MAX_TOTAL_DROPPED_FILES = 2000;
+const TARGET_GEMINI_MODEL = "gemini-2.5-pro-preview-05-06";
+
 
 /* ───────────────────── localStorage helpers ─────────────────── */
 function useDebouncedLocalStorage(key, initial, delay = LOCALSTORAGE_DEBOUNCE) {
   const [value, setValue] = useState(() => {
     try {
-      return JSON.parse(localStorage.getItem(key)) ?? initial;
+      const storedValue = localStorage.getItem(key);
+      if (storedValue !== null) {
+        const parsed = JSON.parse(storedValue);
+        // Ensure the model is always the target model if it exists in settings
+        if (key === 'konzuko-settings' && parsed.hasOwnProperty('model')) {
+            parsed.model = TARGET_GEMINI_MODEL;
+        }
+        return parsed;
+      }
+      return initial;
     } catch {
       return initial;
     }
@@ -35,7 +46,13 @@ function useDebouncedLocalStorage(key, initial, delay = LOCALSTORAGE_DEBOUNCE) {
   useEffect(() => {
     const id = setTimeout(() => {
       try {
-        localStorage.setItem(key, JSON.stringify(value));
+        // Ensure the model is always the target model before saving
+        let valueToStore = value;
+        if (key === 'konzuko-settings' && valueToStore.hasOwnProperty('model')) {
+            // Create a new object to ensure reactivity if value itself is not changing but its property is
+            valueToStore = { ...valueToStore, model: TARGET_GEMINI_MODEL };
+        }
+        localStorage.setItem(key, JSON.stringify(valueToStore));
       } catch (err) {
         console.warn('localStorage error:', err);
       }
@@ -49,8 +66,7 @@ function useDebouncedLocalStorage(key, initial, delay = LOCALSTORAGE_DEBOUNCE) {
 export function useSettings() {
   return useDebouncedLocalStorage('konzuko-settings', {
     apiKey       : '',
-    model        : 'gpt-3.5-turbo',
-    codeType     : 'javascript',
+    model        : TARGET_GEMINI_MODEL,
     showSettings : false
   });
 }
@@ -108,7 +124,9 @@ async function bfsTraverseFsHandle(rootHandle, out = [], max = MAX_TOTAL_DROPPED
     const h = q.shift();
     if (h.kind === 'file') {
       const f = await h.getFile();
-      f.fullPath = f.fullPath || f.name;
+      f.fullPath = h.name; // For FileSystemFileHandle, name is usually sufficient.
+                           // If relative paths from root are needed, they must be constructed during traversal.
+                           // For now, using h.name as it's the direct file name.
       out.push(f);
     } else if (h.kind === 'directory') {
       for await (const [, child] of h.entries()) {
@@ -124,18 +142,20 @@ async function gatherAllDroppedFiles(items) {
   const out = [];
   for (let i = 0; i < items.length && out.length < MAX_TOTAL_DROPPED_FILES; i++) {
     const it = items[i];
-    if (it.kind !== 'file') continue;
+    if (it.kind !== 'file' && typeof it.getAsFileSystemHandle !== 'function' && typeof it.webkitGetAsEntry !== 'function') {
+        continue;
+    }
 
-    /* 1) File-System Access API BFS */
     if (it.getAsFileSystemHandle) {
       try {
         const h = await it.getAsFileSystemHandle();
         await bfsTraverseFsHandle(h, out, MAX_TOTAL_DROPPED_FILES);
         continue;
-      } catch {}
+      } catch(e) {
+        // console.warn("Error with getAsFileSystemHandle:", e);
+      }
     }
 
-    /* 2) WebKit directory BFS */
     if (it.webkitGetAsEntry) {
       const ent = it.webkitGetAsEntry();
       if (ent) {
@@ -148,7 +168,6 @@ async function gatherAllDroppedFiles(items) {
       }
     }
 
-    /* 3) Fallback single file */
     const file = it.getAsFile();
     if (file) {
       file.fullPath = file.name;
@@ -168,7 +187,6 @@ export function useFileDrop(onText, onImage) {
       const files = await gatherAllDroppedFiles(e.dataTransfer.items);
 
       for (const f of files) {
-        /* A) image */
         if (isImage(f)) {
           if (onImage) {
             const url = URL.createObjectURL(f);
@@ -177,9 +195,7 @@ export function useFileDrop(onText, onImage) {
           }
           continue;
         }
-        /* B) non-text skip */
         if (!isTextLike(f)) continue;
-        /* C) text */
         await new Promise(res => {
           const r = new FileReader();
           r.onload = () => {

@@ -7,6 +7,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@google/genai": "^0.15.0",
     "@supabase/supabase-js": "^2.49.4",
     "cross-fetch": "^4.1.0",
     "dompurify": "^3.2.5",

@@ -2,7 +2,7 @@
    – Restores the “GOAL is required” guard (A-1)
 */
 import { useEffect, useRef } from 'preact/hooks';
-import { del }               from 'idb-keyval';
+import { del }               from 'idb-keyval'; // For one-off purge
 import FilePane              from './FilePane.jsx';
 
 export default function PromptBuilder({
@@ -13,13 +13,13 @@ export default function PromptBuilder({
   showToast,
 
   imagePreviews = [],          // [{ name,url }]
-  pdfPreviews   = [],          // [{ name,fileId }]
+  pdfPreviews   = [],          // [{ name,fileId, mimeType }]
   onRemoveImage,
 
   onAddImage,
   onAddPDF,
 
-  settings,
+  settings, // Receive settings to pass to FilePane
   pendingFiles, onFilesChange
 }) {
   /* ── persist draft on page-hide ─────────────────────────── */
@@ -97,9 +97,9 @@ export default function PromptBuilder({
           files={pendingFiles}
           onFilesChange={onFilesChange}
           onSkip={n => showToast?.(`${n} file${n>1?'s':''} ignored`)}
-
           onAddImage={onAddImage}
           onAddPDF={onAddPDF}
+          settings={settings} // Pass settings to FilePane
         />
       )}
 
@@ -107,7 +107,7 @@ export default function PromptBuilder({
       {imagePreviews.length > 0 && (
         <div style={{ display:'flex', flexWrap:'wrap', gap:8, margin:'8px 0' }}>
           {imagePreviews.map((img, i) => (
-            <div key={i} style={{ position:'relative' }}>
+            <div key={`${img.url}-${i}`} style={{ position:'relative' }}> {/* Ensure key is unique */}
               <img src={img.url} alt={img.name} style={{ width:100, borderRadius:4 }} />
               <div
                 onClick={() => onRemoveImage(i)}
@@ -122,7 +122,7 @@ export default function PromptBuilder({
               <div style={{
                 width:100, marginTop:2, fontSize:'0.7rem',
                 overflow:'hidden', whiteSpace:'nowrap', textOverflow:'ellipsis',
-                textAlign:'center', color:'#ccc'
+                textAlign:'center', color:'var(--text-secondary)' // Updated color
               }}>{img.name}</div>
             </div>
           ))}
@@ -133,14 +133,14 @@ export default function PromptBuilder({
       {pdfPreviews.length > 0 && (
         <div style={{ margin:'8px 0' }}>
           <strong>PDFs:</strong>
-          <ul style={{ margin:'4px 0 0 16px' }}>
-            {pdfPreviews.map((p,i)=><li key={i}>{p.name}</li>)}
+          <ul style={{ margin:'4px 0 0 16px', paddingLeft: '0', listStylePosition: 'inside' }}> {/* Adjusted style */}
+            {pdfPreviews.map((p,i)=><li key={`${p.fileId}-${i}`}>{p.name}</li>)} {/* Ensure key is unique */}
           </ul>
         </div>
       )}
 
       {/* footer */}
-      <div style={{ display:'flex', justifyContent:'flex-end', marginTop:12 }}>
+      <div style={{ display:'flex', justifyContent:'flex-end', marginTop:'auto', paddingTop: '12px' }}> {/* marginTop: auto to push to bottom */}
         <button
           className="button send-button"
           disabled={loadingSend}
