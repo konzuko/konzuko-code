@@ -6,7 +6,7 @@ import {
   useState,
   useEffect,
   useCallback,
-  useRef  // <--- Restored useRef import
+  useRef
 } from 'preact/hooks';
 
 import ChatPane        from './chatpane.jsx';
@@ -37,7 +37,7 @@ import { queue }       from './lib/TaskQueue.js';
 import { asciiTree }   from './lib/textUtils.js';
 
 /* ───────────────────────── helpers ───────────────────────── */
-const safeAlert  = msg => { try { alert(msg); } catch {} };
+// Removed safeAlert as Toast is preferred
 const revokeOnce = obj => { if (obj?.revoke) { obj.revoke(); obj.revoke = null; } };
 
 /* ============================================================
@@ -70,7 +70,7 @@ export default function App() {
   const undoableDelete = useUndoableDelete(showToast);
 
   /* ── chat scroll ref and helpers ───────────────────────── */
-  const chatBoxRef = useRef(null); // <--- Restored chatBoxRef
+  const chatBoxRef = useRef(null);
 
   const scrollToPrev = () => {
     const box = chatBoxRef.current; if (!box) return;
@@ -99,7 +99,10 @@ export default function App() {
     async fn => {
       setLoadingSend(true);
       try { await queue.push(fn); }
-      catch (err) { console.error(err); safeAlert(err?.message || 'Unknown error'); }
+      catch (err) {
+        console.error(err);
+        Toast(err?.message || 'Unknown error', 5000);
+      }
       finally { setLoadingSend(false); }
     },
     []
@@ -119,11 +122,12 @@ export default function App() {
       const rows = await fetchChats();
       let shaped = rows.map(r => ({
         id: r.id, title: r.title, started: r.created_at,
-        model: r.code_type, messages: []
+        model: r.code_type, messages: [] // code_type is the column name in DB
       }));
 
       if (!shaped.length) {
-        const c = await createChat({ title: 'New Chat', model: settings.codeType });
+        // Use settings.model for new chat creation consistency
+        const c = await createChat({ title: 'New Chat', model: settings.model });
         shaped = [{
           id: c.id, title: c.title, started: c.created_at,
           model: c.code_type, messages: []
@@ -134,7 +138,7 @@ export default function App() {
     }).finally(() => live && setLoadingChats(false));
 
     return () => { live = false; };
-  }, [settings.codeType, runTask]);
+  }, [settings.model, runTask]); // Changed dependency to settings.model
 
   /* ── load messages when currentChatId changes ──────────── */
   useEffect(() => {
@@ -144,7 +148,7 @@ export default function App() {
       .then(msgs => live && setChats(cs => cs.map(c =>
         c.id === currentChatId ? { ...c, messages: msgs } : c
       )))
-      .catch(err => safeAlert('Failed to fetch messages: ' + err.message));
+      .catch(err => Toast('Failed to fetch messages: ' + err.message, 5000));
     return () => { live = false; };
   }, [currentChatId]);
 
@@ -154,7 +158,7 @@ export default function App() {
   function handleNewChat() {
     if (busy) return;
     runTask(async () => {
-      const c = await createChat({ title: 'New Chat', model: settings.codeType });
+      const c = await createChat({ title: 'New Chat', model: settings.model });
       setChats(cs => [
         { id: c.id, title: c.title, started: c.created_at, model: c.code_type, messages: [] },
         ...cs
@@ -166,7 +170,7 @@ export default function App() {
   function handleRenameChat(id, title) {
     setChats(cs => cs.map(c => c.id === id ? { ...c, title } : c));
     runTask(() => updateChatTitle(id, title)
-      .catch(err => safeAlert('Rename failed: ' + err.message)));
+      .catch(err => Toast('Rename failed: ' + err.message, 5000)));
   }
 
   function handleDeleteChat(id) {
@@ -183,7 +187,7 @@ export default function App() {
           id: r.id, title: r.title, started: r.created_at,
           model: r.code_type, messages: []
         })));
-        setCurrent(id); // Attempt to restore selection to the undeleted chat
+        setCurrent(id);
       }),
       afterDelete: () => {
         setChats(cs => {
@@ -208,33 +212,24 @@ export default function App() {
       if (form.developWarnings.trim())     out.push(`THINGS TO REMEMBER/WARNINGS: ${form.developWarnings.trim()}`);
       if (form.developContext.trim())      out.push(`CONTEXT: ${form.developContext.trim()}`);
 
-      /* tree */
       const treePaths = pendingFiles.filter(f => f.insideProject).map(f => f.fullPath);
       if (treePaths.length) {
         out.push(`/* File structure:\n${asciiTree(treePaths)}\n*/`);
       }
 
-      /* individual files */
       pendingFiles.forEach(f => {
         out.push('```yaml');
         out.push(`file: ${f.fullPath}`);
         if (f.note) out.push(`# ${f.note}`);
         out.push('```');
-
         out.push('```');
         out.push(f.text);
         out.push('```');
       });
-
       return out.join('\n');
     }
-
-    if (mode === 'COMMIT')
-      return 'MODE: COMMIT\nPlease generate a git-style commit message.';
-
-    if (mode === 'CODE CHECK')
-      return 'MODE: CODE CHECK\nPlease analyze any errors or pitfalls.';
-
+    if (mode === 'COMMIT') return 'MODE: COMMIT\nPlease generate a git-style commit message.';
+    if (mode === 'CODE CHECK') return 'MODE: CODE CHECK\nPlease analyze any errors or pitfalls.';
     return '';
   }
 
@@ -243,12 +238,6 @@ export default function App() {
     setPendingImages([]);
     setPendingPDFs([]);
     setPendingFiles([]);
-
-    setForm({
-      developGoal: '', developFeatures: '', developReturnFormat: '',
-      developWarnings: '', developContext: '',
-      fixCode: '', fixErrors: ''
-    });
   }
 
   /* ========================================================
@@ -256,72 +245,59 @@ export default function App() {
   ======================================================== */
   function handleSend() {
     if (busy) return;
-    /* The “GOAL required” guard sits in PromptBuilder's guardedSend */
     runTask(async () => {
-      /* 1) fetch fresh messages */
-      const existing = await fetchMessages(currentChatId);
+      const existingMessages = await fetchMessages(currentChatId);
+      const textPrompt = buildUserPrompt();
 
-      /* 2) create user row */
-      const prompt  = buildUserPrompt();
+      const userMessageContentBlocks = [
+        ...pendingPDFs.map(p => ({
+          type: 'file',
+          file: { file_id: p.fileId, original_name: p.name }
+        })),
+        ...pendingImages.map(img => ({
+          type: 'image_url',
+          image_url: { url: img.url, detail: 'high', original_name: img.name } // Added original_name
+        })),
+        { type: 'text', text: textPrompt }
+      ];
+
       const userRow = await createMessage({
         chat_id: currentChatId,
-        role   : 'user',
-        content: [{ type:'text', text: prompt }]
+        role: 'user',
+        content: userMessageContentBlocks
       });
 
-      /* optimistic UI */
       setChats(cs => cs.map(c =>
         c.id === currentChatId
-          ? { ...c, messages:[...c.messages, userRow] }
+          ? { ...c, messages: [...c.messages, userRow] }
           : c
       ));
 
-      /* 3) build complete list to send */
-      const msgs    = [...existing, userRow];
-      const lastIdx = msgs.length - 1;
+      const messagesForApi = [...existingMessages, userRow];
 
-      /* 4) append images + PDFs to last user message */
-      if (pendingImages.length || pendingPDFs.length) {
-        const blocks = [
-          ...pendingPDFs.map(p => ({
-            type:'file',
-            file:{ file_id: p.fileId }
-          })),
-          ...pendingImages.map(img => ({
-            type:'image_url',
-            image_url:{ url: img.url, detail:'auto' }
-          })),
-          { type:'text', text: prompt }
-        ];
-        msgs[lastIdx] = { ...msgs[lastIdx], content: blocks };
-      }
-
-      /* 5) call OpenAI */
-      const { content, error } = await callApiForText({
-        apiKey  : settings.apiKey,
-        model   : settings.model,
-        messages: msgs
+      const { content: assistantContent, error: apiError } = await callApiForText({
+        apiKey: settings.apiKey,
+        model: settings.model,
+        messages: messagesForApi
       });
 
-      /* 6) assistant row */
-      const asstRow = await createMessage({
+      const assistantRow = await createMessage({
         chat_id: currentChatId,
-        role   : 'assistant',
-        content: [{ type:'text', text: error ? `Error: ${error}` : content }]
+        role: 'assistant',
+        content: [{ type: 'text', text: apiError ? `Error: ${apiError}` : assistantContent }]
       });
+
       setChats(cs => cs.map(c =>
         c.id === currentChatId
-          ? { ...c, messages:[...c.messages, asstRow] }
+          ? { ...c, messages: [...c.messages, assistantRow] }
           : c
       ));
 
-      /* 7) cleanup local inputs */
       resetForm();
 
-      /* 8) refresh messages to stay authoritative */
-      const refreshed = await fetchMessages(currentChatId);
+      const refreshedMessages = await fetchMessages(currentChatId);
       setChats(cs => cs.map(c =>
-        c.id === currentChatId ? { ...c, messages: refreshed } : c
+        c.id === currentChatId ? { ...c, messages: refreshedMessages } : c
       ));
     });
   }
@@ -331,10 +307,10 @@ export default function App() {
   ======================================================== */
   function handleStartEdit(msg) {
     setEditing(msg.id);
-    const txt = Array.isArray(msg.content)
-      ? msg.content.filter(b => b.type === 'text').map(b => b.text).join('')
-      : String(msg.content);
-    setEditText(txt);
+    const textBlock = Array.isArray(msg.content)
+      ? msg.content.find(b => b.type === 'text')
+      : { text: String(msg.content) };
+    setEditText(textBlock?.text || '');
   }
   function handleCancelEdit() { setEditing(null); setEditText(''); }
 
@@ -343,23 +319,33 @@ export default function App() {
     setSaving(true);
     runTask(async () => {
       const msgs = await fetchMessages(currentChatId);
-      const idx  = msgs.findIndex(x => x.id === editingId);
-      if (idx === -1) throw new Error('Message not found');
+      const msgIndex = msgs.findIndex(x => x.id === editingId);
+      if (msgIndex === -1) throw new Error('Message not found for editing');
 
-      await updateMessage(editingId, editText);
-      msgs[idx] = { ...msgs[idx], content:[{ type:'text', text: editText }] };
+      const originalMessage = msgs[msgIndex];
+      const originalContent = Array.isArray(originalMessage.content) ? originalMessage.content : [{type: 'text', text: String(originalMessage.content)}];
 
-      await archiveMessagesAfter(currentChatId, msgs[idx].created_at);
+      const newContentArray = originalContent.map(block =>
+        block.type === 'text' ? { ...block, text: editText } : block
+      );
+      if (!newContentArray.some(b => b.type === 'text')) {
+          newContentArray.push({ type: 'text', text: editText });
+      }
+
+      await updateMessage(editingId, newContentArray);
+      msgs[msgIndex] = { ...originalMessage, content: newContentArray };
+
+      await archiveMessagesAfter(currentChatId, msgs[msgIndex].created_at);
 
       const { content, error } = await callApiForText({
         apiKey: settings.apiKey, model: settings.model,
-        messages: msgs.slice(0, idx + 1)
+        messages: msgs.slice(0, msgIndex + 1)
       });
 
       await createMessage({
         chat_id: currentChatId,
-        role   : 'assistant',
-        content: [{ type:'text', text: error ? `Error: ${error}` : content }]
+        role: 'assistant',
+        content: [{ type: 'text', text: error ? `Error: ${error}` : content }]
       });
 
       const refreshed = await fetchMessages(currentChatId);
@@ -374,29 +360,32 @@ export default function App() {
   function handleResendMessage(id) {
     if (busy) return;
     runTask(async () => {
-      const msgs   = await fetchMessages(currentChatId);
-      const anchor = msgs.find(x => x.id === id);
-      if (!anchor) throw new Error('Message not found');
+      const msgs = await fetchMessages(currentChatId);
+      const anchorMsgIndex = msgs.findIndex(x => x.id === id);
+      if (anchorMsgIndex === -1) throw new Error('Message not found for resend');
+      const anchor = msgs[anchorMsgIndex];
 
       await archiveMessagesAfter(currentChatId, anchor.created_at);
-      const trimmed = await fetchMessages(currentChatId);
+      const messagesForApi = msgs.slice(0, anchorMsgIndex + 1);
 
       const { content, error } = await callApiForText({
-        apiKey: settings.apiKey, model: settings.model, messages: trimmed
+        apiKey: settings.apiKey, model: settings.model, messages: messagesForApi
       });
 
       const asst = await createMessage({
         chat_id: currentChatId,
-        role   : 'assistant',
-        content: [{ type:'text', text: error ? `Error: ${error}` : content }]
+        role: 'assistant',
+        content: [{ type: 'text', text: error ? `Error: ${error}` : content }]
       });
+
+      const refreshedMessages = await fetchMessages(currentChatId);
       setChats(cs => cs.map(c =>
         c.id === currentChatId
-          ? { ...c, messages:[...trimmed, asst] }
+          ? { ...c, messages: refreshedMessages }
           : c
       ));
 
-      showToast('Archived messages. Undo?', () =>
+      showToast('Archived subsequent messages. Undo?', () =>
         runTask(async () => {
           await undoArchiveMessagesAfter(currentChatId, anchor.created_at);
           await deleteMessage(asst.id);
@@ -437,13 +426,12 @@ export default function App() {
      Copy conversation helper
   ======================================================== */
   function handleCopyAll() {
-    const txt = currentChat.messages.map(m =>
-      Array.isArray(m.content)
-        ? m.content.filter(b=>b.type==='text').map(b=>b.text).join('')
-        : String(m.content)
-    ).join('\n\n');
+    const txt = currentChat.messages.map(m => {
+      const contentArray = Array.isArray(m.content) ? m.content : [{ type: 'text', text: String(m.content ?? '') }];
+      return contentArray.filter(b => b.type === 'text').map(b => b.text).join('\n');
+    }).join('\n\n');
     navigator.clipboard.writeText(txt)
-      .catch(() => safeAlert('Copy failed (clipboard API)'));
+      .catch(() => Toast('Copy failed (clipboard API)', 4000));
   }
 
   /* ========================================================
@@ -455,7 +443,6 @@ export default function App() {
 
   return (
     <div className="app-container">
-      {/* ─── sidebar ─── */}
       <ChatPane
         chats          ={chats}
         currentChatId  ={currentChatId}
@@ -465,10 +452,7 @@ export default function App() {
         onDeleteChat   ={handleDeleteChat}
         disabled       ={busy}
       />
-
-      {/* ─── main column ─── */}
       <div className="main-content">
-        {/* top bar */}
         <div className="top-bar">
           <button
             className="button"
@@ -476,9 +460,7 @@ export default function App() {
           >
             {settings.showSettings ? 'Close Settings' : 'Open Settings'}
           </button>
-
           <span style={{margin:'0 1em',fontWeight:'bold'}}>konzuko-code</span>
-
           <div style={{marginLeft:'auto',display:'flex',gap:'0.5em'}}>
             <div style={{padding:'4px 12px',background:'#4f8eff',borderRadius:4}}>
               Tokens: {tokenCount.toLocaleString()}
@@ -486,8 +468,6 @@ export default function App() {
             <button className="button" onClick={handleCopyAll}>Copy All Text</button>
           </div>
         </div>
-
-        {/* settings panel */}
         {settings.showSettings && (
           <div className="settings-panel" style={{padding:'1em',borderBottom:'1px solid var(--border)'}}>
             <div className="form-group">
@@ -514,16 +494,12 @@ export default function App() {
             </div>
           </div>
         )}
-
         <div className="content-container" style={{display:'flex',flex:1}}>
-          {/* chat column */}
-          <div className="chat-container" ref={chatBoxRef}> {/* <--- ref attached */}
-            {/* nav rail */}
+          <div className="chat-container" ref={chatBoxRef}>
             <div className="chat-nav-rail">
-              <button className="button icon-button" onClick={scrollToPrev}>↑</button> {/* <--- scroll up */}
-              <button className="button icon-button" onClick={scrollToNext}>↓</button> {/* <--- scroll down */}
+              <button className="button icon-button" onClick={scrollToPrev}>↑</button>
+              <button className="button icon-button" onClick={scrollToNext}>↓</button>
             </div>
-
             <ChatArea
               messages            ={currentChat.messages}
               editingId           ={editingId}
@@ -538,24 +514,19 @@ export default function App() {
               handleDeleteMessage ={handleDeleteMessage}
             />
           </div>
-
-          {/* prompt builder */}
           <div style={{width:'50%',display:'flex',flexDirection:'column',overflowY:'auto'}}>
             <PromptBuilder
               mode          ={mode}            setMode       ={setMode}
               form          ={form}            setForm       ={setForm}
               loadingSend   ={busy}            handleSend    ={handleSend}
               showToast     ={showToast}
-
               imagePreviews ={pendingImages}
               pdfPreviews   ={pendingPDFs}
               onRemoveImage ={i => setPendingImages(a => {
                 revokeOnce(a[i]); return a.filter((_,j)=>j!==i);
               })}
-
               onAddImage    ={img => setPendingImages(a => [...a, img])}
               onAddPDF      ={pdf => setPendingPDFs(a => [...a, pdf])}
-
               settings      ={settings}
               pendingFiles  ={pendingFiles}
               onFilesChange ={setPendingFiles}

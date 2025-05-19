@@ -198,18 +198,18 @@ export async function fetchMessages(chat_id) {
 export async function createMessage({ chat_id, role, content }) {
   const { data, error } = await supabase
     .from('messages')
-    .insert({ chat_id, role, content })
+    .insert({ chat_id, role, content }) // content is expected to be an array here
     .select()
     .single()
   if (error) throw error
   return data
 }
 
-export async function updateMessage(id, newContent) {
+export async function updateMessage(id, newContentArray) {
   // store as an array of blocks for consistency
   const { data, error } = await supabase
     .from('messages')
-    .update({ content: [{ type: 'text', text: newContent }] })
+    .update({ content: newContentArray }) // Store the array directly
     .eq('id', id)
     .select()
     .single()
@@ -261,4 +261,3 @@ export async function undoDeleteMessage(id) {
   if (error) throw error
   return { success: true }
 }
-

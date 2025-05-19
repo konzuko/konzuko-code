@@ -18,7 +18,6 @@ import {
 import { checksum32 }             from './lib/checksum.js';
 import Toast                      from './components/Toast.jsx';
 import { compressImageToWebP }    from './lib/imageUtils.js';
-// No import for pdfClient.js as we're doing direct browser upload for PDFs
 import { supabase }               from './lib/supabase.js';
 
 const FILE_LIMIT = 500;
@@ -88,18 +87,17 @@ export default function FilePane({
   onFilesChange,
   onSkip,
 
-  onAddImage,       // ({ name, url })
-  onAddPDF,         // ({ name, fileId })
-  settings          // Passed down from App.jsx, contains settings.apiKey (user's key)
+  onAddImage,
+  onAddPDF,
+  settings
 }) {
   const [adding, setAdding]           = useState(false);
   const [projectRoot, setProjectRoot] = useState(null);
 
   const [entryFilter, setEntryFilter] = useState({});
-  const [step, setStep]               = useState('FILTER'); // or 'FILES'
+  const [step, setStep]               = useState('FILTER');
   const [topEntries, setTopEntries]   = useState([]);
 
-  /* restore saved root dir */
   useEffect(() => {
     let live = true;
     loadRoot().then(h => live && setProjectRoot(h)).catch(() => {});
@@ -117,9 +115,11 @@ export default function FilePane({
     onFilesChange([]);
   };
 
-  /* ───────────────────────────── +Add Files (Text/Code) ───────────────── */
   const addFiles = useCallback(async () => {
-    if (!window.showOpenFilePicker) return alert('File picker unsupported');
+    if (!window.showOpenFilePicker) {
+        Toast('File picker is not supported in this browser.', 4000);
+        return;
+    }
     try {
       setAdding(true);
       const handles = await window.showOpenFilePicker({ multiple: true });
@@ -145,13 +145,12 @@ export default function FilePane({
       onFilesChange(merged);
       setStep('FILES');
     } catch (err) {
-      if (err.name !== 'AbortError') alert('File pick error: ' + err.message);
+      if (err.name !== 'AbortError') Toast('File pick error: ' + err.message, 4000);
     } finally {
       setAdding(false);
     }
   }, [files, onFilesChange, onSkip, projectRoot]);
 
-  /* ───────────────────────────── +Add Folder ──────────────────────────── */
   async function scanDir(handle, out, stats, root) {
     for await (const [, h] of handle.entries()) {
       if (out.length >= FILE_LIMIT) { stats.limit++; continue; }
@@ -181,7 +180,10 @@ export default function FilePane({
   }
 
   const addFolder = useCallback(async () => {
-    if (!window.showDirectoryPicker) return alert('Directory picker unsupported');
+    if (!window.showDirectoryPicker) {
+        Toast('Directory picker is not supported in this browser.', 4000);
+        return;
+    }
     try {
       setAdding(true);
       setEntryFilter({});
@@ -189,7 +191,6 @@ export default function FilePane({
       setStep('FILTER');
 
       const dirHandle = await window.showDirectoryPicker();
-
       const tops = [];
       for await (const [name, h] of dirHandle.entries()) {
         tops.push({ name, kind: h.kind });
@@ -199,7 +200,6 @@ export default function FilePane({
       const batch = [];
       const stats = { bigSize:0, bigChar:0, binary:0, limit:0, perm:0, fsErr:0 };
       await scanDir(dirHandle, batch, stats, dirHandle);
-
       await saveRoot(dirHandle);
       setProjectRoot(dirHandle);
 
@@ -221,23 +221,36 @@ export default function FilePane({
         if (stats.limit)   parts.push(`${stats.limit} over limit`);
         if (stats.perm)    parts.push(`${stats.perm} permission denied`);
         if (stats.fsErr)   parts.push(`${stats.fsErr} fs errors`);
-        Toast(`Skipped ${skipped} file${skipped>1?'s':''} – ${parts.join(', ')}`);
+        Toast(`Skipped ${skipped} file${skipped>1?'s':''} – ${parts.join(', ')}`, 5000);
       }
     } catch (err) {
-      if (err.name !== 'AbortError') alert('Folder pick error: ' + err.message);
+      if (err.name !== 'AbortError') Toast('Folder pick error: ' + err.message, 4000);
     } finally {
       setAdding(false);
     }
   }, [files, onFilesChange]);
 
-  /* ───────────────────────────── +Add Images ──────────────────────────── */
   const handleAddImages = useCallback(async () => {
-    if (!window.showOpenFilePicker) return alert('File picker unsupported');
+    if (!window.showOpenFilePicker) {
+        Toast('File picker is not supported in this browser.', 4000);
+        return;
+    }
     try {
       setAdding(true);
       const handles = await window.showOpenFilePicker({
         multiple: true,
-        types: [{ description: 'Images', accept: { 'image/*': ['.png', '.jpg', '.jpeg', '.webp'] } }]
+        types: [{
+          description: 'Images',
+          accept: {
+            'image/png': ['.png'],
+            'image/jpeg': ['.jpg', '.jpeg'],
+            'image/webp': ['.webp'],
+            'image/gif': ['.gif'],
+            'image/bmp': ['.bmp'],
+            'image/tiff': ['.tif', '.tiff'],
+            'image/heic': ['.heic', '.heif'],
+          }
+        }]
       });
 
       for (const h of handles) {
@@ -257,16 +270,18 @@ export default function FilePane({
         onAddImage?.({ name: file.name, url: pub.publicUrl });
       }
     } catch (err) {
-      if (err.name !== 'AbortError') alert('Add images error: ' + err.message);
+      if (err.name !== 'AbortError') {
+        console.error("Add images error:", err);
+        Toast('Add images error: ' + err.message, 4000);
+      }
     } finally {
       setAdding(false);
     }
   }, [onAddImage]);
 
-  /* ───────────────────────────── Paste Image ──────────────────────────── */
   const handlePasteImage = useCallback(async () => {
     if (!navigator.clipboard?.read) {
-      alert('Paste requires a secure context (HTTPS) and Chrome 105+ or compatible browser.');
+      Toast('Paste requires a secure context (HTTPS) and compatible browser.', 4000);
       return;
     }
     try {
@@ -296,24 +311,29 @@ export default function FilePane({
       }
     } catch (err) {
       if (err.name === 'NotAllowedError') {
-        alert('Browser denied clipboard access. Please check permissions.');
+        Toast('Browser denied clipboard access. Please check permissions.', 4000);
       } else {
-        alert('Paste image failed: ' + err.message);
+        console.error("Paste image error:", err);
+        Toast('Paste image failed: ' + err.message, 4000);
       }
     } finally {
       setAdding(false);
     }
   }, [onAddImage]);
 
-  /* ───────────────── +Add PDF (Direct Browser Upload using User's API Key) ───── */
   const handleAddPDF = useCallback(async () => {
     if (!settings || !settings.apiKey) {
-      alert('OpenAI API Key not set. Please set it in the application settings.');
+      Toast('OpenAI API Key not set. Please set it in the application settings.', 4000);
       return;
     }
     if (!window.showOpenFilePicker) {
-      alert('File picker unsupported');
+      Toast('File picker is not supported in this browser.', 4000);
       return;
+    }
+    // Model compatibility check (optional, can be enhanced)
+    const compatibleModels = ['o1', 'o4-mini', 'o3', 'gpt-4o', 'gpt-4o-mini', 'gpt-4.1', 'gpt-4.5-preview-2025-02-27', 'o4-mini-2025-04-16', 'o3-2025-04-16'];
+    if (settings && !compatibleModels.some(m => settings.model.startsWith(m))) {
+        Toast(`Model '${settings.model}' may not fully support PDF uploads. Consider a vision-capable model.`, 5000);
     }
 
     try {
@@ -325,38 +345,31 @@ export default function FilePane({
 
       for (const h of handles) {
         const file = await h.getFile();
-
         const formData = new FormData();
         formData.append('purpose', 'user_data');
         formData.append('file', file, file.name);
 
         const response = await fetch('https://api.openai.com/v1/files', {
           method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${settings.apiKey}` // User's API Key
-          },
+          headers: { 'Authorization': `Bearer ${settings.apiKey}` },
           body: formData
         });
-
         const responseData = await response.json();
-
         if (!response.ok) {
           throw new Error(responseData.error?.message || `OpenAI API Error: ${response.status}`);
         }
-
         onAddPDF?.({ name: file.name, fileId: responseData.id });
       }
     } catch (err) {
       if (err.name !== 'AbortError') {
-        alert('PDF upload error: ' + err.message);
+        Toast('PDF upload error: ' + err.message, 4000);
         console.error("PDF Upload Error:", err);
       }
     } finally {
       setAdding(false);
     }
-  }, [onAddPDF, settings, setAdding]); // Added setAdding to dependencies
+  }, [onAddPDF, settings]);
 
-  /* ───────────────── entry filter side-effect (for folder scan) ──────── */
   useEffect(() => {
     if (step !== 'FILES' || !topEntries.length) return;
     const newList = files.filter(f => isIncluded(f.fullPath, entryFilter));
@@ -365,21 +378,18 @@ export default function FilePane({
     const excluded = files.length - newList.length;
     onFilesChange(newList);
     if (excluded > 0) {
-        Toast(`Excluded ${excluded} item${excluded > 1 ? 's' : ''} by filter`);
+        Toast(`Excluded ${excluded} item${excluded > 1 ? 's' : ''} by filter`, 4000);
     }
   }, [entryFilter, files, step, onFilesChange, topEntries.length]);
 
-  /* ───────────────────────────── UI ───────────────────────────── */
   return (
     <div className="file-pane-container">
       <h2>Project Files</h2>
-
       {projectRoot && (
         <div style={{ marginBottom: 8, fontSize: '0.85rem', opacity: 0.8 }}>
           Root: <code>{projectRoot.name}</code>
         </div>
       )}
-
       <div style={{ display: 'flex', gap: 8, marginBottom: '1rem', flexWrap: 'wrap' }}>
         <button className="button" onClick={addFiles}        disabled={adding}>+ Add Files</button>
         <button className="button" onClick={addFolder}       disabled={adding}>+ Add Folder</button>
@@ -395,7 +405,6 @@ export default function FilePane({
           Clear List
         </button>
       </div>
-
       {step === 'FILTER' && topEntries.length > 0 && (
         <div>
           <h3>Select entries to include from '{projectRoot?.name || 'selected folder'}'</h3>
@@ -424,7 +433,6 @@ export default function FilePane({
           </button>
         </div>
       )}
-
       {step === 'FILES' && (
         <>
           <strong>{files.length} / {FILE_LIMIT} text files selected</strong>
