@@ -61,16 +61,6 @@ function mergeFiles(existing = [], incoming = []) {
       continue;
     }
     if (s.has(f.checksum)) {
-      // If file with same path and checksum exists, decide whether to add or skip.
-      // Current logic might add duplicates if checksum matches but object identity is different.
-      // For simplicity, let's assume if path & checksum match, it's effectively the same.
-      // To avoid duplicates if objects are different but content is same:
-      // if (!out.find(existingFile => existingFile.fullPath === f.fullPath && existingFile.checksum === f.checksum)) {
-      //   out.push(f);
-      // }
-      // For now, let's keep the original behavior which might add if object is new, even if content is same.
-      // This part might need refinement based on desired behavior for identical content from different selections.
-      // A simple way to avoid exact duplicates by object reference and content:
       const alreadyExists = out.some(ef => ef.fullPath === f.fullPath && ef.checksum === f.checksum);
       if (!alreadyExists) {
           out.push(f);
@@ -103,7 +93,7 @@ export default function FilePane({
 
   onAddImage,
   onAddPDF,
-  settings
+  settings // IMPORTANT: This prop carries the API key
 }) {
   const [adding, setAdding]           = useState(false);
   const [projectRoot, setProjectRoot] = useState(null);
@@ -178,8 +168,6 @@ export default function FilePane({
           if (text.length > MAX_CHAR_LEN)  { stats.bigChar++; continue; }
 
           const ck = checksum32(text);
-          // For scanned files, fullPath is relative to the scanned root.
-          // insideProject will be true by definition of scanning a project root.
           out.push({ fullPath: entryPath, text, checksum: ck, insideProject: true, name: f.name });
         } else if (h.kind === 'directory') {
           await scanDir(h, out, stats, root, entryPath);
@@ -215,18 +203,17 @@ export default function FilePane({
 
       const batch = [];
       const stats = { bigSize:0, bigChar:0, binary:0, limit:0, perm:0, fsErr:0 };
-      await scanDir(dirHandle, batch, stats, dirHandle); // Pass dirHandle as root
+      await scanDir(dirHandle, batch, stats, dirHandle);
       await saveRoot(dirHandle);
       setProjectRoot(dirHandle);
 
       const freshMap = {};
-      tops.forEach(e => { freshMap[e.name] = true; }); // Default to include all top-level entries
+      tops.forEach(e => { freshMap[e.name] = true; });
       setEntryFilter(freshMap);
 
-      // Filter batch based on initial freshMap before merging
       const initiallyFilteredBatch = batch.filter(f => isIncluded(f.fullPath, freshMap));
       const merged   = mergeFiles(files, initiallyFilteredBatch);
-      onFilesChange(merged); // Apply merged files, will be re-filtered by useEffect if filter changes
+      onFilesChange(merged);
 
       const skipped = stats.bigSize + stats.bigChar + stats.binary +
                       stats.limit   + stats.perm    + stats.fsErr;
@@ -264,20 +251,17 @@ export default function FilePane({
             'image/jpeg': ['.jpg', '.jpeg'],
             'image/webp': ['.webp'],
             'image/gif': ['.gif'],
-            // 'image/bmp': ['.bmp'], // BMP often large, consider removing or warning
-            // 'image/tiff': ['.tif', '.tiff'], // TIFF often large
-            // 'image/heic': ['.heic', '.heif'], // HEIC might need specific handling/conversion
           }
         }]
       });
 
       for (const h of handles) {
         const file = await h.getFile();
-        const blob = await compressImageToWebP(file, 1024, 0.85); // Compress to WebP
+        const blob = await compressImageToWebP(file, 1024, 0.85);
 
-        const path = `public/images/${crypto.randomUUID()}.webp`; // Ensure 'public' bucket if that's your policy
+        const path = `public/images/${crypto.randomUUID()}.webp`;
         const { error: upErr } = await supabase
-          .storage.from('images') // Ensure this is your image bucket name
+          .storage.from('images')
           .upload(path, blob, { contentType: 'image/webp', upsert: false });
         if (upErr) throw upErr;
 
@@ -285,7 +269,7 @@ export default function FilePane({
           supabase.storage.from('images').getPublicUrl(path);
         if (pubErr) throw pubErr;
 
-        onAddImage?.({ name: file.name, url: pub.publicUrl, revoke: null }); // revoke is for local ObjectURLs
+        onAddImage?.({ name: file.name, url: pub.publicUrl, revoke: null });
       }
     } catch (err) {
       if (err.name !== 'AbortError') {
@@ -325,7 +309,7 @@ export default function FilePane({
 
         onAddImage?.({ name, url: pub.publicUrl, revoke: null });
         Toast('Image pasted & added', 1500);
-        break; // Process first image found
+        break;
       }
     } catch (err) {
       if (err.name === 'NotAllowedError') {
@@ -340,60 +324,93 @@ export default function FilePane({
   }, [onAddImage]);
 
   const handleAddPDF = useCallback(async () => {
-    if (!settings || !settings.apiKey) {
+    console.log('-----> [FilePane - handleAddPDF] TOP OF FUNCTION REACHED <-----');
+
+    console.log('[FilePane - handleAddPDF] Function called (after top log).');
+    console.log('[FilePane - handleAddPDF] Received settings prop:', settings);
+
+    if (!settings) {
+        Toast('Critical Error: The settings object is missing entirely. Cannot proceed with PDF upload.', 6000);
+        console.error('[FilePane - handleAddPDF] The "settings" prop is undefined or null.');
+        setAdding(false);
+        return;
+    }
+
+    console.log('[FilePane - handleAddPDF] Value of settings.apiKey:', settings.apiKey);
+    console.log('[FilePane - handleAddPDF] Type of settings.apiKey:', typeof settings.apiKey);
+
+    if (!settings.apiKey || String(settings.apiKey).trim() === "") {
       Toast('Gemini API Key not set. Please set it in the application settings.', 4000);
+      console.warn('[FilePane - handleAddPDF] API Key check failed: Key is missing or empty. Value was:', `"${settings.apiKey}"`);
+      setAdding(false);
       return;
     }
+
     if (!window.showOpenFilePicker) {
       Toast('File picker is not supported in this browser.', 4000);
+      console.warn('[FilePane - handleAddPDF] showOpenFilePicker not available.');
+      setAdding(false);
       return;
     }
 
     try {
       setAdding(true);
-      const genAI = new GoogleGenAI(settings.apiKey);
+      console.log('[FilePane - handleAddPDF] Attempting to instantiate GoogleGenAI with options:', { apiKey: settings.apiKey ? `"${settings.apiKey.substring(0,5)}..." (length ${settings.apiKey.length})` : "undefined/empty" });
+      const genAI = new GoogleGenAI({ apiKey: settings.apiKey });
+      console.log('[FilePane - handleAddPDF] GoogleGenAI instantiated successfully.');
 
       const handles = await window.showOpenFilePicker({
         multiple: true,
         types: [{ description: 'PDF', accept: { 'application/pdf': ['.pdf'] } }]
       });
+      console.log(`[FilePane - handleAddPDF] Selected ${handles.length} PDF file(s).`);
 
       for (const h of handles) {
         const file = await h.getFile();
+        console.log(`[FilePane - handleAddPDF] Processing file: ${file.name}, type: ${file.type}, size: ${file.size}`);
 
-        const uploadedFile = await genAI.files.uploadFile(file, {
-          mimeType: file.type || 'application/pdf',
-          displayName: file.name,
+        console.log(`[FilePane - handleAddPDF] Calling genAI.files.upload for ${file.name}`);
+        const uploadedFile = await genAI.files.upload({
+          file: file,
+          config: {
+            mimeType: file.type || 'application/pdf',
+            displayName: file.name,
+          }
         });
+        console.log(`[FilePane - handleAddPDF] Uploaded file response for ${file.name}:`, uploadedFile);
         
-        if (uploadedFile && uploadedFile.name) {
+        // *** THE FIX IS HERE: Use uploadedFile.uri for fileId ***
+        if (uploadedFile && uploadedFile.uri && uploadedFile.name) {
           onAddPDF?.({
-            name: file.name,
-            fileId: uploadedFile.name, // Gemini file resource name (e.g., "files/...")
-            mimeType: uploadedFile.mimeType || 'application/pdf'
+            name: file.name, // Original file name for display
+            fileId: uploadedFile.uri, // Use the full URI for generateContent
+            mimeType: uploadedFile.mimeType || 'application/pdf',
+            resourceName: uploadedFile.name // Store the short name if needed for delete/get
           });
+          console.log(`[FilePane - handleAddPDF] Successfully processed and added PDF: ${file.name} (Gemini URI: ${uploadedFile.uri})`);
         } else {
-          throw new Error('Gemini file upload did not return expected data.');
+          console.error(`[FilePane - handleAddPDF] Gemini file upload for ${file.name} did not return expected data (missing name or uri). Response:`, uploadedFile);
+          throw new Error(`Gemini file upload for ${file.name} did not return expected data.`);
         }
       }
     } catch (err) {
       if (err.name !== 'AbortError') {
         Toast('PDF upload error: ' + err.message, 4000);
-        console.error("PDF Upload Error (Gemini):", err);
+        console.error("[FilePane - handleAddPDF] PDF Upload Error (Gemini):", err, err.stack);
+      } else {
+        console.log('[FilePane - handleAddPDF] PDF upload aborted by user.');
       }
     } finally {
       setAdding(false);
+      console.log('[FilePane - handleAddPDF] Operation finished, setAdding to false.');
     }
   }, [onAddPDF, settings]);
 
   useEffect(() => {
-    // This effect re-filters the `files` list whenever `entryFilter` changes.
-    // It's important if the user changes the filter *after* a folder has been scanned and files added.
-    if (step !== 'FILES' || !topEntries.length) return; // Only run if in FILES step and a folder was scanned
+    if (step !== 'FILES' || !topEntries.length) return;
 
     const newList = files.filter(f => isIncluded(f.fullPath, entryFilter));
     
-    // Check if the list actually changed to avoid unnecessary re-renders or toasts
     if (newList.length !== files.length || !files.every((f, i) => newList[i] && newList[i].fullPath === f.fullPath && newList[i].checksum === f.checksum)) {
         const excludedCount = files.length - newList.length;
         onFilesChange(newList);
@@ -442,7 +459,7 @@ export default function FilePane({
               <label key={name} style={{ display: 'block', margin: '4px 8px', cursor: 'pointer' }}>
                 <input
                   type="checkbox"
-                  checked={entryFilter[name] !== false} // Default to checked if not explicitly false
+                  checked={entryFilter[name] !== false}
                   onChange={e => setEntryFilter(m => ({ ...m, [name]: e.target.checked }))}
                   style={{ marginRight: '8px' }}
                 />

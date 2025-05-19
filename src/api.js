@@ -86,7 +86,10 @@ export async function getCurrentUser({ forceRefresh = false } = {}) {
   return _cachedUser
 }
 
-/* ───────────────────── main RPC helper ─────────────────── */
+/* NOTE ON CHAT HISTORY: Using `ai.models.generateContent()` with full manual history.
+   SDK's `ai.chats` API is preferred for chat as it auto-manages history.
+   This app handles history manually; consider `ai.chats` for future refactor
+   if context issues or long conversation problems arise. */
 export async function callApiForText({
   messages = [], // OpenAI-style messages: [{role, content: string | array_of_parts}]
   apiKey   = '',
@@ -117,30 +120,31 @@ export async function callApiForText({
     return { error: '@google/genai SDK initialisation failed: ' + err.message, status: 500 };
   }
 
-  // The new SDK structure for messages (contents) is different.
-  // It expects a direct string for simple prompts, or an array of "Content" objects
-  // A "Content" object has `role` and `parts`. `parts` is an array of `Part` objects.
-  // `Part` can be {text: "..."} or {inlineData: {mimeType:"...", data:"..."}} or {fileData: {mimeType:"...", fileUri:"..."}}
-
   let systemInstructionText = "";
-  const historyContents = []; // This will be an array of Content objects for history
+  const historyContents = []; // This will hold Gemini-formatted Content objects for the API
 
   for (const msg of messages) {
-    const parts = [];
-    // msg.content can be a string (older format) or an array of blocks (your newer format)
-    const contentBlocks = Array.isArray(msg.content) ? msg.content : [{ type: 'text', text: String(msg.content ?? '') }];
+    const parts = []; // This will store Gemini-formatted Part objects for the current message
+
+    // Transform internal message structure (OpenAI-like `msg.content` array/string)
+    // into a `Part[]` array (text, inlineData for images, fileData for PDFs)
+    // suitable for a Gemini `Content` object.
+    // Normalize msg.content to an array of blocks for consistent processing.
+    const contentBlocks = Array.isArray(msg.content)
+      ? msg.content
+      : [{ type: 'text', text: String(msg.content ?? '') }];
 
     for (const block of contentBlocks) {
       if (block.type === 'text') {
         parts.push({ text: block.text });
-      } else if (block.type === 'image_url') {
-        parts.push(await convertImageUrlToPart(block)); // convertImageUrlToPart now returns a Part-like object
+      } else if (block.type === 'image_url' && block.image_url && block.image_url.url) {
+        parts.push(await convertImageUrlToPart(block)); // Handles conversion to inlineData
       } else if (block.type === 'file' && block.file?.file_id && block.file?.mime_type) {
-        // This matches the new SDK's fileData structure
+        // Assumes block.file.file_id is the Gemini File API URI (e.g., "files/...")
         parts.push({
           fileData: {
             mimeType: block.file.mime_type,
-            fileUri: block.file.file_id, // This should be the Gemini File API URI (e.g., "files/...")
+            fileUri: block.file.file_id,
           },
         });
       }
@@ -148,126 +152,52 @@ export async function callApiForText({
 
     if (parts.length > 0) {
       if (msg.role === 'system') {
-        // The new SDK might not have a direct 'system' role for generateContent history.
-        // Often, system instructions are prepended to the first user message or handled via a `systemInstruction` field in the request.
-        // The "After" examples don't explicitly show multi-turn chat history with a system role for generateContent.
-        // For chat, it's `ai.chats.create({ systemInstruction: "..." })`.
-        // Let's try to extract it and pass it to `config.systemInstruction` if available,
-        // or prepend to the next user message if not.
-        // The `generateContent` "After" example doesn't show a system instruction field.
-        // We'll collect it and decide later. For now, let's assume the last message is the current prompt.
+        // System messages are aggregated for `config.systemInstruction`.
         const systemTextPart = parts.find(p => p.text);
         if (systemTextPart) systemInstructionText += (systemInstructionText ? "\n" : "") + systemTextPart.text;
       } else {
+        // User/assistant (model) messages become Gemini Content objects.
         historyContents.push({
-          role: msg.role === 'assistant' ? 'model' : msg.role, // 'model' or 'user'
+          role: msg.role === 'assistant' ? 'model' : msg.role, // 'user' or 'model'
           parts: parts,
         });
       }
     }
   }
 
-  // The `contents` for `ai.models.generateContent` is typically the *current* user prompt.
-  // If `historyContents` has multiple turns, the new SDK's `generateContent` might not directly support
-  // passing full chat history in the same way the old `getGenerativeModel().generateContent(messages)` did.
-  // The "After" example for `generateContent` shows `contents: "Your prompt string"` or `contents: [array_of_parts_for_current_prompt]`.
-  // For chat, you'd use `ai.chats.create()` and `chat.sendMessage()`.
-  //
-  // Let's assume the LAST message in `messages` is the current prompt to the model.
-  // And the preceding messages are history.
-  // The new `generateContent` doesn't seem to have a `history` field like `startChat`.
-  // This is a key difference. If you need multi-turn context, `ai.chats` is the way.
-  // For a single `generateContent` call, we might need to concatenate history into the prompt,
-  // or only send the last user message.
-  //
-  // For now, let's try sending ALL `historyContents` as the `contents` payload.
-  // The SDK might interpret the roles correctly for multi-turn.
-  // If not, we'll need to adjust to send only the last user message + parts.
 
   if (historyContents.length === 0 && !systemInstructionText) {
     console.error("[callApiForText @google/genai] No valid contents to send.");
     return { error: "No content to send to the model.", status: 400 };
   }
 
-  // Construct the payload for ai.models.generateContent
-  // The `contents` field should be the actual prompt data.
-  // If there's a system instruction, some models/versions of the new SDK might take it in `config`.
-  // The "After" examples for `generateContent` don't show `systemInstruction` in `config`.
-  // The `ai.caches.create` example *does* show `config: { systemInstruction: "..." }`.
-  // This is an area that might need adjustment based on runtime behavior.
-
   const requestPayload = {
-    model: GEMINI_MODEL_NAME, // e.g., "gemini-2.0-flash" or your "gemini-2.5-pro-preview-05-06"
-    // contents: historyContents, // Send the whole history
-    // Let's try sending only the last content as the prompt, and if systemInstructionText exists, prepend it.
-    // This is more aligned with single-shot generateContent.
-    // If you need full chat history, the `ai.chats` API is better.
-    contents: [],
+    model: GEMINI_MODEL_NAME,
+    contents: historyContents, // Send the full processed history for the model to use as context
     config: {
-      // candidateCount: 1, // Default is 1
-      // maxOutputTokens: 8192, // Example
-      temperature: 1.0, // Default is often 0.9 or 1.0
-      topP: 0.95,       // Default
-      // topK: 40,         // Default varies
-      safetySettings: [ // Structure from "After" example
-        { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_ONLY_HIGH" }, // Example values
+      temperature: 1.0,
+      topP: 0.95,
+      safetySettings: [
+        { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_ONLY_HIGH" },
         { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_ONLY_HIGH" },
         { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_ONLY_HIGH" },
         { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_ONLY_HIGH" },
       ],
-      // systemInstruction: systemInstructionText || undefined, // Try passing system instruction here
+      // Pass aggregated system instructions if any.
+      ...(systemInstructionText && { systemInstruction: systemInstructionText }),
     },
   };
-
-  // Prepare the final `contents` for the request
-  let finalUserParts = [];
-  if (historyContents.length > 0) {
-    const lastMessage = historyContents[historyContents.length - 1];
-    if (lastMessage.role === 'user') {
-        finalUserParts = [...lastMessage.parts];
-    } else {
-        // If the last message isn't from the user, this is an unusual state for a new prompt
-        console.warn("[callApiForText @google/genai] Last message in history is not from user. Sending empty prompt.");
-    }
-  }
-
-  if (systemInstructionText) {
-    // Prepend system instruction as a text part to the user's actual prompt parts
-    finalUserParts.unshift({ text: systemInstructionText });
-  }
-
-  if (finalUserParts.length > 0) {
-    requestPayload.contents = [{ role: "user", parts: finalUserParts }];
-  } else {
-    console.error("[callApiForText @google/genai] No final user parts to send after processing system instruction.");
-    return { error: "No user content to send to the model.", status: 400 };
-  }
   
-  // If you need to pass the *entire* chat history (excluding the system message we extracted):
-  // requestPayload.contents = historyContents.filter(c => c.role !== 'system'); // This sends an array of Content objects
-  // And then you'd need to handle how `systemInstructionText` is passed, perhaps in `requestPayload.config.systemInstruction`.
-  // The `ai.models.generateContent` is more for single prompts or prompts with some leading context.
-  // For true multi-turn chat, `ai.chats.create` and `chat.sendMessage` is the pattern.
-  //
-  // Given your app structure, you are essentially sending the whole history as context for the next turn.
-  // Let's try sending the full `historyContents` (which now excludes system messages)
-  // and see if the new SDK's `generateContent` handles it.
-  // The `contents` field for `generateContent` in the new SDK expects `Contents`.
-  // `Contents` is `Content[]` where `Content` is `{ role: string, parts: Part[] }`.
-  // So, `historyContents` should be the correct structure.
-
-  requestPayload.contents = historyContents; // This should be an array of {role, parts} objects.
-
-  if (requestPayload.contents.length === 0) {
-      console.error("[callApiForText @google/genai] `contents` array is empty before API call.");
-      return { error: "No contents to send to API.", status: 400 };
+  if (requestPayload.contents.length === 0 && !requestPayload.config.systemInstruction) {
+      console.error("[callApiForText @google/genai] `contents` array is empty and no system instruction before API call.");
+      return { error: "No contents or system instruction to send to API.", status: 400 };
   }
 
 
   let timeoutId;
   try {
     console.log('[callApiForText @google/genai] Calling ai.models.generateContent with model:', requestPayload.model);
-    console.log('[callApiForText @google/genai] Payload:', JSON.stringify(requestPayload, null, 2).substring(0, 500) + "...");
+    console.log('[callApiForText @google/genai] Payload (first 500 chars):', JSON.stringify(requestPayload, null, 2).substring(0, 500) + "...");
 
     const generatePromise = ai.models.generateContent(requestPayload);
 
@@ -285,9 +215,6 @@ export async function callApiForText({
     clearTimeout(timeoutId);
     console.log('[callApiForText @google/genai] ai.models.generateContent resolved.');
 
-    // The "After" examples show `response.text` directly for simple cases,
-    // and `response.candidates[0].content.parts` for more complex ones (like code execution).
-    // Let's try to get text robustly.
 
     let textContent = "";
     if (response && response.candidates && response.candidates.length > 0) {
@@ -299,7 +226,6 @@ export async function callApiForText({
                 }
             }
         }
-        // Check for safety ratings and block reasons
         if (candidate.finishReason === "SAFETY" || (candidate.safetyRatings && candidate.safetyRatings.some(r => r.blocked))) {
             console.warn('[callApiForText @google/genai] Content potentially blocked due to safety settings. Candidate:', candidate);
             return {
@@ -308,7 +234,7 @@ export async function callApiForText({
                 status: 400
             };
         }
-    } else if (response && typeof response.text === 'string') { // Fallback for simpler response structure
+    } else if (response && typeof response.text === 'string') {
         textContent = response.text;
     }
 
@@ -330,7 +256,7 @@ export async function callApiForText({
     }
     if (
       (err.status === 404 || err.message?.toUpperCase().includes('NOT_FOUND') || err.message?.includes('is not found')) ||
-      (err.message?.includes("Could not find model")) // New SDK error message for missing model
+      (err.message?.includes("Could not find model"))
     ) {
       return {
         error: `Model "${requestPayload.model}" not found or method not enabled. Check model name.`,
@@ -340,7 +266,6 @@ export async function callApiForText({
     if (err.message?.includes("failed to connect")) {
         return { error: "Network error: Failed to connect to Google API.", status: 503 };
     }
-    // Default error
     return { error: err.message || 'An unknown error occurred with the Gemini API.', details: err.stack, status: err.status || 500 };
   }
 }
