@@ -244,16 +244,33 @@ html, body {
   display: flex;
   justify-content: space-between;
   margin-bottom: var(--space-sm);
+  align-items: baseline; /* Align items in the header */
 }
+
 .message-role {
   font-weight: bold;
-  color: var(--accent);
-  font-size: 0.8rem;
+  font-size: 0.8rem; /* Base size for "user" or "assistant" text */
   text-transform: uppercase;
+  display: flex; /* Allows number and text to sit side-by-side */
+  align-items: baseline; /* Aligns the text and number nicely */
 }
+
 .message-user .message-role {
-  color: #ff4444;
+  color: #ff4444; /* User role color */
 }
+
+.message-assistant .message-role {
+  color: var(--text-secondary); /* Color for the "assistant" text itself */
+}
+
+.assistant-message-number {
+  font-size: 1.1rem; /* Larger for visibility */
+  font-weight: bold;
+  color: var(--accent); /* Prominent color */
+  margin-right: 0.4em; /* Space between number and "assistant" text */
+  line-height: 1; /* Ensure it aligns well if it wraps */
+}
+
 
 .message-actions {
   display: flex;

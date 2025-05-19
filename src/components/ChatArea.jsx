@@ -28,11 +28,19 @@ function ChatArea({
   handleDeleteMessage
 }) {
   const [copyMessage] = useCopyToClipboard();
+  let assistantMessageCounter = 0; // Counter for assistant messages
 
   return (
     <>
       {messages.map((m, idx) => {
         const isAsst     = m.role === 'assistant';
+        let currentAssistantNumber = 0;
+
+        if (isAsst) {
+          assistantMessageCounter++;
+          currentAssistantNumber = assistantMessageCounter;
+        }
+
         const isLastUser = m.role === 'user' &&
                            idx === messages.length - 1 &&
                            !editingId;
@@ -57,7 +65,14 @@ function ChatArea({
             {/* header */}
             <div className="message-header">
               <span className="message-role">
-                {isAsst ? `assistant #${idx}` : m.role}
+                {isAsst ? (
+                  <>
+                    <span className="assistant-message-number">#{currentAssistantNumber}</span>
+                    {' assistant'}
+                  </>
+                ) : (
+                  m.role
+                )}
               </span>
 
               <div className="message-actions">
