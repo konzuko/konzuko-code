@@ -16,12 +16,11 @@ import {
   MAX_TEXT_FILE_SIZE,
   MAX_CHAR_LEN
 } from './lib/fileTypeGuards.js';
+import { FILE_LIMIT }             from './config.js';
 import { checksum32 }             from './lib/checksum.js';
 import Toast                      from './components/Toast.jsx';
 import { compressImageToWebP }    from './lib/imageUtils.js';
 import { supabase }               from './lib/supabase.js';
-
-const FILE_LIMIT = 500;
 
 /* ─────────── misc helpers ─────────── */
 const NOTE =
