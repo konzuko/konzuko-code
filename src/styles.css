@@ -20,21 +20,7 @@
   --transition: 0.2s ease;
 }
 
-.loading-dots {
-  display: inline-flex;
-  align-items: center;
-}
-.loading-dots::after {
-  content: '.';
-  width: 1em;
-  overflow: hidden;
-  animation: loading-dots 1.5s infinite;
-}
-@keyframes loading-dots {
-  0% { content: '.'; }
-  33% { content: '..'; }
-  66% { content: '...'; }
-}
+/* .loading-dots and @keyframes loading-dots are no longer needed and have been removed */
 
 * {
   box-sizing: border-box;

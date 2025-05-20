@@ -31,7 +31,7 @@ import {
 import {
   useSettings, useFormData, useMode,
   useUndoableDelete,
-  INITIAL_FORM_DATA // <--- Import the constant
+  INITIAL_FORM_DATA
 } from './hooks.js';
 import { useTokenizableContent } from './hooks/useTokenizableContent.js'; 
 
@@ -106,7 +106,7 @@ export default function App() {
   const [mode,     setMode]     = useMode();
 
   const [apiCalculatedTokenCount, setApiCalculatedTokenCount] = useState(0);
-  const [isCountingApiTokens, setIsCountingApiTokens] = useState(false);
+  const [isCountingApiTokens, setIsCountingApiTokens] = useState(false); // Still used for 'busy'
   const tokenCountVersionRef = useRef(0);
   const debouncedApiCallRef = useRef(null);
   
@@ -241,49 +241,55 @@ export default function App() {
     setPendingImages([]);
     setPendingPDFs([]);
     setPendingFiles([]);
-    // Reset the form fields to their initial state
     setForm(INITIAL_FORM_DATA);
   }
 
   /* ========================================================
-     GEMINI TOKEN COUNTING useEffect - Simplified
+     GEMINI TOKEN COUNTING 
   ======================================================== */
-  useEffect(() => {
-    const callWorkerForTokenCount = async (currentItemsForApi, currentApiKey, currentModel) => {
-        if (!currentApiKey || String(currentApiKey).trim() === "") {
-            if (isCountingApiTokens) setIsCountingApiTokens(false);
+  const callWorkerForTokenCount = useCallback(async (currentItemsForApi, currentApiKey, currentModel) => {
+    const currentVersion = ++tokenCountVersionRef.current;
+
+    if (!currentApiKey || String(currentApiKey).trim() === "") {
+        if (tokenCountVersionRef.current === currentVersion) {
+            setIsCountingApiTokens(false);
             setApiCalculatedTokenCount(0);
-            return;
         }
+        return;
+    }
 
-        const currentVersion = ++tokenCountVersionRef.current;
-        setIsCountingApiTokens(true);
-        
-        if (currentItemsForApi.length === 0) {
-            if (tokenCountVersionRef.current === currentVersion) {
-                setApiCalculatedTokenCount(0);
-                setIsCountingApiTokens(false);
-            }
-            return;
+    if (currentItemsForApi.length === 0) {
+        if (tokenCountVersionRef.current === currentVersion) {
+            setApiCalculatedTokenCount(0);
+            setIsCountingApiTokens(false);
         }
-        
-        try {
-            const count = await countTokensWithGemini(currentApiKey, currentModel, currentItemsForApi);
-            if (tokenCountVersionRef.current === currentVersion) {
-                setApiCalculatedTokenCount(count);
-            }
-        } catch (error) {
-            console.error(`[App.jsx] v${currentVersion} - Error counting tokens:`, error.message);
-            if (tokenCountVersionRef.current === currentVersion) {
-                setApiCalculatedTokenCount(0);
-            }
-        } finally {
-            if (tokenCountVersionRef.current === currentVersion) {
-                setIsCountingApiTokens(false);
-            }
-        }
-    };
+        return;
+    }
+    
+    if (tokenCountVersionRef.current === currentVersion) {
+      setIsCountingApiTokens(true);
+    } else {
+      return; 
+    }
 
+    try {
+        const count = await countTokensWithGemini(currentApiKey, currentModel, currentItemsForApi);
+        if (tokenCountVersionRef.current === currentVersion) {
+            setApiCalculatedTokenCount(count);
+        }
+    } catch (error) {
+        console.error(`[App.jsx] v${currentVersion} - Error counting tokens:`, error.message);
+        if (tokenCountVersionRef.current === currentVersion) {
+            setApiCalculatedTokenCount(0);
+        }
+    } finally {
+        if (tokenCountVersionRef.current === currentVersion) {
+            setIsCountingApiTokens(false);
+        }
+    }
+  }, [setApiCalculatedTokenCount, setIsCountingApiTokens]); 
+
+  useEffect(() => {
     if (!debouncedApiCallRef.current) {
         debouncedApiCallRef.current = debounce(callWorkerForTokenCount, 750);
     }
@@ -295,7 +301,7 @@ export default function App() {
       itemsForApiCount, 
       settings.apiKey, 
       settings.model,
-      isCountingApiTokens // Added as a dependency as it's read inside callWorkerForTokenCount
+      callWorkerForTokenCount 
   ]);
 
 
@@ -580,8 +586,8 @@ export default function App() {
           </button>
           <span style={{margin:'0 1em',fontWeight:'bold'}}>konzuko-code</span>
           <div style={{marginLeft:'auto',display:'flex',gap:'0.5em'}}>
-            <div style={{padding:'4px 12px',background:'#4f8eff',borderRadius:4, fontSize: '0.9em'}}>
-              Tokens: {isCountingApiTokens ? <span class="loading-dots">Counting</span> : totalPromptTokenCount.toLocaleString()} (Gemini)
+            <div style={{padding:'4px 12px',background:'#4f8eff',borderRadius:4, fontSize: '0.9em', minHeight: 'calc(1.5em + 8px)', display: 'flex', alignItems: 'center'}}>
+              Tokens: {totalPromptTokenCount.toLocaleString()}
             </div>
             <button className="button" onClick={handleCopyAll}>Copy All Text</button>
           </div>
