@@ -15,7 +15,6 @@
     "highlight.js": "^11.11.1",
     "idb-keyval": "^6.2.2",
     "isomorphic-dompurify": "^2.24.0",
-    "js-tiktoken": "^1.0.20",
     "preact": "^10.26.4",
     "react-markdown": "^10.1.0",
     "rehype-highlight": "^7.0.2",

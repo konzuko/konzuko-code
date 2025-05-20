@@ -12,20 +12,21 @@ tokenWorker.addEventListener('message', e => {
   if (!p) return;               // unknown / timed-out
   pending.delete(id);
   if (error) p.reject(new Error(error));
-  else       p.resolve(total);
+  else       p.resolve(total); // The worker now directly sends the total number
 });
 
-/* countTokens(model, list) → Promise<number> */
-export function countTokens(model, list) {
+/* countTokensWithGemini(apiKey, model, items) → Promise<number> */
+// items: Array<{type: 'text', value: string} | {type: 'pdf', uri: string, mimeType: string}>
+export function countTokensWithGemini(apiKey, model, items) {
   const id = allocId();
-  tokenWorker.postMessage({ id, model, list });
+  tokenWorker.postMessage({ id, apiKey, model, items }); // Pass new parameters
 
   return new Promise((resolve, reject) => {
     /* 60-second safety timeout */
     const t = setTimeout(() => {
       if (pending.has(id)) {
         pending.delete(id);
-        reject(new Error('tokenWorker timeout'));
+        reject(new Error('Gemini tokenWorker timeout'));
       }
     }, 60_000);
 

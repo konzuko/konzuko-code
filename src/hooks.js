@@ -6,14 +6,16 @@
    ----
    • The old synchronous token counter has been deleted.
    • We now *re-export* the worker-based implementation from
-     "hooks/useTokenCount.js".
+     "hooks/useTokenCount.js".  -> THIS COMMENT IS NOW OUTDATED.
+     The old useTokenCount.js (tiktoken for chat messages) will be removed.
+     The new prompt token counting logic is in App.jsx.
 ---------------------------------------------------------------------------*/
 
 import {
   useState,
   useEffect,
   useCallback,
-  useRef
+  // useRef // Not used directly in this file anymore
 } from 'preact/hooks';
 
 import { LOCALSTORAGE_DEBOUNCE } from './config.js';
@@ -124,9 +126,7 @@ async function bfsTraverseFsHandle(rootHandle, out = [], max = MAX_TOTAL_DROPPED
     const h = q.shift();
     if (h.kind === 'file') {
       const f = await h.getFile();
-      f.fullPath = h.name; // For FileSystemFileHandle, name is usually sufficient.
-                           // If relative paths from root are needed, they must be constructed during traversal.
-                           // For now, using h.name as it's the direct file name.
+      f.fullPath = h.name; 
       out.push(f);
     } else if (h.kind === 'directory') {
       for await (const [, child] of h.entries()) {
@@ -227,10 +227,11 @@ export function useMode() {
   return [mode, setMode];
 }
 
-/* worker-based token counter re-export */
-export { default as useTokenCount } from './hooks/useTokenCount.js';
+/* 
+   No re-export of useTokenCount as it's being removed.
+   usePromptTokenCount was also removed.
+*/
 
-/* undo-delete helper remains unchanged */
 export function useUndoableDelete(showToast) {
   return useCallback(
     async ({ itemLabel, confirmMessage, deleteFn, undoFn, afterDelete }) => {
