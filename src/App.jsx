@@ -30,7 +30,8 @@ import {
 
 import {
   useSettings, useFormData, useMode,
-  useUndoableDelete
+  useUndoableDelete,
+  INITIAL_FORM_DATA // <--- Import the constant
 } from './hooks.js';
 import { useTokenizableContent } from './hooks/useTokenizableContent.js'; 
 
@@ -109,7 +110,6 @@ export default function App() {
   const tokenCountVersionRef = useRef(0);
   const debouncedApiCallRef = useRef(null);
   
-  // chatBoxRef definition WAS MISSING in the previous full paste
   const chatBoxRef = useRef(null);
 
 
@@ -127,7 +127,6 @@ export default function App() {
   const showToast     = useCallback((txt, undo) => Toast(txt, 6000, undo), []);
   const undoableDelete = useUndoableDelete(showToast);
 
-  // stableRunTask definition WAS MISSING detail in the previous full paste
   const stableRunTask = useCallback(async fn => {
       setLoadingSend(true);
       try { await queue.push(fn); }
@@ -136,9 +135,8 @@ export default function App() {
         Toast(err?.message || 'Unknown error', 5000);
       }
       finally { setLoadingSend(false); }
-    }, []); // Dependencies: queue and Toast are global/stable, setLoadingSend is from useState
+    }, []); 
 
-  // scrollToPrev and scrollToNext definitions WERE MISSING in the previous full paste
   const scrollToPrev = () => {
     const box = chatBoxRef.current; if (!box) return;
     const rows = Array.from(box.querySelectorAll('.message'));
@@ -182,7 +180,7 @@ export default function App() {
       if (live) { setChats(shaped); setCurrent(shaped[0].id); }
     }).finally(() => live && setLoadingChats(false));
     return () => { live = false; };
-  }, [stableRunTask]); // stableRunTask is now a dependency
+  }, [stableRunTask]);
 
   useEffect(() => {
     if (!currentChatId) return;
@@ -243,6 +241,8 @@ export default function App() {
     setPendingImages([]);
     setPendingPDFs([]);
     setPendingFiles([]);
+    // Reset the form fields to their initial state
+    setForm(INITIAL_FORM_DATA);
   }
 
   /* ========================================================
@@ -250,23 +250,16 @@ export default function App() {
   ======================================================== */
   useEffect(() => {
     const callWorkerForTokenCount = async (currentItemsForApi, currentApiKey, currentModel) => {
-        // console.log('[App.jsx] callWorkerForTokenCount CALLED. APIKey set:', !!currentApiKey);
-
         if (!currentApiKey || String(currentApiKey).trim() === "") {
-            // console.log('[App.jsx] API Key is missing. Skipping token count call.');
             if (isCountingApiTokens) setIsCountingApiTokens(false);
             setApiCalculatedTokenCount(0);
             return;
         }
 
         const currentVersion = ++tokenCountVersionRef.current;
-        // console.log(`[App.jsx] Starting token count v${currentVersion}.`);
         setIsCountingApiTokens(true);
         
-        // console.log(`[App.jsx] v${currentVersion} - Items for API count (${currentItemsForApi.length}):`, JSON.stringify(currentItemsForApi.map(item => ({type: item.type, value: item.value ? item.value.substring(0,30)+'...' : undefined, uri: item.uri ? item.uri.substring(0,30)+'...' : undefined })), null, 2));
-
         if (currentItemsForApi.length === 0) {
-            // console.log(`[App.jsx] v${currentVersion} - No text or PDFs for API count.`);
             if (tokenCountVersionRef.current === currentVersion) {
                 setApiCalculatedTokenCount(0);
                 setIsCountingApiTokens(false);
@@ -276,7 +269,6 @@ export default function App() {
         
         try {
             const count = await countTokensWithGemini(currentApiKey, currentModel, currentItemsForApi);
-            // console.log(`[App.jsx] v${currentVersion} - Received count: ${count}`);
             if (tokenCountVersionRef.current === currentVersion) {
                 setApiCalculatedTokenCount(count);
             }
@@ -303,6 +295,7 @@ export default function App() {
       itemsForApiCount, 
       settings.apiKey, 
       settings.model,
+      isCountingApiTokens // Added as a dependency as it's read inside callWorkerForTokenCount
   ]);
 
 
@@ -535,6 +528,7 @@ export default function App() {
       return contentArray.filter(b => b.type === 'text').map(b => b.text).join('\n');
     }).join('\n\n');
     navigator.clipboard.writeText(txt)
+      .then(() => Toast('Copied all text to clipboard!', 2000))
       .catch(() => Toast('Copy failed (clipboard API)', 4000));
   }
 
@@ -587,7 +581,7 @@ export default function App() {
           <span style={{margin:'0 1em',fontWeight:'bold'}}>konzuko-code</span>
           <div style={{marginLeft:'auto',display:'flex',gap:'0.5em'}}>
             <div style={{padding:'4px 12px',background:'#4f8eff',borderRadius:4, fontSize: '0.9em'}}>
-              Tokens: {isCountingApiTokens ? 'Counting...' : totalPromptTokenCount.toLocaleString()} (Gemini)
+              Tokens: {isCountingApiTokens ? <span class="loading-dots">Counting</span> : totalPromptTokenCount.toLocaleString()} (Gemini)
             </div>
             <button className="button" onClick={handleCopyAll}>Copy All Text</button>
           </div>
@@ -598,6 +592,7 @@ export default function App() {
               <label>Gemini API Key (Google AI Studio):</label>
               <input
                 className="form-input"
+                type="password"
                 value={settings.apiKey}
                 onInput={e => setSettings(s => ({ ...s, apiKey:e.target.value }))}
                 placeholder="Enter your Gemini API Key"
@@ -615,7 +610,7 @@ export default function App() {
           </div>
         )}
         <div className="content-container" style={{display:'flex',flex:1}}>
-          <div className="chat-container" ref={chatBoxRef}> {/* chatBoxRef is used here */}
+          <div className="chat-container" ref={chatBoxRef}>
             <div className="chat-nav-rail">
               <button className="button icon-button" onClick={scrollToPrev}>↑</button>
               <button className="button icon-button" onClick={scrollToNext}>↓</button>

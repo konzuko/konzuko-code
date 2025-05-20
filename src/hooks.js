@@ -25,6 +25,16 @@ import { isTextLike, isImage }   from './lib/fileTypeGuards.js';
 const MAX_TOTAL_DROPPED_FILES = 2000;
 const TARGET_GEMINI_MODEL = "gemini-2.5-pro-preview-05-06";
 
+// Define the initial structure for the form data
+export const INITIAL_FORM_DATA = {
+  developGoal: '',
+  developFeatures: '',
+  developReturnFormat: 'return complete refactored code in FULL so that i can paste it directly into my ide',
+  developWarnings: '',
+  developContext: '',
+  fixCode: '',
+  fixErrors: ''
+};
 
 /* ───────────────────── localStorage helpers ─────────────────── */
 function useDebouncedLocalStorage(key, initial, delay = LOCALSTORAGE_DEBOUNCE) {
@@ -37,9 +47,12 @@ function useDebouncedLocalStorage(key, initial, delay = LOCALSTORAGE_DEBOUNCE) {
         if (key === 'konzuko-settings' && parsed.hasOwnProperty('model')) {
             parsed.model = TARGET_GEMINI_MODEL;
         }
+        // For form data, if it's loaded from localStorage, it's user's draft.
+        // The 'initial' (INITIAL_FORM_DATA) is primarily for the very first load
+        // or when explicitly resetting.
         return parsed;
       }
-      return initial;
+      return initial; // Use the passed 'initial' (which will be INITIAL_FORM_DATA for form)
     } catch {
       return initial;
     }
@@ -48,9 +61,9 @@ function useDebouncedLocalStorage(key, initial, delay = LOCALSTORAGE_DEBOUNCE) {
   useEffect(() => {
     const id = setTimeout(() => {
       try {
-        // Ensure the model is always the target model before saving
+        // Ensure the model is always the target model before saving settings
         let valueToStore = value;
-        if (key === 'konzuko-settings' && valueToStore.hasOwnProperty('model')) {
+        if (key === 'konzuko-settings' && valueToStore && typeof valueToStore === 'object' && valueToStore.hasOwnProperty('model')) {
             // Create a new object to ensure reactivity if value itself is not changing but its property is
             valueToStore = { ...valueToStore, model: TARGET_GEMINI_MODEL };
         }
@@ -74,16 +87,8 @@ export function useSettings() {
 }
 
 export function useFormData() {
-  return useDebouncedLocalStorage('konzuko-form-data', {
-    developGoal         : '',
-    developFeatures     : '',
-    developReturnFormat :
-      'return complete refactored code in FULL so that i can paste it directly into my ide',
-    developWarnings     : '',
-    developContext      : '',
-    fixCode             : '',
-    fixErrors           : ''
-  });
+  // Use the exported constant here for the initial state if nothing in localStorage
+  return useDebouncedLocalStorage('konzuko-form-data', INITIAL_FORM_DATA);
 }
 
 /* ───────────────────── BFS dir scanning ───────────────────────── */
