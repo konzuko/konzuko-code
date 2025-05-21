@@ -92,8 +92,11 @@ export default function App() {
   const [mode, setMode] = useMode();
 
   const [apiCalculatedTokenCount, setApiCalculatedTokenCount] = useState(0);
+  // isCountingApiTokens reflects the state of the debounced token counting worker.
+  // It is intentionally kept separate from globalBusy and button loading states
+  // to prevent UI flicker for this background operation.
   const [isCountingApiTokens, setIsCountingApiTokens] = useState(false);
-  const tokenCountVersionRef = useRef(0);
+  const tokenCountVersionRef = useRef(0); 
   const debouncedApiCallRef = useRef(null);
 
   const chatContainerRef = useRef(null);
@@ -102,7 +105,7 @@ export default function App() {
     queryKey: ['messages', currentChatId],
     queryFn: () => fetchMessages(currentChatId),
     enabled: !!currentChatId,
-    staleTime: 1000 * 60 * 2, // 2 minutes
+    staleTime: 1000 * 60 * 2, 
   });
   const currentChatMessages = currentChatMessagesData || [];
 
@@ -146,7 +149,6 @@ export default function App() {
     onMutate: async (chatId) => {
       await queryClient.cancelQueries({ queryKey: ['chats'] });
       const previousChatsData = queryClient.getQueryData(['chats']);
-
       queryClient.setQueryData(['chats'], (oldInfiniteData) => {
         if (!oldInfiniteData) return oldInfiniteData;
         const newPages = oldInfiniteData.pages.map(page => ({
@@ -195,9 +197,7 @@ export default function App() {
       });
       return { previousChatsData };
     },
-    onSuccess: (updatedChatDataFromServer, variables) => {
-      // Invalidate to ensure consistency with server, especially for updated_at or other fields
-      // if the server returns a slightly different timestamp or other data.
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['chats'] });
       Toast('Title updated!', 2000);
     },
@@ -217,11 +217,13 @@ export default function App() {
         content: payload.userMessageContentBlocks
       });
       queryClient.setQueryData(['messages', payload.currentChatId], (oldMessages = []) => [...oldMessages, userRow]);
+      
       const messagesForApi = [...payload.existingMessages, userRow];
       const { content: assistantContent } = await callApiForText({
         apiKey: payload.apiKey,
         messages: messagesForApi
       });
+      
       const assistantRow = await apiCreateMessage({
         chat_id: payload.currentChatId,
         role: 'assistant',
@@ -278,11 +280,10 @@ export default function App() {
   const editMessageMutation = useMutation({
     mutationFn: async ({ messageId, newContentArray, originalMessages, apiKey }) => {
       const editedMessage = await apiUpdateMessage(messageId, newContentArray);
-      const editedMsgIndex = originalMessages.findIndex(m => m.id === messageId);
-      if (editedMsgIndex === -1) throw new Error("Edited message not found in original list for API call.");
-      
       await apiArchiveMessagesAfter(currentChatId, editedMessage.created_at);
       
+      const editedMsgIndex = originalMessages.findIndex(m => m.id === messageId);
+      if (editedMsgIndex === -1) throw new Error("Edited message not found in original list for API call.");
       const messagesForApi = [...originalMessages.slice(0, editedMsgIndex), editedMessage];
       
       const { content: assistantContent } = await callApiForText({
@@ -299,7 +300,6 @@ export default function App() {
     onMutate: async (variables) => {
       const { messageId, newContentArray } = variables;
       const queryKey = ['messages', currentChatId];
-
       await queryClient.cancelQueries({ queryKey });
       const previousMessages = queryClient.getQueryData(queryKey);
 
@@ -307,26 +307,21 @@ export default function App() {
         if (!oldMessages) return [];
         const originalEditedMessageIndex = oldMessages.findIndex(m => m.id === messageId);
         if (originalEditedMessageIndex === -1) {
-          console.warn("Optimistic edit: original message not found in cache. Skipping optimistic update.");
           return oldMessages;
         }
         const originalEditedMessage = oldMessages[originalEditedMessageIndex];
-
         const optimisticallyUpdatedMessage = {
           ...originalEditedMessage,
           content: newContentArray,
           updated_at: new Date().toISOString(),
         };
-        
         let newOptimisticMessages = oldMessages
           .map(msg => (msg.id === messageId ? optimisticallyUpdatedMessage : msg))
           .filter(msg => {
             if (msg.id === messageId) return true;
             return new Date(msg.created_at) < new Date(originalEditedMessage.created_at);
           });
-        
         newOptimisticMessages.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-        
         return newOptimisticMessages;
       });
       return { previousMessages };
@@ -372,53 +367,89 @@ export default function App() {
     }
   });
 
+  // `globalBusy` should reflect operations that make the entire app or major parts of it
+  // non-interactive. Background token counting (`isCountingApiTokens`) is excluded
+  // to prevent UI flicker for a non-blocking background task.
   const globalBusy = useMemo(() => 
     createChatMutation.isPending || 
     deleteChatMutation.isPending || 
-    sendMessageMutation.isPending ||
+    // sendMessageMutation.isPending is handled by specific loadingSend prop for PromptBuilder
     updateChatTitleMutation.isPending ||
-    deleteMessageMutation.isPending ||
+    deleteMessageMutation.isPending || // Message actions are disabled by ChatArea's loadingSend/actionsDisabled
     undoDeleteMessageMutation.isPending ||
-    editMessageMutation.isPending ||    
-    resendMessageMutation.isPending ||  
-    isCountingApiTokens ||
+    // editMessageMutation.isPending is handled by specific loadingSend/savingEdit in ChatArea
+    // resendMessageMutation.isPending is handled by specific loadingSend in ChatArea
     undoDeleteChatMutation.isPending,
   [
     createChatMutation.isPending, 
     deleteChatMutation.isPending,
-    sendMessageMutation.isPending,
     updateChatTitleMutation.isPending,
     deleteMessageMutation.isPending,
     undoDeleteMessageMutation.isPending,
-    editMessageMutation.isPending,    
-    resendMessageMutation.isPending,  
-    isCountingApiTokens,
     undoDeleteChatMutation.isPending,
   ]);
+  
+  // Specific loading state for send-like actions on PromptBuilder
+  const promptBuilderLoadingSend = useMemo(() => 
+    sendMessageMutation.isPending || 
+    editMessageMutation.isPending || // If an edit is triggered from PromptBuilder (future feature?)
+    resendMessageMutation.isPending, // If resend is triggered from PromptBuilder (future feature?)
+  [
+    sendMessageMutation.isPending,
+    editMessageMutation.isPending,
+    resendMessageMutation.isPending
+  ]);
 
-  useEffect(() => () => { pendingImages.forEach(revokeOnce); }, [pendingImages]);
+
+  useEffect(() => {
+    const imagesToRevoke = [...pendingImages];
+    return () => {
+      imagesToRevoke.forEach(revokeOnce);
+    };
+  }, [pendingImages]);
 
   const callWorkerForTokenCount = useCallback((currentItemsForApi, currentApiKey, currentModel) => {
-    const currentVersion = ++tokenCountVersionRef.current;
+    const currentVersion = ++tokenCountVersionRef.current; 
+    
     if (!currentApiKey || String(currentApiKey).trim() === "") {
-        if (tokenCountVersionRef.current === currentVersion) { setIsCountingApiTokens(false); setApiCalculatedTokenCount(0); } return;
+        if (tokenCountVersionRef.current === currentVersion) {
+            setIsCountingApiTokens(false); 
+            setApiCalculatedTokenCount(0); 
+        }
+        return;
     }
     if (currentItemsForApi.length === 0) {
-        if (tokenCountVersionRef.current === currentVersion) { setApiCalculatedTokenCount(0); setIsCountingApiTokens(false); } return;
+        if (tokenCountVersionRef.current === currentVersion) {
+            setApiCalculatedTokenCount(0); 
+            setIsCountingApiTokens(false); 
+        }
+        return;
     }
-    if (tokenCountVersionRef.current === currentVersion) { setIsCountingApiTokens(true); } else { return; }
+
+    if (tokenCountVersionRef.current === currentVersion) {
+        setIsCountingApiTokens(true); 
+    } else {
+        return; 
+    }
+
     countTokensWithGemini(currentApiKey, currentModel, currentItemsForApi)
         .then(count => {
-            if (tokenCountVersionRef.current === currentVersion) { setApiCalculatedTokenCount(count); }
+            if (tokenCountVersionRef.current === currentVersion) { 
+                setApiCalculatedTokenCount(count); 
+            }
         })
         .catch(error => {
             console.warn("Token counting error:", error);
-            if (tokenCountVersionRef.current === currentVersion) { setApiCalculatedTokenCount(0); }
+            if (tokenCountVersionRef.current === currentVersion) { 
+                setApiCalculatedTokenCount(0);
+            }
         })
         .finally(() => {
-            if (tokenCountVersionRef.current === currentVersion) { setIsCountingApiTokens(false); }
+            if (tokenCountVersionRef.current === currentVersion) { 
+                setIsCountingApiTokens(false); 
+            }
         });
-  }, []);
+  }, []); 
 
   useEffect(() => {
     if (!debouncedApiCallRef.current) {
@@ -454,7 +485,8 @@ export default function App() {
   }
 
   function handleSend() {
-    if (sendMessageMutation.isPending || !currentChatId || globalBusy) {
+    // Disable send if these specific mutations are pending, or if globalBusy is true for other reasons
+    if (sendMessageMutation.isPending || editMessageMutation.isPending || resendMessageMutation.isPending || globalBusy) {
       if(!currentChatId) Toast("Please select or create a chat first.", 3000);
       return;
     }
@@ -565,7 +597,7 @@ export default function App() {
     if (editingId) { 
       handleCancelEdit();
     }
-  }, [currentChatId, handleCancelEdit]); // Removed editingId from deps
+  }, [currentChatId, handleCancelEdit]);
 
 
   const scrollToPrev = useCallback(() => {
@@ -713,7 +745,7 @@ export default function App() {
             <PromptBuilder
               mode={mode} setMode={setMode}
               form={form} setForm={setForm}
-              loadingSend={globalBusy}
+              loadingSend={promptBuilderLoadingSend} // Use the more specific loading state for button text
               handleSend={handleSend}
               showToast={Toast}
               imagePreviews={pendingImages}
