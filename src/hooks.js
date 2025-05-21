@@ -29,7 +29,7 @@ const TARGET_GEMINI_MODEL = "gemini-2.5-pro-preview-05-06";
 export const INITIAL_FORM_DATA = {
   developGoal: '',
   developFeatures: '',
-  developReturnFormat: 'return complete refactored code in FULL so that i can paste it directly into my ide',
+  developReturnFormat: 'return the complete refactored code for the respective changed files in FULL with NO OMISSIONS so that i can paste it directly into my ide',
   developWarnings: '',
   developContext: '',
   fixCode: '',

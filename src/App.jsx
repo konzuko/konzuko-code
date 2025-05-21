@@ -20,6 +20,7 @@ import {
   createMessage as apiCreateMessage,
   updateChatTitle as apiUpdateChatTitle,
   deleteChat as apiDeleteChat,
+  undoDeleteChat as apiUndoDeleteChat,
   deleteMessage as apiDeleteMessage,
   undoDeleteMessage as apiUndoDeleteMessage,
   updateMessage as apiUpdateMessage,
@@ -101,7 +102,7 @@ export default function App() {
     queryKey: ['messages', currentChatId],
     queryFn: () => fetchMessages(currentChatId),
     enabled: !!currentChatId,
-    staleTime: 1000 * 60 * 2,
+    staleTime: 1000 * 60 * 2, // 2 minutes
   });
   const currentChatMessages = currentChatMessagesData || [];
 
@@ -128,48 +129,84 @@ export default function App() {
       Toast('Failed to create chat: ' + error.message, 5000);
     }
   });
-
-  const deleteChatMutation = useMutation({ 
-    mutationFn: (chatId) => apiDeleteChat(chatId),
-    onSuccess: (data, chatId) => { 
-      queryClient.setQueryData(['chats'], (oldData) => {
-          if (!oldData) return oldData;
-          return {
-              ...oldData,
-              pages: oldData.pages.map(page => ({
-                  ...page,
-                  chats: page.chats.filter(chat => chat.id !== chatId)
-              })).filter(page => page.chats.length > 0)
-          };
-      });
-      if (currentChatId === chatId) {
-          setCurrentChatId(null); 
-      }
-      Toast('Chat deleted.', 3000); // TODO: Consider adding Undo for chat deletion
+  
+  const undoDeleteChatMutation = useMutation({
+    mutationFn: (chatId) => apiUndoDeleteChat(chatId),
+    onSuccess: (restoredChat, chatId) => {
+      queryClient.invalidateQueries({ queryKey: ['chats'] });
+      Toast('Chat restored.', 2000);
     },
     onError: (error) => {
-      Toast('Failed to delete chat: ' + error.message, 5000);
+      Toast('Failed to restore chat: ' + error.message, 5000);
+    }
+  });
+
+  const deleteChatMutation = useMutation({
+    mutationFn: (chatId) => apiDeleteChat(chatId),
+    onMutate: async (chatId) => {
+      await queryClient.cancelQueries({ queryKey: ['chats'] });
+      const previousChatsData = queryClient.getQueryData(['chats']);
+
+      queryClient.setQueryData(['chats'], (oldInfiniteData) => {
+        if (!oldInfiniteData) return oldInfiniteData;
+        const newPages = oldInfiniteData.pages.map(page => ({
+          ...page,
+          chats: page.chats.filter(chat => chat.id !== chatId)
+        }));
+        return {
+          ...oldInfiniteData,
+          pages: newPages,
+        };
+      });
+      return { previousChatsData, chatId };
+    },
+    onSuccess: (data, chatId, context) => {
+      if (currentChatId === chatId) {
+        setCurrentChatId(null); 
+      }
+      Toast('Chat deleted.', 15000, () => { 
+        undoDeleteChatMutation.mutate(chatId);
+      });
+    },
+    onError: (err, chatId, context) => {
+      if (context?.previousChatsData) {
+        queryClient.setQueryData(['chats'], context.previousChatsData);
+      }
+      Toast('Failed to delete chat: ' + err.message, 5000);
     }
   });
   
-  const updateChatTitleMutation = useMutation({ 
+  const updateChatTitleMutation = useMutation({
     mutationFn: ({ id, title }) => apiUpdateChatTitle(id, title),
-    onSuccess: (updatedChatData, variables) => {
-      queryClient.setQueryData(['chats'], (oldData) => {
-        if (!oldData) return oldData;
+    onMutate: async ({ id, title }) => {
+      await queryClient.cancelQueries({ queryKey: ['chats'] });
+      const previousChatsData = queryClient.getQueryData(['chats']);
+      queryClient.setQueryData(['chats'], (oldInfiniteData) => {
+        if (!oldInfiniteData) return oldInfiniteData;
         return {
-          ...oldData,
-          pages: oldData.pages.map(page => ({
+          ...oldInfiniteData,
+          pages: oldInfiniteData.pages.map(page => ({
             ...page,
             chats: page.chats.map(chat =>
-              chat.id === variables.id ? updatedChatData : chat
+              chat.id === id ? { ...chat, title: title, updated_at: new Date().toISOString() } : chat
             ),
           })),
         };
       });
+      return { previousChatsData };
+    },
+    onSuccess: (updatedChatDataFromServer, variables) => {
+      // Invalidate to ensure consistency with server, especially for updated_at or other fields
+      // if the server returns a slightly different timestamp or other data.
+      queryClient.invalidateQueries({ queryKey: ['chats'] });
       Toast('Title updated!', 2000);
     },
-    onError: (error) => Toast('Failed to update title: ' + error.message, 5000)
+    onError: (err, variables, context) => {
+      if (context?.previousChatsData) {
+        queryClient.setQueryData(['chats'], context.previousChatsData);
+      }
+      Toast('Failed to update title: ' + err.message, 5000);
+    },
   });
 
   const sendMessageMutation = useMutation({ 
@@ -239,12 +276,15 @@ export default function App() {
   });
 
   const editMessageMutation = useMutation({
-    mutationFn: async ({ messageId, newContent, originalMessages, apiKey }) => {
-      const editedMessage = await apiUpdateMessage(messageId, newContent);
+    mutationFn: async ({ messageId, newContentArray, originalMessages, apiKey }) => {
+      const editedMessage = await apiUpdateMessage(messageId, newContentArray);
       const editedMsgIndex = originalMessages.findIndex(m => m.id === messageId);
-      if (editedMsgIndex === -1) throw new Error("Edited message not found in original list during mutation.");
+      if (editedMsgIndex === -1) throw new Error("Edited message not found in original list for API call.");
+      
       await apiArchiveMessagesAfter(currentChatId, editedMessage.created_at);
+      
       const messagesForApi = [...originalMessages.slice(0, editedMsgIndex), editedMessage];
+      
       const { content: assistantContent } = await callApiForText({
         apiKey: apiKey,
         messages: messagesForApi,
@@ -256,11 +296,49 @@ export default function App() {
       });
       return { editedMessageId: messageId };
     },
+    onMutate: async (variables) => {
+      const { messageId, newContentArray } = variables;
+      const queryKey = ['messages', currentChatId];
+
+      await queryClient.cancelQueries({ queryKey });
+      const previousMessages = queryClient.getQueryData(queryKey);
+
+      queryClient.setQueryData(queryKey, (oldMessages = []) => {
+        if (!oldMessages) return [];
+        const originalEditedMessageIndex = oldMessages.findIndex(m => m.id === messageId);
+        if (originalEditedMessageIndex === -1) {
+          console.warn("Optimistic edit: original message not found in cache. Skipping optimistic update.");
+          return oldMessages;
+        }
+        const originalEditedMessage = oldMessages[originalEditedMessageIndex];
+
+        const optimisticallyUpdatedMessage = {
+          ...originalEditedMessage,
+          content: newContentArray,
+          updated_at: new Date().toISOString(),
+        };
+        
+        let newOptimisticMessages = oldMessages
+          .map(msg => (msg.id === messageId ? optimisticallyUpdatedMessage : msg))
+          .filter(msg => {
+            if (msg.id === messageId) return true;
+            return new Date(msg.created_at) < new Date(originalEditedMessage.created_at);
+          });
+        
+        newOptimisticMessages.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+        
+        return newOptimisticMessages;
+      });
+      return { previousMessages };
+    },
     onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['messages', currentChatId] });
       Toast('Message edited and conversation continued.', 3000);
     },
-    onError: (error) => {
+    onError: (error, variables, context) => {
+      if (context?.previousMessages) {
+        queryClient.setQueryData(['messages', currentChatId], context.previousMessages);
+      }
       Toast('Failed to edit message: ' + error.message, 5000);
       queryClient.invalidateQueries({ queryKey: ['messages', currentChatId] });
     }
@@ -303,7 +381,8 @@ export default function App() {
     undoDeleteMessageMutation.isPending ||
     editMessageMutation.isPending ||    
     resendMessageMutation.isPending ||  
-    isCountingApiTokens,
+    isCountingApiTokens ||
+    undoDeleteChatMutation.isPending,
   [
     createChatMutation.isPending, 
     deleteChatMutation.isPending,
@@ -313,7 +392,8 @@ export default function App() {
     undoDeleteMessageMutation.isPending,
     editMessageMutation.isPending,    
     resendMessageMutation.isPending,  
-    isCountingApiTokens
+    isCountingApiTokens,
+    undoDeleteChatMutation.isPending,
   ]);
 
   useEffect(() => () => { pendingImages.forEach(revokeOnce); }, [pendingImages]);
@@ -354,11 +434,11 @@ export default function App() {
   }, [createChatMutation]);
 
   const handleDeleteChatTrigger = useCallback((id) => {
-    if (deleteChatMutation.isPending) return;
-    if (window.confirm('Are you sure you want to delete this chat? This action cannot be undone directly (no undo toast).')) {
+    if (deleteChatMutation.isPending || undoDeleteChatMutation.isPending) return;
+    if (window.confirm('Are you sure you want to delete this chat?')) {
       deleteChatMutation.mutate(id);
     }
-  }, [deleteChatMutation]);
+  }, [deleteChatMutation, undoDeleteChatMutation]);
 
   const handleUpdateChatTitleTrigger = useCallback((id, title) => {
     if (updateChatTitleMutation.isPending) return;
@@ -427,9 +507,10 @@ export default function App() {
     const originalMessage = currentChatMessages.find(m => m.id === editingId);
     if (!originalMessage) {
         Toast("Original message not found for editing.", 4000);
-        handleCancelEdit(); // Reset edit state
+        handleCancelEdit();
         return;
     }
+    
     let newContentArray = [];
     if (Array.isArray(originalMessage.content)) {
         newContentArray = originalMessage.content.map(block => 
@@ -441,21 +522,24 @@ export default function App() {
     } else {
         newContentArray.push({type: 'text', text: editText.trim() });
     }
-    newContentArray = newContentArray.filter(block => block.type !== 'text' || block.text.trim() !== "");
+    newContentArray = newContentArray.filter(block => block.type !== 'text' || (block.text && block.text.trim() !== ""));
+
     if (newContentArray.every(block => block.type !== 'text') && editText.trim() !== "") {
         newContentArray.push({type: 'text', text: editText.trim() });
     }
-    if (newContentArray.length === 0 && editText.trim() === "") {
+    
+    if (newContentArray.length === 0) {
         Toast("Cannot save an empty message.", 3000);
         return;
     }
+
     editMessageMutation.mutate({
       messageId: editingId,
-      newContent: newContentArray,
-      originalMessages: currentChatMessages,
+      newContentArray: newContentArray,
+      originalMessages: currentChatMessages, 
       apiKey: settings.apiKey,
     });
-    handleCancelEdit(); // Reset edit state
+    handleCancelEdit(); 
   }, [editingId, editText, currentChatId, currentChatMessages, editMessageMutation, settings.apiKey, globalBusy, handleCancelEdit]);
   
   const handleResendMessageTrigger = useCallback((messageId) => { 
@@ -477,12 +561,11 @@ export default function App() {
     }
   }, [deleteMessageMutation, currentChatId, globalBusy]);
 
-  // Effect to clear edit state when chat changes
   useEffect(() => {
-    if (editingId) {
+    if (editingId) { 
       handleCancelEdit();
     }
-  }, [currentChatId, editingId, handleCancelEdit]);
+  }, [currentChatId, handleCancelEdit]); // Removed editingId from deps
 
 
   const scrollToPrev = useCallback(() => {

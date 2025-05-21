@@ -2,7 +2,7 @@
    File: src/api.js
 ====================================================================== */
 
-console.log('API.JS FILE LOADED (for @google/genai & TanStack Query) - VERSION TQ_003_EDIT_RESEND_FIXED - TIMESTAMP', new Date().toISOString());
+console.log('API.JS FILE LOADED (for @google/genai & TanStack Query) - VERSION TQ_004_OPTIMISTIC_UNDO - TIMESTAMP', new Date().toISOString());
 
 import { supabase }                      from './lib/supabase.js'
 import { OPENAI_TIMEOUT_MS }             from './config.js'
@@ -65,12 +65,12 @@ export async function getCurrentUser({ forceRefresh = false } = {}) {
 
 export async function callApiForText({
   messages = [],
-  apiKey   = '', // apiKey is now explicitly passed
+  apiKey   = '', 
   signal
 } = {}) {
   let validatedKey;
   try {
-    validatedKey = validateKey(apiKey); // Use the passed apiKey
+    validatedKey = validateKey(apiKey); 
   } catch (err) {
     throw err; 
   }
@@ -238,6 +238,19 @@ export async function deleteChat(id) {
   return { success: true, id };
 }
 
+export async function undoDeleteChat(id) {
+  const user = await getCurrentUser();
+  const { data, error } = await supabase
+    .from('chats')
+    .update({ deleted_at: null })
+    .eq('id', id)
+    .eq('user_id', user.id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data; // Return the un-deleted chat object
+}
+
 export async function fetchMessages(chat_id) {
   if (!chat_id) return [];
   const { data, error } = await supabase
@@ -300,3 +313,4 @@ export async function undoDeleteMessage(id) {
   if (error) throw error;
   return data;
 }
+
