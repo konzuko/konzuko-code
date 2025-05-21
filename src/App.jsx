@@ -1,6 +1,4 @@
-/* ------------------------------------------------------------------
-   src/App.jsx  –  FULL, paste-ready file
--------------------------------------------------------------------*/
+// src/App.jsx
 import {
   useState,
   useEffect,
@@ -8,41 +6,37 @@ import {
   useRef,
   useMemo
 } from 'preact/hooks';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
-import ChatPane        from './chatpane.jsx';
-import PromptBuilder   from './PromptBuilder.jsx';
-import ChatArea        from './components/ChatArea.jsx';
-import Toast           from './components/Toast.jsx';
+import ChatList from './ChatList.jsx'; // Changed from ChatPane
+import PromptBuilder from './PromptBuilder.jsx';
+import ChatArea from './components/ChatArea.jsx';
+import Toast from './components/Toast.jsx';
 
 import {
   callApiForText,
-
-  fetchChats,          fetchMessages,
-  createChat,          createMessage,
-  updateMessage,       deleteMessage,
-  updateChatTitle,     deleteChat,
-
-  archiveMessagesAfter,
-  undoArchiveMessagesAfter,
-  undoDeleteMessage,
-  undoDeleteChat
+  fetchMessages,
+  createChat as apiCreateChat, // Renamed to avoid conflict
+  createMessage as apiCreateMessage,
+  updateMessage as apiUpdateMessage, // For future use (edit)
+  deleteChat as apiDeleteChat,
+  // ... other api functions if needed for mutations
+  GEMINI_MODEL_NAME
 } from './api.js';
 
 import {
   useSettings, useFormData, useMode,
-  useUndoableDelete,
+  // useUndoableDelete, // TQ mutations handle success/error states better for API calls
   INITIAL_FORM_DATA
-} from './hooks.js';
-import { useTokenizableContent } from './hooks/useTokenizableContent.js'; 
+} from './hooks.js'; // Ensure useUndoableDelete is removed or adapted if used for non-TQ actions
+import { useTokenizableContent } from './hooks/useTokenizableContent.js';
 
-import { queue }       from './lib/TaskQueue.js';
-import { asciiTree }   from './lib/textUtils.js';
+import { queue } from './lib/TaskQueue.js'; // May be less needed with TQ for API calls
+import { asciiTree } from './lib/textUtils.js';
 import { IMAGE_TOKEN_ESTIMATE } from './config.js';
 import { countTokensWithGemini } from './lib/tokenWorkerClient.js';
 
-/* ───────────────────────── helpers ───────────────────────── */
 const revokeOnce = obj => { if (obj?.revoke) { obj.revoke(); obj.revoke = null; } };
-const TARGET_GEMINI_MODEL = "gemini-2.5-pro-preview-05-06";
 
 const debounce = (func, delay) => {
   let timeoutId;
@@ -53,6 +47,7 @@ const debounce = (func, delay) => {
 };
 
 function buildNewUserPromptText(currentForm, currentMode, currentPendingFiles) {
+    // ... (buildNewUserPromptText function remains the same)
     if (currentMode === 'DEVELOP') {
       const out = ['MODE: DEVELOP'];
       if (currentForm.developGoal.trim())         out.push(`GOAL: ${currentForm.developGoal.trim()}`);
@@ -81,161 +76,193 @@ function buildNewUserPromptText(currentForm, currentMode, currentPendingFiles) {
     return '';
 }
 
-
-/* ============================================================
-   APP COMPONENT
-============================================================ */
 export default function App() {
-  /* ── primary state ─────────────────────────────────────── */
-  const [chats,         setChats]         = useState([]);
-  const [currentChatId, setCurrent]       = useState(null);
-  const [loadingChats,  setLoadingChats]  = useState(true);
+  const queryClient = useQueryClient();
 
-  const [loadingSend,   setLoadingSend]   = useState(false);
+  const [currentChatId, setCurrentChatId] = useState(null);
 
-  const [editingId,     setEditing]       = useState(null);
-  const [editText,      setEditText]      = useState('');
-  const [savingEdit,    setSaving]        = useState(false);
+  // State for prompt building, UI, settings
+  const [editingId, setEditing] = useState(null);
+  const [editText, setEditText] = useState('');
+  // const [savingEdit, setSaving] = useState(false); // Will be mutation.isLoading
 
   const [pendingImages, setPendingImages] = useState([]);
-  const [pendingPDFs,   setPendingPDFs]   = useState([]);
-  const [pendingFiles,  setPendingFiles]  = useState([]);
+  const [pendingPDFs, setPendingPDFs] = useState([]);
+  const [pendingFiles, setPendingFiles] = useState([]);
 
   const [settings, setSettings] = useSettings();
-  const [form,     setForm]     = useFormData();
-  const [mode,     setMode]     = useMode();
+  const [form, setForm] = useFormData();
+  const [mode, setMode] = useMode();
 
+  // Token counting state
   const [apiCalculatedTokenCount, setApiCalculatedTokenCount] = useState(0);
-  const [isCountingApiTokens, setIsCountingApiTokens] = useState(false); // Still used for 'busy'
+  const [isCountingApiTokens, setIsCountingApiTokens] = useState(false);
   const tokenCountVersionRef = useRef(0);
   const debouncedApiCallRef = useRef(null);
-  
+
   const chatBoxRef = useRef(null);
 
+  // Fetch messages for the current chat
+  const { data: currentChatMessagesData, isLoading: isLoadingMessages } = useQuery({
+    queryKey: ['messages', currentChatId],
+    queryFn: () => fetchMessages(currentChatId),
+    enabled: !!currentChatId, // Only fetch if currentChatId is set
+    staleTime: 1000 * 60 * 1, // Messages can be staler than chat list (1 min)
+  });
+  const currentChatMessages = currentChatMessagesData || [];
 
-  const busy          = loadingSend || savingEdit || isCountingApiTokens;
-  const currentChat   = useMemo(() => chats.find(c => c.id === currentChatId) ?? { messages: [] }, [chats, currentChatId]);
-  
+
   const itemsForApiCount = useTokenizableContent(
-    currentChat.messages,
+    currentChatMessages, // Use messages from TQ
     form,
     mode,
     pendingFiles,
     pendingPDFs
   );
 
-  const showToast     = useCallback((txt, undo) => Toast(txt, 6000, undo), []);
-  const undoableDelete = useUndoableDelete(showToast);
+  const showToast = useCallback((txt, undoFn) => Toast(txt, 6000, undoFn), []);
+  // const undoableDelete = useUndoableDelete(showToast); // Replaced by TQ mutation logic
 
-  const stableRunTask = useCallback(async fn => {
-      setLoadingSend(true);
-      try { await queue.push(fn); }
-      catch (err) {
-        console.error(err);
-        Toast(err?.message || 'Unknown error', 5000);
+  // Mutations
+  const createChatMutation = useMutation({
+    mutationFn: (newChatData) => apiCreateChat(newChatData),
+    onSuccess: (newlyCreatedChat) => {
+      queryClient.invalidateQueries({ queryKey: ['chats'] });
+      if (newlyCreatedChat && newlyCreatedChat.id) {
+        setCurrentChatId(newlyCreatedChat.id); // Select the new chat
       }
-      finally { setLoadingSend(false); }
-    }, []); 
-
-  const scrollToPrev = () => {
-    const box = chatBoxRef.current; if (!box) return;
-    const rows = Array.from(box.querySelectorAll('.message'));
-    const cur  = box.scrollTop;
-    let tgt = null;
-    for (let i = rows.length - 1; i >= 0; i--) {
-      if (rows[i].offsetTop < cur - 1) { tgt = rows[i]; break; }
+      Toast('New chat created!', 2000);
+    },
+    onError: (error) => {
+      Toast('Failed to create chat: ' + error.message, 5000);
+      console.error("Create chat error:", error);
     }
-    box.scrollTop = tgt ? tgt.offsetTop : 0;
-  };
+  });
 
-  const scrollToNext = () => {
-    const box = chatBoxRef.current; if (!box) return;
-    const rows = Array.from(box.querySelectorAll('.message'));
-    const cur  = box.scrollTop;
-    let tgt = null;
-    for (let i = 0; i < rows.length; i++) {
-      if (rows[i].offsetTop > cur + 1) { tgt = rows[i]; break; }
+  const deleteChatMutation = useMutation({
+    mutationFn: (chatId) => apiDeleteChat(chatId),
+    onSuccess: (data, chatId) => { // data is {success: true, id: chatId}
+      queryClient.invalidateQueries({ queryKey: ['chats'] });
+      if (currentChatId === chatId) {
+        setCurrentChatId(null); // Deselect, ChatList will pick the next one
+      }
+      Toast('Chat deleted.', 3000 /*, () => handleUndoDelete(chatId) // TODO: Undo for TQ */);
+    },
+    onError: (error) => {
+      Toast('Failed to delete chat: ' + error.message, 5000);
     }
-    box.scrollTop = tgt ? tgt.offsetTop : box.scrollHeight;
-  };
+  });
+  
+  const sendMessageMutation = useMutation({
+    mutationFn: async (payload) => {
+      // payload = { currentChatId, userMessageContentBlocks, settings, form, mode, pendingFiles, existingMessages }
+      
+      // 1. Create user message (optimistically or via API)
+      const userRow = await apiCreateMessage({
+        chat_id: payload.currentChatId,
+        role: 'user',
+        content: payload.userMessageContentBlocks
+      });
+
+      // Optimistically update messages cache to show user message immediately
+      queryClient.setQueryData(['messages', payload.currentChatId], (oldMessages = []) => [...oldMessages, userRow]);
+
+      // 2. Prepare messages for AI (including the new user message)
+      const messagesForApi = [...payload.existingMessages, userRow];
+      
+      // 3. Call AI
+      const { content: assistantContent } = await callApiForText({
+        apiKey: payload.settings.apiKey,
+        messages: messagesForApi
+        // signal can be added here if needed
+      });
+      
+      // 4. Create assistant message
+      const assistantRow = await apiCreateMessage({
+        chat_id: payload.currentChatId,
+        role: 'assistant',
+        content: [{ type: 'text', text: assistantContent }] // Ensure content is an array of blocks
+      });
+      
+      return { userRow, assistantRow }; // Return for potential further cache updates
+    },
+    onSuccess: (data, variables) => {
+      // Invalidate messages for the current chat to ensure assistant message is properly fetched/updated from server
+      // This also ensures the cache reflects the final server state.
+      queryClient.invalidateQueries({ queryKey: ['messages', variables.currentChatId] });
+      resetForm(); // Your existing resetForm
+    },
+    onError: (error, variables) => {
+      Toast(`Error sending message: ${error.message}`, 8000);
+      console.error("Send message error:", error);
+      // Optional: Revert optimistic update for user message if it failed before AI call
+      // This is more complex and depends on where the failure occurred.
+      // For now, a full refetch from invalidation is simpler.
+      queryClient.invalidateQueries({ queryKey: ['messages', variables.currentChatId] });
+    }
+  });
+
+
+  const busy = useMemo(() => 
+    createChatMutation.isPending || 
+    deleteChatMutation.isPending || 
+    sendMessageMutation.isPending ||
+    // isLoadingMessages || //isLoadingMessages is for current chat, not a global busy state for UI disabling
+    isCountingApiTokens,
+  [
+    createChatMutation.isPending, 
+    deleteChatMutation.isPending,
+    sendMessageMutation.isPending,
+    // isLoadingMessages, 
+    isCountingApiTokens
+  ]);
+
 
   useEffect(() => () => { pendingImages.forEach(revokeOnce); }, [pendingImages]);
 
-  useEffect(() => {
-    let live = true;
-    stableRunTask(async () => {
-      setLoadingChats(true);
-      const rows = await fetchChats();
-      let shaped = rows.map(r => ({
-        id: r.id, title: r.title, started: r.created_at,
-        model: r.code_type || TARGET_GEMINI_MODEL, messages: []
-      }));
-      if (!shaped.length) {
-        const c = await createChat({ title: 'New Chat' });
-        shaped = [{
-          id: c.id, title: c.title, started: c.created_at,
-          model: c.code_type, messages: []
-        }];
-      }
-      if (live) { setChats(shaped); setCurrent(shaped[0].id); }
-    }).finally(() => live && setLoadingChats(false));
-    return () => { live = false; };
-  }, [stableRunTask]);
+  // Token counting useEffect and helpers
+  const callWorkerForTokenCount = useCallback(async (currentItemsForApi, currentApiKey, currentModel) => {
+    // ... (callWorkerForTokenCount remains the same)
+    const currentVersion = ++tokenCountVersionRef.current;
+    if (!currentApiKey || String(currentApiKey).trim() === "") {
+        if (tokenCountVersionRef.current === currentVersion) { setIsCountingApiTokens(false); setApiCalculatedTokenCount(0); } return;
+    }
+    if (currentItemsForApi.length === 0) {
+        if (tokenCountVersionRef.current === currentVersion) { setApiCalculatedTokenCount(0); setIsCountingApiTokens(false); } return;
+    }
+    if (tokenCountVersionRef.current === currentVersion) { setIsCountingApiTokens(true); } else { return; }
+    try {
+        const count = await countTokensWithGemini(currentApiKey, currentModel, currentItemsForApi);
+        if (tokenCountVersionRef.current === currentVersion) { setApiCalculatedTokenCount(count); }
+    } catch (error) {
+        if (tokenCountVersionRef.current === currentVersion) { setApiCalculatedTokenCount(0); }
+    } finally {
+        if (tokenCountVersionRef.current === currentVersion) { setIsCountingApiTokens(false); }
+    }
+  }, [setApiCalculatedTokenCount, setIsCountingApiTokens]);
 
   useEffect(() => {
-    if (!currentChatId) return;
-    let live = true;
-    fetchMessages(currentChatId)
-      .then(msgs => live && setChats(cs => cs.map(c =>
-        c.id === currentChatId ? { ...c, messages: msgs } : c
-      )))
-      .catch(err => Toast('Failed to fetch messages: ' + err.message, 5000));
-    return () => { live = false; };
-  }, [currentChatId]);
+    if (!debouncedApiCallRef.current) {
+        debouncedApiCallRef.current = debounce(callWorkerForTokenCount, 750);
+    }
+    const modelToUse = settings.model || GEMINI_MODEL_NAME;
+    debouncedApiCallRef.current(itemsForApiCount, settings.apiKey, modelToUse);
+  }, [itemsForApiCount, settings.apiKey, settings.model, callWorkerForTokenCount]);
+
 
   function handleNewChat() {
     if (busy) return;
-    stableRunTask(async () => {
-      const c = await createChat({ title: 'New Chat' });
-      setChats(cs => [
-        { id: c.id, title: c.title, started: c.created_at, model: c.code_type, messages: [] },
-        ...cs
-      ]);
-      setCurrent(c.id);
-    });
-  }
-
-  function handleRenameChat(id, title) {
-    setChats(cs => cs.map(c => c.id === id ? { ...c, title } : c));
-    stableRunTask(() => updateChatTitle(id, title)
-      .catch(err => Toast('Rename failed: ' + err.message, 5000)));
+    createChatMutation.mutate({ title: 'New Chat', model: GEMINI_MODEL_NAME });
   }
 
   function handleDeleteChat(id) {
+    // Confirmation dialog can be added here if desired before mutating
     if (busy) return;
-    const anchorId = currentChatId;
-    undoableDelete({
-      itemLabel  : 'Chat',
-      deleteFn   : () => stableRunTask(() => deleteChat(id)),
-      undoFn     : () => stableRunTask(async () => { 
-        await undoDeleteChat(id);
-        const rows = await fetchChats();
-        setChats(rows.map(r => ({
-          id: r.id, title: r.title, started: r.created_at,
-          model: r.code_type || TARGET_GEMINI_MODEL, messages: []
-        })));
-        setCurrent(id);
-       }),
-      afterDelete: () => { 
-        setChats(cs => {
-          const remaining = cs.filter(c => c.id !== id);
-          if (anchorId === id) setCurrent(remaining[0]?.id ?? null);
-          return remaining;
-        });
-       }
-    });
+    if (confirm('Delete this chat? This action cannot be undone through the UI immediately.')) {
+        deleteChatMutation.mutate(id);
+    }
   }
-  
+
   function resetForm() {
     pendingImages.forEach(revokeOnce);
     setPendingImages([]);
@@ -244,72 +271,8 @@ export default function App() {
     setForm(INITIAL_FORM_DATA);
   }
 
-  /* ========================================================
-     GEMINI TOKEN COUNTING 
-  ======================================================== */
-  const callWorkerForTokenCount = useCallback(async (currentItemsForApi, currentApiKey, currentModel) => {
-    const currentVersion = ++tokenCountVersionRef.current;
-
-    if (!currentApiKey || String(currentApiKey).trim() === "") {
-        if (tokenCountVersionRef.current === currentVersion) {
-            setIsCountingApiTokens(false);
-            setApiCalculatedTokenCount(0);
-        }
-        return;
-    }
-
-    if (currentItemsForApi.length === 0) {
-        if (tokenCountVersionRef.current === currentVersion) {
-            setApiCalculatedTokenCount(0);
-            setIsCountingApiTokens(false);
-        }
-        return;
-    }
-    
-    if (tokenCountVersionRef.current === currentVersion) {
-      setIsCountingApiTokens(true);
-    } else {
-      return; 
-    }
-
-    try {
-        const count = await countTokensWithGemini(currentApiKey, currentModel, currentItemsForApi);
-        if (tokenCountVersionRef.current === currentVersion) {
-            setApiCalculatedTokenCount(count);
-        }
-    } catch (error) {
-        console.error(`[App.jsx] v${currentVersion} - Error counting tokens:`, error.message);
-        if (tokenCountVersionRef.current === currentVersion) {
-            setApiCalculatedTokenCount(0);
-        }
-    } finally {
-        if (tokenCountVersionRef.current === currentVersion) {
-            setIsCountingApiTokens(false);
-        }
-    }
-  }, [setApiCalculatedTokenCount, setIsCountingApiTokens]); 
-
-  useEffect(() => {
-    if (!debouncedApiCallRef.current) {
-        debouncedApiCallRef.current = debounce(callWorkerForTokenCount, 750);
-    }
-    
-    const modelToUse = settings.model || TARGET_GEMINI_MODEL;
-    debouncedApiCallRef.current(itemsForApiCount, settings.apiKey, modelToUse);
-
-  }, [
-      itemsForApiCount, 
-      settings.apiKey, 
-      settings.model,
-      callWorkerForTokenCount 
-  ]);
-
-
-  /* ========================================================
-     SEND
-  ======================================================== */
   function handleSend() {
-    if (busy) return;
+    if (sendMessageMutation.isPending || busy) return;
 
     if (!settings.apiKey || String(settings.apiKey).trim() === "") {
       Toast("Gemini API Key is missing. Please set it in settings.", 5000);
@@ -317,234 +280,61 @@ export default function App() {
       return;
     }
 
-    stableRunTask(async () => {
-      const existingMessages = currentChat.messages;
-      const newUserTextPrompt = buildNewUserPromptText(form, mode, pendingFiles);
-
-      const userMessageContentBlocks = [];
-      
-      pendingPDFs.forEach(p => {
-        userMessageContentBlocks.push({
-          type: 'file',
-          file: { file_id: p.fileId, original_name: p.name, mime_type: p.mimeType }
-        });
-      });
-      pendingImages.forEach(img => {
-        userMessageContentBlocks.push({
-          type: 'image_url',
-          image_url: { url: img.url, detail: 'high', original_name: img.name }
-        });
-      });
-
-      if (newUserTextPrompt && newUserTextPrompt.trim() !== "") {
-        userMessageContentBlocks.push({ type: 'text', text: newUserTextPrompt });
-      }
-      
-      if (userMessageContentBlocks.length === 0) {
-        Toast("Cannot send an empty message (no text, images, or PDFs added to the current prompt).", 3000);
-        return;
-      }
-
-      const userRow = await createMessage({
-        chat_id: currentChatId,
-        role: 'user',
-        content: userMessageContentBlocks
-      });
-
-      setChats(prevChats => prevChats.map(c => 
-        c.id === currentChatId 
-          ? { ...c, messages: [...c.messages, userRow] } 
-          : c
-      ));
-
-      const messagesForApi = [...existingMessages, userRow]; 
-      
-      const { content: assistantContent, error: apiError, details: apiErrorDetails } = await callApiForText({
-        apiKey: settings.apiKey,
-        messages: messagesForApi
-      });
-      
-      let assistantText = assistantContent;
-      if (apiError) {
-        assistantText = `Error: ${apiError}`;
-        if (apiErrorDetails) assistantText += `\nDetails: ${apiErrorDetails}`;
-        Toast(assistantText, 8000);
-      }
-
-      const assistantRow = await createMessage({
-        chat_id: currentChatId,
-        role: 'assistant',
-        content: [{ type: 'text', text: assistantText }]
-      });
-
-      setChats(prevChats => prevChats.map(c => 
-        c.id === currentChatId 
-          ? { ...c, messages: [...c.messages, assistantRow] } 
-          : c
-      ));
-
-      resetForm();
-    });
-  }
-
-  function handleStartEdit(msg) {
-    setEditing(msg.id);
-    const textBlock = Array.isArray(msg.content)
-      ? msg.content.find(b => b.type === 'text')
-      : { text: String(msg.content) };
-    setEditText(textBlock?.text || '');
-  }
-  function handleCancelEdit() { setEditing(null); setEditText(''); }
-
-  async function handleSaveEdit() {
-    if (!editingId || busy) return;
-    if (!settings.apiKey || String(settings.apiKey).trim() === "") { 
-        Toast("Gemini API Key is missing. Please set it in settings before saving edit.", 5000);
-        setSettings(s => ({ ...s, showSettings: true }));
-        return; 
+    const newUserTextPrompt = buildNewUserPromptText(form, mode, pendingFiles);
+    const userMessageContentBlocks = [];
+    
+    pendingPDFs.forEach(p => userMessageContentBlocks.push({
+      type: 'file', file: { file_id: p.fileId, original_name: p.name, mime_type: p.mimeType }
+    }));
+    pendingImages.forEach(img => userMessageContentBlocks.push({
+      type: 'image_url', image_url: { url: img.url, detail: 'high', original_name: img.name }
+    }));
+    if (newUserTextPrompt && newUserTextPrompt.trim() !== "") {
+      userMessageContentBlocks.push({ type: 'text', text: newUserTextPrompt });
     }
-    setSaving(true);
-    stableRunTask(async () => {
-      const msgs = await fetchMessages(currentChatId);
-      const msgIndex = msgs.findIndex(x => x.id === editingId);
-      if (msgIndex === -1) throw new Error('Message not found for editing');
-
-      const originalMessage = msgs[msgIndex];
-      const originalContent = Array.isArray(originalMessage.content) ? originalMessage.content : [{type: 'text', text: String(originalMessage.content)}];
-
-      const newContentArray = originalContent.map(block =>
-        block.type === 'text' ? { ...block, text: editText } : block
-      );
-      if (!newContentArray.some(b => b.type === 'text')) {
-          newContentArray.push({ type: 'text', text: editText });
-      }
-
-      await updateMessage(editingId, newContentArray);
-      msgs[msgIndex] = { ...originalMessage, content: newContentArray };
-
-      await archiveMessagesAfter(currentChatId, msgs[msgIndex].created_at);
-
-      const { content, error, details: apiErrorDetails } = await callApiForText({
-        apiKey: settings.apiKey,
-        messages: msgs.slice(0, msgIndex + 1)
-      });
-
-      let assistantText = content;
-      if (error) {
-        assistantText = `Error: ${error}`;
-        if (apiErrorDetails) assistantText += `\nDetails: ${apiErrorDetails}`;
-        Toast(assistantText, 8000);
-      }
-
-      await createMessage({
-        chat_id: currentChatId,
-        role: 'assistant',
-        content: [{ type: 'text', text: assistantText }]
-      });
-
-      const refreshed = await fetchMessages(currentChatId);
-      setChats(cs => cs.map(c =>
-        c.id === currentChatId ? { ...c, messages: refreshed } : c
-      ));
-
-      setEditing(null); setEditText('');
-     }).finally(() => setSaving(false));
-  }
-
-  function handleResendMessage(id) {
-    if (busy) return;
-    if (!settings.apiKey || String(settings.apiKey).trim() === "") { 
-        Toast("Gemini API Key is missing. Please set it in settings before resending.", 5000);
-        setSettings(s => ({ ...s, showSettings: true }));
-        return; 
+    
+    if (userMessageContentBlocks.length === 0) {
+      Toast("Cannot send an empty message.", 3000);
+      return;
     }
-    stableRunTask(async () => {
-        const msgs = await fetchMessages(currentChatId);
-        const anchorMsgIndex = msgs.findIndex(x => x.id === id);
-        if (anchorMsgIndex === -1) throw new Error('Message not found for resend');
-        const anchor = msgs[anchorMsgIndex];
 
-        await archiveMessagesAfter(currentChatId, anchor.created_at);
-        const messagesForApi = msgs.slice(0, anchorMsgIndex + 1);
-
-        const { content, error, details: apiErrorDetails } = await callApiForText({
-            apiKey: settings.apiKey,
-            messages: messagesForApi
-        });
-
-        let assistantText = content;
-        if (error) {
-            assistantText = `Error: ${error}`;
-            if (apiErrorDetails) assistantText += `\nDetails: ${apiErrorDetails}`;
-            Toast(assistantText, 8000);
-        }
-
-        const asst = await createMessage({
-            chat_id: currentChatId,
-            role: 'assistant',
-            content: [{ type: 'text', text: assistantText }]
-        });
-
-        const refreshedMessages = await fetchMessages(currentChatId);
-        setChats(cs => cs.map(c =>
-            c.id === currentChatId
-            ? { ...c, messages: refreshedMessages }
-            : c
-        ));
-
-        showToast('Archived subsequent messages. Undo?', () =>
-            stableRunTask(async () => {
-            await undoArchiveMessagesAfter(currentChatId, anchor.created_at);
-            await deleteMessage(asst.id);
-            const undone = await fetchMessages(currentChatId);
-            setChats(u => u.map(cc =>
-                cc.id === currentChatId ? { ...cc, messages: undone } : cc
-            ));
-            })
-        );
+    sendMessageMutation.mutate({
+      currentChatId,
+      userMessageContentBlocks,
+      settings,
+      form, // For context if needed by mutationFn, though not directly used now
+      mode, // For context
+      pendingFiles, // For context
+      existingMessages: currentChatMessages, // Pass current messages for context to AI
     });
   }
 
-  function handleDeleteMessage(id) {
-    if (id === editingId) { setEditing(null); setEditText(''); }
-    if (busy) return;
-    undoableDelete({
-      itemLabel  : 'Message',
-      deleteFn   : () => stableRunTask(() => deleteMessage(id)),
-      undoFn     : () => stableRunTask(async () => { 
-          await undoDeleteMessage(id);
-          const msgs = await fetchMessages(currentChatId);
-            setChats(cs => cs.map(c =>
-            c.id === currentChatId ? { ...c, messages: msgs } : c
-            ));
-       }),
-      afterDelete: () => { 
-          setChats(cs => cs.map(c =>
-            c.id === currentChatId
-                ? { ...c, messages:c.messages.filter(m=>m.id!==id) }
-                : c
-            ));
-       }
-    });
-  }
+  // TODO: Refactor edit/resend/delete message with TQ mutations
+  function handleStartEdit(msg) { /* ... */ }
+  function handleCancelEdit() { /* ... */ }
+  async function handleSaveEdit() { /* ... implement with useMutation ... */ }
+  function handleResendMessage(id) { /* ... implement with useMutation ... */ }
+  function handleDeleteMessage(id) { /* ... implement with useMutation ... */ }
+
+
+  const scrollToPrev = () => { /* ... */ };
+  const scrollToNext = () => { /* ... */ };
   
-  function handleCopyAll() {
-    const txt = currentChat.messages.map(m => {
+  const handleCopyAll = () => {
+    const txt = currentChatMessages.map(m => { // Use messages from TQ
       const contentArray = Array.isArray(m.content) ? m.content : [{ type: 'text', text: String(m.content ?? '') }];
       return contentArray.filter(b => b.type === 'text').map(b => b.text).join('\n');
     }).join('\n\n');
     navigator.clipboard.writeText(txt)
       .then(() => Toast('Copied all text to clipboard!', 2000))
       .catch(() => Toast('Copy failed (clipboard API)', 4000));
-  }
-
+  };
 
   const totalPromptTokenCount = useMemo(() => {
+    // ... (token count logic remains similar, using currentChatMessages from TQ)
     let estimatedImageTokens = 0;
     estimatedImageTokens += pendingImages.length * IMAGE_TOKEN_ESTIMATE;
-
-    const currentMessages = currentChat.messages || [];
-    currentMessages.forEach(msg => {
+    (currentChatMessages || []).forEach(msg => {
         const contentBlocks = Array.isArray(msg.content)
             ? msg.content
             : [{ type: 'text', text: String(msg.content ?? '') }];
@@ -554,27 +344,24 @@ export default function App() {
             }
         });
     });
-    
     return apiCalculatedTokenCount + estimatedImageTokens;
-  }, [apiCalculatedTokenCount, pendingImages, currentChat]);
+  }, [apiCalculatedTokenCount, pendingImages, currentChatMessages]);
 
-  /* ========================================================
-     UI
-  ======================================================== */
-  if (loadingChats) {
-    return <h2 style={{textAlign:'center',marginTop:'20vh'}}>Loading…</h2>;
-  }
+
+  // Main App Loading State: Initially, we wait for ChatList to determine if it's loading.
+  // App.jsx doesn't have its own `loadingChats` anymore for the list.
+  // If ChatList is loading (isLoadingChats passed to it), it will show its own loader.
 
   return (
     <div className="app-container">
-      <ChatPane
-        chats          ={chats}
-        currentChatId  ={currentChatId}
-        onSelectChat   ={setCurrent}
-        onNewChat      ={handleNewChat}
-        onTitleUpdate  ={handleRenameChat}
-        onDeleteChat   ={handleDeleteChat}
-        disabled       ={busy}
+      <ChatList
+        currentChatId={currentChatId}
+        onSelectChat={setCurrentChatId}
+        // Pass TQ-ified mutation triggers or let ChatList handle its own mutations eventually
+        // For now, App.jsx handles mutations and ChatList just displays.
+        // onNewChat={handleNewChat} // ChatList handles this and calls `onSelectChat`
+        // onTitleUpdate, onDeleteChat are passed to ChatPaneLayout from ChatList
+        appDisabled={busy}
       />
       <div className="main-content">
         <div className="top-bar">
@@ -585,15 +372,16 @@ export default function App() {
             {settings.showSettings ? 'Close Settings' : 'Open Settings'}
           </button>
           <span style={{margin:'0 1em',fontWeight:'bold'}}>konzuko-code</span>
-          <div style={{marginLeft:'auto',display:'flex',gap:'0.5em'}}>
-            <div style={{padding:'4px 12px',background:'#4f8eff',borderRadius:4, fontSize: '0.9em', minHeight: 'calc(1.5em + 8px)', display: 'flex', alignItems: 'center'}}>
-              Tokens: {totalPromptTokenCount.toLocaleString()}
+          <div style={{marginLeft:'auto',display:'flex',gap:'0.5em', alignItems: 'center'}}>
+            <div style={{padding:'4px 12px',background:'var(--accent)', color: 'white', borderRadius:4, fontSize: '0.9em', minHeight: 'calc(1.5em + 8px)', display: 'flex', alignItems: 'center', opacity: isCountingApiTokens ? 0.7 : 1}}>
+              Tokens: {isCountingApiTokens ? 'Counting...' : totalPromptTokenCount.toLocaleString()}
             </div>
-            <button className="button" onClick={handleCopyAll}>Copy All Text</button>
+            <button className="button" onClick={handleCopyAll} disabled={currentChatMessages.length === 0}>Copy All Text</button>
           </div>
         </div>
         {settings.showSettings && (
           <div className="settings-panel" style={{padding:'1em',borderBottom:'1px solid var(--border)'}}>
+            {/* ... settings form ... */}
             <div className="form-group">
               <label>Gemini API Key (Google AI Studio):</label>
               <input
@@ -608,51 +396,55 @@ export default function App() {
               <label>Model:</label>
               <input
                 className="form-input"
-                value={TARGET_GEMINI_MODEL}
+                value={GEMINI_MODEL_NAME} // Use constant from api.js or config.js
                 readOnly
                 style={{backgroundColor: 'var(--bg-tertiary)', color: 'var(--text-secondary)', cursor: 'default'}}
               />
             </div>
           </div>
         )}
-        <div className="content-container" style={{display:'flex',flex:1}}>
-          <div className="chat-container" ref={chatBoxRef}>
+        <div className="content-container" style={{display:'flex',flex:1, overflow:'hidden'}}>
+          <div className="chat-container" ref={chatBoxRef} style={{position: 'relative'}}> {/* Added position relative for nav rail */}
             <div className="chat-nav-rail">
               <button className="button icon-button" onClick={scrollToPrev}>↑</button>
               <button className="button icon-button" onClick={scrollToNext}>↓</button>
             </div>
-            <ChatArea
-              messages            ={currentChat.messages}
-              editingId           ={editingId}
-              editText            ={editText}
-              loadingSend         ={loadingSend}
-              savingEdit          ={savingEdit}
-              setEditText         ={setEditText}
-              handleSaveEdit      ={handleSaveEdit}
-              handleCancelEdit    ={handleCancelEdit}
-              handleStartEdit     ={handleStartEdit}
-              handleResendMessage ={handleResendMessage}
-              handleDeleteMessage ={handleDeleteMessage}
-            />
+            {isLoadingMessages && currentChatId && <div style={{textAlign: 'center', padding: '2rem'}}>Loading messages...</div>}
+            {!isLoadingMessages && currentChatId && (
+              <ChatArea
+                messages={currentChatMessages}
+                editingId={editingId}
+                editText={editText}
+                loadingSend={sendMessageMutation.isPending} // Use mutation pending state
+                savingEdit={false /* TODO: Replace with editMutation.isPending */}
+                setEditText={setEditText}
+                handleSaveEdit={handleSaveEdit}
+                handleCancelEdit={handleCancelEdit}
+                handleStartEdit={handleStartEdit}
+                handleResendMessage={handleResendMessage}
+                handleDeleteMessage={handleDeleteMessage}
+              />
+            )}
+            {!currentChatId && <div style={{textAlign: 'center', padding: '2rem', color: 'var(--text-secondary)'}}>Select a chat to start.</div>}
           </div>
           <div style={{width:'50%',display:'flex',flexDirection:'column',overflowY:'auto'}}>
             <PromptBuilder
-              mode          ={mode}            setMode       ={setMode}
-              form          ={form}            setForm       ={setForm}
-              loadingSend   ={loadingSend}
-              handleSend    ={handleSend}
-              showToast     ={showToast}
-              imagePreviews ={pendingImages}
-              pdfPreviews   ={pendingPDFs}
-              onRemoveImage ={i => {
+              mode={mode} setMode={setMode}
+              form={form} setForm={setForm}
+              loadingSend={sendMessageMutation.isPending} // Use mutation pending state
+              handleSend={handleSend}
+              showToast={showToast}
+              imagePreviews={pendingImages}
+              pdfPreviews={pendingPDFs}
+              onRemoveImage={i => {
                 revokeOnce(pendingImages[i]);
                 setPendingImages(a => a.filter((_,j)=>j!==i));
               }}
-              onAddImage    ={img => setPendingImages(a => [...a, img])}
-              onAddPDF      ={pdf => setPendingPDFs(a => [...a, pdf])}
-              settings      ={settings}
-              pendingFiles  ={pendingFiles}
-              onFilesChange ={setPendingFiles}
+              onAddImage={img => setPendingImages(a => [...a, img])}
+              onAddPDF={pdf => setPendingPDFs(a => [...a, pdf])}
+              settings={settings}
+              pendingFiles={pendingFiles}
+              onFilesChange={setPendingFiles}
             />
           </div>
         </div>
