@@ -71,7 +71,7 @@ function buildNewUserPromptText(currentForm, currentMode, currentPendingFiles) {
       });
       return out.join('\n');
     }
-    if (currentMode === 'COMMIT') return 'MODE: COMMIT\nPlease generate a git-style commit message.';
+    if (currentMode === 'COMMIT') return 'MODE: COMMIT\nGenerate a git-style commit message for everything accomplished since last commit. If there was no previous commit, generate a commit message based on everything accomplished. Be detailed and comprehensive';
     if (currentMode === 'CODE CHECK') return 'MODE: CODE CHECK\nPlease analyze any errors or pitfalls.';
     return '';
 }
@@ -92,20 +92,29 @@ export default function App() {
   const [mode, setMode] = useMode();
 
   const [apiCalculatedTokenCount, setApiCalculatedTokenCount] = useState(0);
-  // isCountingApiTokens reflects the state of the debounced token counting worker.
-  // It is intentionally kept separate from globalBusy and button loading states
-  // to prevent UI flicker for this background operation.
   const [isCountingApiTokens, setIsCountingApiTokens] = useState(false);
   const tokenCountVersionRef = useRef(0); 
   const debouncedApiCallRef = useRef(null);
 
   const chatContainerRef = useRef(null);
 
+  // Fetch messages for the current chat.
+  // - `enabled: !!currentChatId`: Only fetches if a chat is selected.
+  // - `staleTime: Infinity`: Data is considered fresh indefinitely once fetched.
+  //   It will only refetch if the query key changes (currentChatId) or if explicitly invalidated.
+  // - `refetchOnMount: true`: Fetches when the chat is first focused (query becomes enabled)
+  //   if data is not in cache or is considered stale (which it always is with staleTime: Infinity,
+  //   forcing a fetch on first view unless data is already perfectly cached and fresh).
+  // - `refetchOnWindowFocus: false`, `refetchOnReconnect: false`: Prevents refetches on these events
+  //   for individual chat messages, relying on explicit invalidations for updates.
   const { data: currentChatMessagesData, isLoading: isLoadingMessages } = useQuery({
     queryKey: ['messages', currentChatId],
     queryFn: () => fetchMessages(currentChatId),
     enabled: !!currentChatId,
-    staleTime: 1000 * 60 * 2, 
+    staleTime: Infinity, 
+    refetchOnMount: true, 
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
   const currentChatMessages = currentChatMessagesData || [];
 
@@ -367,18 +376,12 @@ export default function App() {
     }
   });
 
-  // `globalBusy` should reflect operations that make the entire app or major parts of it
-  // non-interactive. Background token counting (`isCountingApiTokens`) is excluded
-  // to prevent UI flicker for a non-blocking background task.
   const globalBusy = useMemo(() => 
     createChatMutation.isPending || 
     deleteChatMutation.isPending || 
-    // sendMessageMutation.isPending is handled by specific loadingSend prop for PromptBuilder
     updateChatTitleMutation.isPending ||
-    deleteMessageMutation.isPending || // Message actions are disabled by ChatArea's loadingSend/actionsDisabled
+    deleteMessageMutation.isPending || 
     undoDeleteMessageMutation.isPending ||
-    // editMessageMutation.isPending is handled by specific loadingSend/savingEdit in ChatArea
-    // resendMessageMutation.isPending is handled by specific loadingSend in ChatArea
     undoDeleteChatMutation.isPending,
   [
     createChatMutation.isPending, 
@@ -389,11 +392,10 @@ export default function App() {
     undoDeleteChatMutation.isPending,
   ]);
   
-  // Specific loading state for send-like actions on PromptBuilder
   const promptBuilderLoadingSend = useMemo(() => 
     sendMessageMutation.isPending || 
-    editMessageMutation.isPending || // If an edit is triggered from PromptBuilder (future feature?)
-    resendMessageMutation.isPending, // If resend is triggered from PromptBuilder (future feature?)
+    editMessageMutation.isPending || 
+    resendMessageMutation.isPending,
   [
     sendMessageMutation.isPending,
     editMessageMutation.isPending,
@@ -461,6 +463,7 @@ export default function App() {
 
   const handleNewChatTrigger = useCallback((data = {}) => {
     if (createChatMutation.isPending) return;
+    // "New Chat" now directly creates a chat in the DB.
     createChatMutation.mutate({ title: data.title || 'New Chat', model: data.model || GEMINI_MODEL_NAME });
   }, [createChatMutation]);
 
@@ -485,10 +488,13 @@ export default function App() {
   }
 
   function handleSend() {
-    // Disable send if these specific mutations are pending, or if globalBusy is true for other reasons
-    if (sendMessageMutation.isPending || editMessageMutation.isPending || resendMessageMutation.isPending || globalBusy) {
+    if (promptBuilderLoadingSend || globalBusy) { // Check specific send-like loading or general global busy
       if(!currentChatId) Toast("Please select or create a chat first.", 3000);
       return;
+    }
+    if (!currentChatId) { // Ensure currentChatId is not null/undefined before proceeding
+        Toast("Please select or create a chat first.", 3000);
+        return;
     }
     if (!settings.apiKey || String(settings.apiKey).trim() === "") {
       Toast("Gemini API Key is missing. Please set it in settings.", 5000);
@@ -532,6 +538,7 @@ export default function App() {
   }
   
   const handleSaveEditTrigger = useCallback(() => { 
+    // Check specific edit mutation pending or global busy
     if (!editingId || !currentChatId || editMessageMutation.isPending || globalBusy) return;
     if (!settings.apiKey) {
         Toast("API Key not set. Cannot save edit.", 4000); return;
@@ -575,6 +582,7 @@ export default function App() {
   }, [editingId, editText, currentChatId, currentChatMessages, editMessageMutation, settings.apiKey, globalBusy, handleCancelEdit]);
   
   const handleResendMessageTrigger = useCallback((messageId) => { 
+    // Check specific resend mutation pending or global busy
     if (!currentChatId || resendMessageMutation.isPending || globalBusy) return;
     if (!settings.apiKey) {
         Toast("API Key not set. Cannot resend.", 4000); return;
@@ -587,6 +595,7 @@ export default function App() {
   }, [currentChatId, currentChatMessages, resendMessageMutation, settings.apiKey, globalBusy]);
 
   const handleDeleteMessageTrigger = useCallback((messageId) => {
+    // Check specific delete mutation pending or global busy
     if (deleteMessageMutation.isPending || !currentChatId || globalBusy) return;
     if (window.confirm('Are you sure you want to delete this message? You can undo this action from the toast.')) {
       deleteMessageMutation.mutate(messageId);
@@ -745,7 +754,7 @@ export default function App() {
             <PromptBuilder
               mode={mode} setMode={setMode}
               form={form} setForm={setForm}
-              loadingSend={promptBuilderLoadingSend} // Use the more specific loading state for button text
+              loadingSend={promptBuilderLoadingSend} 
               handleSend={handleSend}
               showToast={Toast}
               imagePreviews={pendingImages}
