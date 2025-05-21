@@ -2,7 +2,7 @@
    File: src/api.js
 ====================================================================== */
 
-console.log('API.JS FILE LOADED (for @google/genai & TanStack Query) - VERSION TQ_002_UNDO - TIMESTAMP', new Date().toISOString());
+console.log('API.JS FILE LOADED (for @google/genai & TanStack Query) - VERSION TQ_003_EDIT_RESEND_FIXED - TIMESTAMP', new Date().toISOString());
 
 import { supabase }                      from './lib/supabase.js'
 import { OPENAI_TIMEOUT_MS }             from './config.js'
@@ -17,7 +17,6 @@ export const CHATS_PAGE_LIMIT = 20;
 
 const isoNow = () => new Date().toISOString()
 
-// ... (validateKey, convertImageUrlToPart, getCurrentUser, callApiForText - remain unchanged) ...
 function validateKey(raw = '') {
   const key = raw ? raw.trim() : '';
   if (!/^[A-Za-z0-9_\-]{30,60}$/.test(key)) {
@@ -66,12 +65,12 @@ export async function getCurrentUser({ forceRefresh = false } = {}) {
 
 export async function callApiForText({
   messages = [],
-  apiKey   = '',
+  apiKey   = '', // apiKey is now explicitly passed
   signal
 } = {}) {
   let validatedKey;
   try {
-    validatedKey = validateKey(apiKey);
+    validatedKey = validateKey(apiKey); // Use the passed apiKey
   } catch (err) {
     throw err; 
   }
@@ -184,9 +183,7 @@ export async function callApiForText({
   }
 }
 
-
 export async function fetchChats({ pageParam = 1 }) {
-    // ... (fetchChats - unchanged) ...
   const user = await getCurrentUser();
   const limit = CHATS_PAGE_LIMIT;
   const offset = (pageParam - 1) * limit;
@@ -207,7 +204,6 @@ export async function fetchChats({ pageParam = 1 }) {
 }
 
 export async function createChat({ title = 'New Chat', model = GEMINI_MODEL_NAME }) {
-    // ... (createChat - unchanged) ...
   const user = await getCurrentUser();
   const { data, error } = await supabase
     .from('chats')
@@ -219,19 +215,19 @@ export async function createChat({ title = 'New Chat', model = GEMINI_MODEL_NAME
 }
 
 export async function updateChatTitle(id, newTitle) {
-    // ... (updateChatTitle - unchanged) ...
   const user = await getCurrentUser(); 
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('chats')
     .update({ title: newTitle })
     .eq('id', id)
-    .eq('user_id', user.id); 
+    .eq('user_id', user.id)
+    .select() 
+    .single(); 
   if (error) throw error;
-  return { success: true, id, title: newTitle };
+  return data; 
 }
 
 export async function deleteChat(id) {
-    // ... (deleteChat - unchanged) ...
   const user = await getCurrentUser(); 
   const { error } = await supabase
     .from('chats')
@@ -243,7 +239,6 @@ export async function deleteChat(id) {
 }
 
 export async function fetchMessages(chat_id) {
-    // ... (fetchMessages - unchanged) ...
   if (!chat_id) return [];
   const { data, error } = await supabase
     .from('messages')
@@ -256,7 +251,6 @@ export async function fetchMessages(chat_id) {
 }
 
 export async function createMessage({ chat_id, role, content }) {
-    // ... (createMessage - unchanged) ...
   const { data, error } = await supabase
     .from('messages')
     .insert({ chat_id, role, content })
@@ -266,11 +260,10 @@ export async function createMessage({ chat_id, role, content }) {
   return data;
 }
 
-export async function updateMessage(id, newContentArray) {
-    // ... (updateMessage - unchanged) ...
+export async function updateMessage(id, newContent) {
   const { data, error } = await supabase
     .from('messages')
-    .update({ content: newContentArray })
+    .update({ content: newContent, updated_at: isoNow() })
     .eq('id', id)
     .select()
     .single();
@@ -279,7 +272,6 @@ export async function updateMessage(id, newContentArray) {
 }
 
 export async function archiveMessagesAfter(chat_id, anchorCreatedAt) {
-    // ... (archiveMessagesAfter - unchanged) ...
   const { error } = await supabase
     .from('messages')
     .update({ deleted_at: isoNow() })
@@ -290,7 +282,6 @@ export async function archiveMessagesAfter(chat_id, anchorCreatedAt) {
 }
 
 export async function deleteMessage(id) {
-    // ... (deleteMessage - unchanged, already soft deletes) ...
   const { error } = await supabase
     .from('messages')
     .update({ deleted_at: isoNow() }) 
@@ -299,18 +290,13 @@ export async function deleteMessage(id) {
   return { success: true, id }; 
 }
 
-/**
- * Reverts a soft delete on a message.
- * @param {string} id - The ID of the message to undelete.
- * @returns {Promise<{success: boolean, id: string}>}
- */
 export async function undoDeleteMessage(id) {
-  // For simplicity, we're just clearing deleted_at.
-  // A more robust undo might check if it was deleted within a certain timeframe.
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('messages')
     .update({ deleted_at: null })
-    .eq('id', id);
+    .eq('id', id)
+    .select()
+    .single();
   if (error) throw error;
-  return { success: true, id };
+  return data;
 }

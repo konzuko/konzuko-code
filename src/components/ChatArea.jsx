@@ -13,14 +13,15 @@ function ChatArea({
   messages = [],
   editingId,
   editText,
-  loadingSend,
-  savingEdit,
+  loadingSend, // This now reflects a broader "busy" state for sending/editing/resending
+  savingEdit,  // Specifically for the "Save" button when editing
   setEditText,
   handleSaveEdit,
   handleCancelEdit,
   handleStartEdit,
   handleResendMessage,
-  handleDeleteMessage // Receives handleDeleteMessageTrigger from App.jsx
+  handleDeleteMessage,
+  actionsDisabled // New prop to disable all actions if App is globally busy
 }) {
   const [copyMessage] = useCopyToClipboard();
   let assistantMessageCounter = 0;
@@ -41,11 +42,12 @@ function ChatArea({
                            !editingId;
 
         const doCopy = () => copyMessage(flatten(m.content));
+        const currentMessageIsBeingEdited = m.id === editingId;
 
         return (
           <div key={m.id} className={`message message-${m.role}`}> 
             <div className="floating-controls">
-              {isAsst && (
+              {isAsst && !actionsDisabled && ( // Check actionsDisabled
                 <button
                   className="button icon-button"
                   title="Copy entire message"
@@ -57,28 +59,21 @@ function ChatArea({
             </div>
             <div className="message-header">
               <span className="message-role">
-                {isAsst ? (
-                  <>
-                    <span className="assistant-message-number">#{currentAssistantNumber}</span>
-                    {' assistant'}
-                  </>
-                ) : (
-                  m.role
-                )}
+                {isAsst ? ( /* ... role display ... */ <><span className="assistant-message-number">#{currentAssistantNumber}</span> assistant</> ) : m.role }
               </span>
               <div className="message-actions">
-                {m.id === editingId ? (
+                {currentMessageIsBeingEdited ? (
                   <>
                     <button
                       className="button"
-                      disabled={loadingSend || savingEdit}
-                      onClick={handleSaveEdit} // This will call App's handleSaveEdit
+                      disabled={savingEdit || actionsDisabled} // Use savingEdit for this specific button
+                      onClick={handleSaveEdit}
                     >
                       {savingEdit ? 'Saving…' : 'Save'}
                     </button>
                     <button
                       className="button"
-                      disabled={loadingSend} // Ensure this is connected to the edit mutation's pending state
+                      disabled={actionsDisabled} // General disable
                       onClick={handleCancelEdit}
                     >
                       Cancel
@@ -86,14 +81,14 @@ function ChatArea({
                   </>
                 ) : (
                   <>
-                    <button className="button icon-button" onClick={doCopy} title="Copy message text">
+                    <button className="button icon-button" onClick={doCopy} title="Copy message text" disabled={actionsDisabled}>
                       Copy
                     </button>
                     {isLastUser && (
                       <>
                         <button
                           className="button icon-button"
-                          disabled={loadingSend} // Ensure this is connected to app-wide busy or specific edit states
+                          disabled={loadingSend || actionsDisabled} // loadingSend covers send/edit/resend
                           onClick={() => handleStartEdit(m)}
                           title="Edit message"
                         >
@@ -101,19 +96,19 @@ function ChatArea({
                         </button>
                         <button
                           className="button icon-button"
-                          disabled={loadingSend} // Ensure this is connected to app-wide busy or specific resend states
-                          onClick={() => handleResendMessage(m.id)} // Calls App's handleResendMessage
+                          disabled={loadingSend || actionsDisabled} // loadingSend covers send/edit/resend
+                          onClick={() => handleResendMessage(m.id)}
                           title="Resend message"
                         >
                           Resend
                         </button>
                       </>
                     )}
-                    {handleDeleteMessage && ( // Conditionally render if handler is provided
+                    {handleDeleteMessage && (
                         <button
                           className="button icon-button"
-                          disabled={loadingSend} // Or a message-specific delete pending state
-                          onClick={() => handleDeleteMessage(m.id)} // Calls App's handleDeleteMessageTrigger
+                          disabled={loadingSend || actionsDisabled} // loadingSend covers send/edit/resend/delete
+                          onClick={() => handleDeleteMessage(m.id)}
                           title="Delete message"
                         >
                           Del
@@ -124,9 +119,9 @@ function ChatArea({
               </div>
             </div>
             <div className="message-content">
-              {m.id === editingId ? (
+              {currentMessageIsBeingEdited ? (
                 <textarea
-                  rows={5} // Slightly larger
+                  rows={5}
                   style={{ width: '100%', fontSize: '0.95rem', padding: 'var(--space-sm)', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
                   value={editText}
                   onInput={e => setEditText(e.target.value)}
@@ -142,26 +137,19 @@ function ChatArea({
   );
 }
 
-// Memoization: TQ usually ensures stable data references if data hasn't changed.
-// This custom comparator can be useful if props other than `messages` change frequently
-// and you want to avoid re-renders based on deep message content.
-// However, if `messages` is the primary driver, TQ's default behavior + React.memo might be enough.
 function areEqual(prev, next) {
   if (prev.editingId   !== next.editingId)   return false;
   if (prev.editText    !== next.editText)    return false;
-  if (prev.loadingSend !== next.loadingSend) return false; // From App.jsx (sendMessageMutation.isPending)
-  if (prev.savingEdit  !== next.savingEdit)  return false; // From App.jsx (editMessageMutation.isPending)
+  if (prev.loadingSend !== next.loadingSend) return false;
+  if (prev.savingEdit  !== next.savingEdit)  return false;
+  if (prev.actionsDisabled !== next.actionsDisabled) return false; // Check new prop
 
-  if (prev.messages === next.messages) return true; // Quick exit if reference is same
+  if (prev.messages === next.messages) return true;
   if (prev.messages.length !== next.messages.length) return false;
   if (!prev.messages.length && !next.messages.length) return true;
 
-  // More robust check if message content itself can change without ID changing (e.g. streaming)
-  // or if order can change. For TQ, usually the array reference changes if content changes.
   for (let i = 0; i < prev.messages.length; i++) {
     if (prev.messages[i].id !== next.messages[i].id) return false;
-    // Only compare checksum if IDs are same but content might differ (e.g. if content is mutable)
-    // If TQ guarantees new message objects for new content, ID check is often enough.
     if (getChecksum(prev.messages[i]) !== getChecksum(next.messages[i])) return false;
   }
   return true;
