@@ -92,7 +92,7 @@ export default function FilePane({
 
   onAddImage,
   onAddPDF,
-  settings // IMPORTANT: This prop carries the API key
+  settings 
 }) {
   const [adding, setAdding]           = useState(false);
   const [projectRoot, setProjectRoot] = useState(null);
@@ -239,23 +239,35 @@ export default function FilePane({
         Toast('File picker is not supported in this browser.', 4000);
         return;
     }
+    let handles;
     try {
-      setAdding(true);
-      const handles = await window.showOpenFilePicker({
-        multiple: true,
-        types: [{
-          description: 'Images',
-          accept: {
-            'image/png': ['.png'],
-            'image/jpeg': ['.jpg', '.jpeg'],
-            'image/webp': ['.webp'],
-            'image/gif': ['.gif'],
-          }
-        }]
-      });
+        handles = await window.showOpenFilePicker({
+            multiple: true,
+            types: [{
+                description: 'Images',
+                accept: {
+                    'image/png': ['.png'],
+                    'image/jpeg': ['.jpg', '.jpeg'],
+                    'image/webp': ['.webp'],
+                    'image/gif': ['.gif'],
+                }
+            }]
+        });
+    } catch (pickerErr) {
+        if (pickerErr.name !== 'AbortError') {
+            Toast('Image picker error: ' + pickerErr.message, 4000);
+        }
+        return; // Exit if picker fails or is aborted
+    }
 
-      for (const h of handles) {
+    setAdding(true);
+    const failedUploads = [];
+
+    for (const h of handles) {
+      let currentFileName = "Unnamed file";
+      try {
         const file = await h.getFile();
+        currentFileName = file.name; 
         const blob = await compressImageToWebP(file, 1024, 0.85);
 
         const path = `public/images/${crypto.randomUUID()}.webp`;
@@ -269,15 +281,23 @@ export default function FilePane({
         if (pubErr) throw pubErr;
 
         onAddImage?.({ name: file.name, url: pub.publicUrl, revoke: null });
+      } catch (fileProcessingErr) {
+        console.error(`Error processing image ${currentFileName}:`, fileProcessingErr);
+        failedUploads.push({ name: currentFileName, reason: fileProcessingErr.message });
       }
-    } catch (err) {
-      if (err.name !== 'AbortError') {
-        console.error("Add images error:", err);
-        Toast('Add images error: ' + err.message, 4000);
-      }
-    } finally {
-      setAdding(false);
     }
+
+    if (failedUploads.length > 0) {
+        const errorLimit = 3;
+        let summary = `${failedUploads.length} image${failedUploads.length > 1 ? 's' : ''} failed to upload: `;
+        summary += failedUploads.slice(0, errorLimit).map(f => f.name).join(', ');
+        if (failedUploads.length > errorLimit) {
+            summary += ` and ${failedUploads.length - errorLimit} more.`;
+        }
+        summary += " Check console for details."
+        Toast(summary, 5000);
+    }
+    setAdding(false);
   }, [onAddImage]);
 
   const handlePasteImage = useCallback(async () => {
@@ -288,6 +308,7 @@ export default function FilePane({
     try {
       setAdding(true);
       const items = await navigator.clipboard.read();
+      let imagePasted = false;
       for (const it of items) {
         const mime = it.types.find(t => t.startsWith('image/'));
         if (!mime) continue;
@@ -308,7 +329,11 @@ export default function FilePane({
 
         onAddImage?.({ name, url: pub.publicUrl, revoke: null });
         Toast('Image pasted & added', 1500);
-        break;
+        imagePasted = true;
+        break; 
+      }
+      if (!imagePasted) {
+          Toast('No image found in clipboard.', 3000);
       }
     } catch (err) {
       if (err.name === 'NotAllowedError') {
@@ -323,52 +348,45 @@ export default function FilePane({
   }, [onAddImage]);
 
   const handleAddPDF = useCallback(async () => {
-    console.log('-----> [FilePane - handleAddPDF] TOP OF FUNCTION REACHED <-----');
+    if (!settings || !settings.apiKey || String(settings.apiKey).trim() === "") {
+      Toast('Gemini API Key not set. Please set it in application settings.', 4000);
+      return;
+    }
+    if (!window.showOpenFilePicker) {
+      Toast('File picker is not supported in this browser.', 4000);
+      return;
+    }
 
-    console.log('[FilePane - handleAddPDF] Function called (after top log).');
-    console.log('[FilePane - handleAddPDF] Received settings prop:', settings);
-
-    if (!settings) {
-        Toast('Critical Error: The settings object is missing entirely. Cannot proceed with PDF upload.', 6000);
-        console.error('[FilePane - handleAddPDF] The "settings" prop is undefined or null.');
+    let handles;
+    try {
+        handles = await window.showOpenFilePicker({
+            multiple: true,
+            types: [{ description: 'PDF', accept: { 'application/pdf': ['.pdf'] } }]
+        });
+    } catch (pickerErr) {
+        if (pickerErr.name !== 'AbortError') {
+            Toast('PDF picker error: ' + pickerErr.message, 4000);
+        }
+        return; // Exit if picker fails or is aborted
+    }
+    
+    setAdding(true);
+    const failedUploads = [];
+    let genAI;
+    try {
+        genAI = new GoogleGenAI({ apiKey: settings.apiKey });
+    } catch(sdkErr) {
+        Toast('Failed to initialize Gemini SDK: ' + sdkErr.message, 5000);
         setAdding(false);
         return;
     }
 
-    console.log('[FilePane - handleAddPDF] Value of settings.apiKey:', settings.apiKey);
-    console.log('[FilePane - handleAddPDF] Type of settings.apiKey:', typeof settings.apiKey);
-
-    if (!settings.apiKey || String(settings.apiKey).trim() === "") {
-      Toast('Gemini API Key not set. Please set it in the application settings.', 4000);
-      console.warn('[FilePane - handleAddPDF] API Key check failed: Key is missing or empty. Value was:', `"${settings.apiKey}"`);
-      setAdding(false);
-      return;
-    }
-
-    if (!window.showOpenFilePicker) {
-      Toast('File picker is not supported in this browser.', 4000);
-      console.warn('[FilePane - handleAddPDF] showOpenFilePicker not available.');
-      setAdding(false);
-      return;
-    }
-
-    try {
-      setAdding(true);
-      console.log('[FilePane - handleAddPDF] Attempting to instantiate GoogleGenAI with options:', { apiKey: settings.apiKey ? `"${settings.apiKey.substring(0,5)}..." (length ${settings.apiKey.length})` : "undefined/empty" });
-      const genAI = new GoogleGenAI({ apiKey: settings.apiKey });
-      console.log('[FilePane - handleAddPDF] GoogleGenAI instantiated successfully.');
-
-      const handles = await window.showOpenFilePicker({
-        multiple: true,
-        types: [{ description: 'PDF', accept: { 'application/pdf': ['.pdf'] } }]
-      });
-      console.log(`[FilePane - handleAddPDF] Selected ${handles.length} PDF file(s).`);
-
-      for (const h of handles) {
+    for (const h of handles) {
+      let currentFileName = "Unnamed PDF";
+      try {
         const file = await h.getFile();
-        console.log(`[FilePane - handleAddPDF] Processing file: ${file.name}, type: ${file.type}, size: ${file.size}`);
+        currentFileName = file.name;
 
-        console.log(`[FilePane - handleAddPDF] Calling genAI.files.upload for ${file.name}`);
         const uploadedFile = await genAI.files.upload({
           file: file,
           config: {
@@ -376,33 +394,34 @@ export default function FilePane({
             displayName: file.name,
           }
         });
-        console.log(`[FilePane - handleAddPDF] Uploaded file response for ${file.name}:`, uploadedFile);
         
-        // *** THE FIX IS HERE: Use uploadedFile.uri for fileId ***
         if (uploadedFile && uploadedFile.uri && uploadedFile.name) {
           onAddPDF?.({
-            name: file.name, // Original file name for display
-            fileId: uploadedFile.uri, // Use the full URI for generateContent
+            name: file.name, 
+            fileId: uploadedFile.uri, 
             mimeType: uploadedFile.mimeType || 'application/pdf',
-            resourceName: uploadedFile.name // Store the short name if needed for delete/get
+            resourceName: uploadedFile.name 
           });
-          console.log(`[FilePane - handleAddPDF] Successfully processed and added PDF: ${file.name} (Gemini URI: ${uploadedFile.uri})`);
         } else {
-          console.error(`[FilePane - handleAddPDF] Gemini file upload for ${file.name} did not return expected data (missing name or uri). Response:`, uploadedFile);
           throw new Error(`Gemini file upload for ${file.name} did not return expected data.`);
         }
+      } catch (fileProcessingErr) {
+        console.error(`[FilePane - handleAddPDF] Error processing PDF ${currentFileName}:`, fileProcessingErr, fileProcessingErr.stack);
+        failedUploads.push({ name: currentFileName, reason: fileProcessingErr.message });
       }
-    } catch (err) {
-      if (err.name !== 'AbortError') {
-        Toast('PDF upload error: ' + err.message, 4000);
-        console.error("[FilePane - handleAddPDF] PDF Upload Error (Gemini):", err, err.stack);
-      } else {
-        console.log('[FilePane - handleAddPDF] PDF upload aborted by user.');
-      }
-    } finally {
-      setAdding(false);
-      console.log('[FilePane - handleAddPDF] Operation finished, setAdding to false.');
     }
+
+    if (failedUploads.length > 0) {
+        const errorLimit = 3;
+        let summary = `${failedUploads.length} PDF${failedUploads.length > 1 ? 's' : ''} failed to upload: `;
+        summary += failedUploads.slice(0, errorLimit).map(f => f.name).join(', ');
+        if (failedUploads.length > errorLimit) {
+            summary += ` and ${failedUploads.length - errorLimit} more.`;
+        }
+        summary += " Check console for details."
+        Toast(summary, 5000);
+    }
+    setAdding(false);
   }, [onAddPDF, settings]);
 
   useEffect(() => {
@@ -511,3 +530,4 @@ export default function FilePane({
     </div>
   );
 }
+
