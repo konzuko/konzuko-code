@@ -145,7 +145,7 @@ export default function App() {
       if (currentChatId === chatId) {
           setCurrentChatId(null); 
       }
-      Toast('Chat deleted.', 3000);
+      Toast('Chat deleted.', 3000); // TODO: Consider adding Undo for chat deletion
     },
     onError: (error) => {
       Toast('Failed to delete chat: ' + error.message, 5000);
@@ -355,7 +355,9 @@ export default function App() {
 
   const handleDeleteChatTrigger = useCallback((id) => {
     if (deleteChatMutation.isPending) return;
-    deleteChatMutation.mutate(id);
+    if (window.confirm('Are you sure you want to delete this chat? This action cannot be undone directly (no undo toast).')) {
+      deleteChatMutation.mutate(id);
+    }
   }, [deleteChatMutation]);
 
   const handleUpdateChatTitleTrigger = useCallback((id, title) => {
@@ -404,6 +406,11 @@ export default function App() {
     });
   }
   
+  const handleCancelEdit = useCallback(() => { 
+    setEditing(null); 
+    setEditText(''); 
+  }, []);
+  
   function handleStartEdit(msg) { 
     setEditing(msg.id); 
     const textContent = Array.isArray(msg.content) 
@@ -411,7 +418,6 @@ export default function App() {
       : String(msg.content || '');
     setEditText(textContent);
   }
-  function handleCancelEdit() { setEditing(null); setEditText(''); }
   
   const handleSaveEditTrigger = useCallback(() => { 
     if (!editingId || !currentChatId || editMessageMutation.isPending || globalBusy) return;
@@ -421,7 +427,7 @@ export default function App() {
     const originalMessage = currentChatMessages.find(m => m.id === editingId);
     if (!originalMessage) {
         Toast("Original message not found for editing.", 4000);
-        setEditing(null); setEditText('');
+        handleCancelEdit(); // Reset edit state
         return;
     }
     let newContentArray = [];
@@ -449,9 +455,8 @@ export default function App() {
       originalMessages: currentChatMessages,
       apiKey: settings.apiKey,
     });
-    setEditing(null); 
-    setEditText(''); 
-  }, [editingId, editText, currentChatId, currentChatMessages, editMessageMutation, settings.apiKey, globalBusy]);
+    handleCancelEdit(); // Reset edit state
+  }, [editingId, editText, currentChatId, currentChatMessages, editMessageMutation, settings.apiKey, globalBusy, handleCancelEdit]);
   
   const handleResendMessageTrigger = useCallback((messageId) => { 
     if (!currentChatId || resendMessageMutation.isPending || globalBusy) return;
@@ -467,8 +472,18 @@ export default function App() {
 
   const handleDeleteMessageTrigger = useCallback((messageId) => {
     if (deleteMessageMutation.isPending || !currentChatId || globalBusy) return;
-    deleteMessageMutation.mutate(messageId);
+    if (window.confirm('Are you sure you want to delete this message? You can undo this action from the toast.')) {
+      deleteMessageMutation.mutate(messageId);
+    }
   }, [deleteMessageMutation, currentChatId, globalBusy]);
+
+  // Effect to clear edit state when chat changes
+  useEffect(() => {
+    if (editingId) {
+      handleCancelEdit();
+    }
+  }, [currentChatId, editingId, handleCancelEdit]);
+
 
   const scrollToPrev = useCallback(() => {
     const box = chatContainerRef.current; if (!box) return;
@@ -519,12 +534,12 @@ export default function App() {
   const totalPromptTokenCount = useMemo(() => {
     let estimatedImageTokens = 0;
     estimatedImageTokens += pendingImages.length * IMAGE_TOKEN_ESTIMATE;
-    (currentChatMessages || []).forEach(msg => { // Iterate over 'msg'
+    (currentChatMessages || []).forEach(msg => { 
         const contentBlocks = Array.isArray(msg.content)
             ? msg.content
             : [{ type: 'text', text: String(msg.content ?? '') }];
-        contentBlocks.forEach(block => { // Iterate over 'block'
-            if (block.type === 'image_url' && block.image_url && block.image_url.url) { // Use 'block' here
+        contentBlocks.forEach(block => { 
+            if (block.type === 'image_url' && block.image_url && block.image_url.url) { 
                 estimatedImageTokens += IMAGE_TOKEN_ESTIMATE;
             }
         });
@@ -595,7 +610,7 @@ export default function App() {
                 messages={currentChatMessages}
                 editingId={editingId}
                 editText={editText}
-                loadingSend={sendMessageMutation.isPending || editMessageMutation.isPending || resendMessageMutation.isPending} // More specific for send-like ops
+                loadingSend={sendMessageMutation.isPending || editMessageMutation.isPending || resendMessageMutation.isPending}
                 savingEdit={editMessageMutation.isPending} 
                 setEditText={setEditText}
                 handleSaveEdit={handleSaveEditTrigger} 
@@ -636,3 +651,4 @@ export default function App() {
     </div>
   );
 }
+
