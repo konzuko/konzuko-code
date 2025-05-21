@@ -183,7 +183,6 @@ html, body {
   min-height: calc(1.5em + 8px); 
   display: flex; 
   align-items: center;
-  /* Removed .counting class specific style for opacity change */
 }
 
 .settings-panel {
@@ -200,11 +199,11 @@ html, body {
 }
 
 .chat-container {
-  position: relative; /* For .chat-nav-rail positioning */
+  position: relative; 
   width: 50%;
   display: flex; 
   flex-direction: column; 
-  overflow-y: auto; /* THIS IS CRITICAL for nav rail and scrolling messages */
+  overflow-y: auto; 
   padding: var(--space-md);
   border-right: 1px solid var(--border);
   background-color: var(--bg-primary);
@@ -220,23 +219,22 @@ html, body {
 }
 
 .chat-nav-rail {
-  position: sticky; /* Reverted to sticky for better scroll behavior */
+  position: sticky; 
   top: 50%; 
-  /* right: var(--space-sm); Removed, let it be outside content flow slightly */
-  float: right; /* Allows it to sit to the right without disrupting flow */
-  margin-right: -40px; /* Pull it outside the padding/content box, adjust as needed */
+  float: right; 
+  margin-right: -40px; 
   transform: translateY(-50%);
   display: flex;
   flex-direction: column;
   gap: var(--space-xs);
   z-index: 30;
-  width: 32px; /* Explicit width */
+  width: 32px; 
 }
 .chat-nav-rail .button {
   padding: var(--space-xs);
-  min-width: 32px; /* Match width */
-  height: 32px;  /* Make it square */
-  line-height: 1; /* For better text centering in button */
+  min-width: 32px; 
+  height: 32px;  
+  line-height: 1; 
 }
 
 .prompt-builder-area {
@@ -294,6 +292,8 @@ html, body {
   color: var(--text-primary);
   font-family: inherit;
   font-size: 0.95rem;
+  line-height: 1.5; 
+  overflow-y: hidden; 
 }
 .form-input:focus,
 .form-select:focus,
@@ -303,48 +303,63 @@ html, body {
   background-color: #2a2a2e; 
 }
 .form-textarea {
-  resize: vertical;
-  min-height: 60px;
+  resize: vertical; /* Allow manual vertical resize by user if desired */
+  min-height: 60px; 
+  /* max-height will be controlled by JS, but CSS can provide a fallback if needed */
 }
+
+/* Textarea specific for message editing in ChatArea */
+.editing-textarea {
+  width: 100%; 
+  font-size: 0.95rem; 
+  padding: var(--space-sm); 
+  background: var(--bg-tertiary); 
+  border: 1px solid var(--border); 
+  color: var(--text-primary);
+  line-height: 1.5; 
+  overflow-y: hidden;
+  resize: vertical;
+}
+
 
 .message {
   margin-bottom: var(--space-md);
-  padding: var(--space-sm) var(--space-md); /* Reduced padding slightly */
+  padding: var(--space-sm) var(--space-md); 
   border-radius: var(--radius);
-  width: auto; /* Let content define width up to max-width */
-  max-width: 85%; /* Allow messages to be a bit wider */
+  width: auto; 
+  max-width: 85%; 
   position: relative;
   animation: fadeIn 0.3s ease-out;
   clear: both; 
-  /* Add display: table or inline-block if float issues persist, but clear:both is usually enough */
 }
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(10px); }
   to   { opacity: 1; transform: translateY(0); }
 }
 .message-user {
-  background: #383838; /* Slightly lighter user message */
+  background: #383838; 
   margin-left: auto; 
   float: right; 
   border-top-right-radius: 0;
 }
 .message-assistant {
-  background: #2c3e50; /* A different shade of blue/grey */
+  background: #2c3e50; 
   margin-right: auto; 
   float: left; 
   border-top-left-radius: 0;
+  max-width: 100%; 
 }
 
 .message-header {
   display: flex;
   justify-content: space-between;
-  margin-bottom: var(--space-xs); /* Tighter spacing */
-  align-items: center; /* Vertically align role and actions */
+  margin-bottom: var(--space-xs); 
+  align-items: center; 
 }
 
 .message-role {
   font-weight: bold;
-  font-size: 0.75rem; /* Smaller role text */
+  font-size: 0.75rem; 
   text-transform: uppercase;
   display: flex;
   align-items: baseline;
@@ -352,7 +367,7 @@ html, body {
 .message-user .message-role { color: #ff8a80; } 
 .message-assistant .message-role { color: var(--text-secondary); }
 .assistant-message-number {
-  font-size: 1rem; /* Slightly smaller number */
+  font-size: 1rem; 
   font-weight: bold;
   color: var(--accent);
   margin-right: 0.3em;
@@ -369,7 +384,7 @@ html, body {
   opacity: 1; 
 }
 .message-actions .button.icon-button {
-    padding: 2px 4px; /* Smaller padding for action buttons */
+    padding: 2px 4px; 
     font-size: 0.75rem;
     min-width: auto;
 }
@@ -381,12 +396,12 @@ html, body {
   font-size: 0.95rem;
   line-height: 1.6; 
 }
-.message-content img { /* Style for images within messages */
+.message-content img { 
     max-width: 100%;
     max-height: 300px;
     border-radius: var(--radius);
     margin-top: var(--space-sm);
-    display: block; /* Or inline-block */
+    display: block; 
 }
 .message-content pre {
   background: var(--bg-primary);
@@ -395,13 +410,21 @@ html, body {
   overflow-x: auto;
   border: 1px solid var(--border);
   margin: var(--space-sm) 0;
+  font-size: 0.85rem; /* As per request for code blocks */
+  line-height: 1.4; 
+}
+.message-content pre code {
+  font-family: monospace; /* Explicitly monospace */
+  font-size: inherit; /* Inherit 1rem from pre tag */
+  line-height: inherit; /* Inherit line-height from pre */
+  /* CSS for syntax highlighting (colors, bolding) comes from highlight.js theme */
 }
 .message-content code:not(pre code) { 
   font-family: monospace;
   background: rgba(255,255,255,0.1);
   padding: 2px 5px;
-  border-radius: 3px;
-  font-size: 0.9em;
+  border-radius: 1px;
+  font-size: 0.9em; /* Relative to parent's (0.95rem) font-size */
 }
 
 .code-wrapper {
@@ -417,7 +440,7 @@ html, body {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 3px 8px; 
-  font-size: 0.75rem;
+  font-size: 0.6rem;
   opacity: 0.6; 
   cursor: pointer;
   transition: opacity var(--transition), background-color var(--transition), color var(--transition);
@@ -439,14 +462,13 @@ html, body {
   border: 1px solid var(--border);
   background-color: var(--bg-secondary);
   padding: var(--space-md);
-  /* margin-top: var(--space-md); Removed, PromptBuilder handles its layout */
   border-radius: var(--radius);
 }
 
 @media (max-width: 768px) {
   .sidebar {
     width: 100%;
-    height: 250px; 
+    height: 300px; 
     min-height: 200px;
     border-right: none;
     border-bottom: 1px solid var(--border);
@@ -468,13 +490,12 @@ html, body {
     width: 100%;
     height: auto; 
     flex-grow: 1;
-    /* min-height for sections, e.g., 50vh or a pixel value */
   }
    .chat-container {
-    min-height: 300px; /* Or some other value */
+    min-height: 300px; 
    }
    .prompt-builder-area {
-    min-height: 300px; /* Or some other value */
+    min-height: 300px; 
    }
 
 
@@ -486,17 +507,18 @@ html, body {
   }
 
   .message {
-    width: auto; /* Let it be natural within padding */
-    max-width: 95%; /* Take most of the width */
-    float: none; /* On mobile, allow them to stack without float */
-    margin-left: 0; /* Reset margins for mobile */
+    width: auto; 
+    max-width: 95%; 
+    float: none; 
+    margin-left: 0; 
     margin-right: 0;
   }
   .message-user {
-      margin-left: auto; /* Push to right on mobile still */
+      margin-left: auto; 
   }
   .message-assistant {
-      margin-right: auto; /* Push to left */
+      margin-right: auto; 
+      max-width: 100%; 
   }
 
   .chat-nav-rail { 
@@ -507,7 +529,8 @@ html, body {
     background: rgba(0,0,0,0.3);
     padding: var(--space-xs);
     border-radius: var(--radius);
-    float: none; /* No float on mobile */
+    float: none; 
     margin-right: 0;
   }
 }
+
