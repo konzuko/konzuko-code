@@ -25,8 +25,8 @@ function ensureRoot() {
   Object.assign(rootEl.style, {
     position   : 'fixed',
     bottom     : '20px',
-    left       : '50%',
-    transform  : 'translateX(-50%)',
+    left       : '90%', // Changed from 50% to move 40% to the right (center at 90vw)
+    transform  : 'translateX(-50%)', // Keeps the toast centered on its new 'left' position
     display    : 'flex',
     flexDirection: 'column',
     gap        : '8px',
@@ -115,4 +115,5 @@ export default function Toast(msg, ms = 4000, onAction) {
 
 /* named re-export for convenience */
 export const showToast = Toast;
+
 

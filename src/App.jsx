@@ -337,7 +337,7 @@ export default function App() {
     },
     onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['messages', currentChatId] });
-      Toast('Message edited and conversation continued.', 3000);
+      // Toast('Message edited and conversation continued.', 3000); // Toast removed as per request
     },
     onError: (error, variables, context) => {
       if (context?.previousMessages) {
