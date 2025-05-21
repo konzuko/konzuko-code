@@ -1,17 +1,18 @@
 // src/ChatList.jsx
-import { useEffect } from 'preact/hooks';
+import { useEffect, useCallback } from 'preact/hooks';
 import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
-import { fetchChats, createChat as apiCreateChat, GEMINI_MODEL_NAME } from './api.js';
+import { fetchChats, GEMINI_MODEL_NAME, createChat as apiCreateChat } from './api.js'; // Ensure apiCreateChat is imported
 import ChatPaneLayout from './ChatPaneLayout.jsx';
 import Toast from './components/Toast.jsx';
 
 export default function ChatList({
   currentChatId,
   onSelectChat,
-  // onNewChat, // Will be handled internally or via TQ mutation passed from App
-  // onTitleUpdate, // Will be handled via TQ mutation
-  // onDeleteChat, // Will be handled via TQ mutation
-  appDisabled // General disabled state from App
+  // These are now passed from App.jsx, where the TQ mutations are defined
+  onNewChatTrigger,      
+  onDeleteChatTrigger,   
+  onUpdateChatTitleTrigger,
+  appDisabled 
 }) {
   const queryClient = useQueryClient();
 
@@ -22,7 +23,7 @@ export default function ChatList({
     isLoading: isLoadingChats,
     isFetchingNextPage,
     error: chatsError,
-    isSuccess, // Added to check if initial fetch was successful
+    isSuccess, 
   } = useInfiniteQuery({
     queryKey: ['chats'],
     queryFn: ({ pageParam = 1 }) => fetchChats({ pageParam }),
@@ -31,45 +32,46 @@ export default function ChatList({
   });
 
   const allChats = data
-    ? data.pages.flatMap(page => page.chats.map(r => ({
+    ? data.pages.flatMap(page => page.chats?.map(r => ({ // Added optional chaining for page.chats
         id: r.id,
         title: r.title,
         started: r.created_at,
         model: r.code_type || GEMINI_MODEL_NAME,
-        messages: [] // Messages are fetched separately based on currentChatId
-      })))
+        messages: [] 
+      })) || []) // Ensure flatMap input is always an array
     : [];
 
-  // Handle automatic creation of a new chat if none exist after initial load
+  // Effect for creating an initial chat if none exist (runs only once after successful fetch)
   useEffect(() => {
-    if (isSuccess && data && data.pages[0]?.totalCount === 0 && allChats.length === 0) {
-      // No chats exist, let's create one.
-      // This mutation could also live in App.jsx if it needs more global side effects.
-      (async () => {
-        try {
-          console.log("No chats found, attempting to create an initial chat.");
-          const newChat = await apiCreateChat({ title: 'New Chat' });
-          queryClient.invalidateQueries({ queryKey: ['chats'] });
-          if (newChat && newChat.id) {
-            onSelectChat(newChat.id); // Select the newly created chat
-          }
-        } catch (err) {
-          Toast('Failed to create initial chat: ' + err.message, 5000);
-          console.error("Failed to create initial chat:", err);
+    if (isSuccess && data && data.pages[0]?.totalCount === 0 && !isLoadingChats) {
+      // Check if a chat creation is already in progress or just finished to avoid loops
+      const existingChatCreation = queryClient.getMutationCache().getAll().find(m => m.options.mutationKey?.[0] === 'createChat' && m.state.status === 'pending');
+      const chatsQueryData = queryClient.getQueryState(['chats']);
+      
+      if (!existingChatCreation && chatsQueryData && chatsQueryData.data && chatsQueryData.data.pages[0]?.totalCount === 0) {
+        console.log("[ChatList] No chats found on server, triggering initial chat creation via prop.");
+        if (onNewChatTrigger) { // Use the trigger from App.jsx
+            onNewChatTrigger({ title: 'First Chat', model: GEMINI_MODEL_NAME });
         }
-      })();
+      }
     }
-  }, [isSuccess, data, allChats.length, queryClient, onSelectChat]);
+  }, [isSuccess, data, isLoadingChats, queryClient, onNewChatTrigger]);
   
   // Auto-select first chat if none is selected and chats are loaded
   useEffect(() => {
-    if (!currentChatId && allChats.length > 0) {
+    if (!currentChatId && allChats.length > 0 && onSelectChat) {
         onSelectChat(allChats[0].id);
     }
-  }, [currentChatId, allChats, onSelectChat]);
+  }, [currentChatId, allChats, onSelectChat]); // allChats reference changes when data re-fetches
+
+  const handleLoadMore = useCallback(() => {
+    if (hasNextPage && !isFetchingNextPage) {
+      fetchNextPage();
+    }
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
 
-  if (isLoadingChats && !data) {
+  if (isLoadingChats && !data?.pages?.length) { // Show loader only if no pages are loaded yet
     return <div style={{ padding: '1rem', textAlign: 'center', color: 'var(--text-secondary)' }}>Loading chats...</div>;
   }
 
@@ -82,16 +84,15 @@ export default function ChatList({
       chats={allChats}
       currentChatId={currentChatId}
       onSelectChat={onSelectChat}
-      // Pass down functions for create/delete/update that App.jsx will provide (wired to TQ mutations)
-      // These are placeholders for now, App.jsx will provide the TQ-ified versions
-      onNewChat={() => queryClient.executeMutation({ mutationKey: ['createChat']})} // Example, actual call from App
-      onTitleUpdate={(id, title) => {/* call updateChatMutation from App */}}
-      onDeleteChat={(id) => {/* call deleteChatMutation from App */}}
+      // Pass down the mutation triggers from App.jsx
+      onNewChat={onNewChatTrigger}       
+      onTitleUpdate={onUpdateChatTitleTrigger} 
+      onDeleteChat={onDeleteChatTrigger}   
       
-      disabled={appDisabled || isLoadingChats || isFetchingNextPage}
+      disabled={appDisabled || isLoadingChats} // Disable if initial load is happening
       
       hasMoreChatsToFetch={hasNextPage}
-      onLoadMoreChats={fetchNextPage}
+      onLoadMoreChats={handleLoadMore}
       isLoadingMoreChats={isFetchingNextPage}
     />
   );

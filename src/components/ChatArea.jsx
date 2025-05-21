@@ -1,13 +1,9 @@
 // src/components/ChatArea.jsx
-/* --------------------------------------------------------------------
-   ChatArea – renders the conversation list
----------------------------------------------------------------------*/
-import { memo }             from 'preact/compat';
-import MessageItem          from './MessageItem.jsx';
-import useCopyToClipboard   from '../hooks/useCopyToClipboard.js';
-import { getChecksum }      from '../lib/checksumCache.js';
+import { memo } from 'preact/compat';
+import MessageItem from './MessageItem.jsx';
+import useCopyToClipboard from '../hooks/useCopyToClipboard.js';
+import { getChecksum } from '../lib/checksumCache.js';
 
-/* flatten helper */
 const flatten = c =>
   Array.isArray(c)
     ? c.filter(b => b.type === 'text').map(b => b.text).join('')
@@ -15,7 +11,6 @@ const flatten = c =>
 
 function ChatArea({
   messages = [],
-
   editingId,
   editText,
   loadingSend,
@@ -25,15 +20,15 @@ function ChatArea({
   handleCancelEdit,
   handleStartEdit,
   handleResendMessage,
-  handleDeleteMessage
+  handleDeleteMessage // Receives handleDeleteMessageTrigger from App.jsx
 }) {
   const [copyMessage] = useCopyToClipboard();
-  let assistantMessageCounter = 0; // Counter for assistant messages
+  let assistantMessageCounter = 0;
 
   return (
     <>
       {messages.map((m, idx) => {
-        const isAsst     = m.role === 'assistant';
+        const isAsst = m.role === 'assistant';
         let currentAssistantNumber = 0;
 
         if (isAsst) {
@@ -48,8 +43,7 @@ function ChatArea({
         const doCopy = () => copyMessage(flatten(m.content));
 
         return (
-          <div key={m.id} className={`message message-${m.role}`}>
-            {/* floating Copy for assistant rows */}
+          <div key={m.id} className={`message message-${m.role}`}> 
             <div className="floating-controls">
               {isAsst && (
                 <button
@@ -61,8 +55,6 @@ function ChatArea({
                 </button>
               )}
             </div>
-
-            {/* header */}
             <div className="message-header">
               <span className="message-role">
                 {isAsst ? (
@@ -74,20 +66,19 @@ function ChatArea({
                   m.role
                 )}
               </span>
-
               <div className="message-actions">
                 {m.id === editingId ? (
                   <>
                     <button
                       className="button"
                       disabled={loadingSend || savingEdit}
-                      onClick={handleSaveEdit}
+                      onClick={handleSaveEdit} // This will call App's handleSaveEdit
                     >
                       {savingEdit ? 'Saving…' : 'Save'}
                     </button>
                     <button
                       className="button"
-                      disabled={loadingSend}
+                      disabled={loadingSend} // Ensure this is connected to the edit mutation's pending state
                       onClick={handleCancelEdit}
                     >
                       Cancel
@@ -95,47 +86,48 @@ function ChatArea({
                   </>
                 ) : (
                   <>
-                    <button className="button icon-button" onClick={doCopy}>
+                    <button className="button icon-button" onClick={doCopy} title="Copy message text">
                       Copy
                     </button>
-
                     {isLastUser && (
                       <>
                         <button
                           className="button icon-button"
-                          disabled={loadingSend}
+                          disabled={loadingSend} // Ensure this is connected to app-wide busy or specific edit states
                           onClick={() => handleStartEdit(m)}
+                          title="Edit message"
                         >
                           Edit
                         </button>
                         <button
                           className="button icon-button"
-                          disabled={loadingSend}
-                          onClick={() => handleResendMessage(m.id)}
+                          disabled={loadingSend} // Ensure this is connected to app-wide busy or specific resend states
+                          onClick={() => handleResendMessage(m.id)} // Calls App's handleResendMessage
+                          title="Resend message"
                         >
                           Resend
                         </button>
                       </>
                     )}
-
-                    <button
-                      className="button icon-button"
-                      disabled={loadingSend}
-                      onClick={() => handleDeleteMessage(m.id)}
-                    >
-                      Del
-                    </button>
+                    {handleDeleteMessage && ( // Conditionally render if handler is provided
+                        <button
+                          className="button icon-button"
+                          disabled={loadingSend} // Or a message-specific delete pending state
+                          onClick={() => handleDeleteMessage(m.id)} // Calls App's handleDeleteMessageTrigger
+                          title="Delete message"
+                        >
+                          Del
+                        </button>
+                    )}
                   </>
                 )}
               </div>
             </div>
-
-            {/* body */}
             <div className="message-content">
               {m.id === editingId ? (
                 <textarea
-                  rows={4}
-                  style={{ width: '100%' }}
+                  rows={5} // Slightly larger
+                  style={{ width: '100%', fontSize: '0.95rem', padding: 'var(--space-sm)', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
                   value={editText}
                   onInput={e => setEditText(e.target.value)}
                 />
@@ -150,23 +142,29 @@ function ChatArea({
   );
 }
 
-/* memo comparator using WeakMap checksum */
+// Memoization: TQ usually ensures stable data references if data hasn't changed.
+// This custom comparator can be useful if props other than `messages` change frequently
+// and you want to avoid re-renders based on deep message content.
+// However, if `messages` is the primary driver, TQ's default behavior + React.memo might be enough.
 function areEqual(prev, next) {
   if (prev.editingId   !== next.editingId)   return false;
   if (prev.editText    !== next.editText)    return false;
-  if (prev.loadingSend !== next.loadingSend) return false;
-  if (prev.savingEdit  !== next.savingEdit)  return false;
+  if (prev.loadingSend !== next.loadingSend) return false; // From App.jsx (sendMessageMutation.isPending)
+  if (prev.savingEdit  !== next.savingEdit)  return false; // From App.jsx (editMessageMutation.isPending)
 
-  const a = prev.messages;
-  const b = next.messages;
-  if (a === b) return true;
+  if (prev.messages === next.messages) return true; // Quick exit if reference is same
+  if (prev.messages.length !== next.messages.length) return false;
+  if (!prev.messages.length && !next.messages.length) return true;
 
-  if (a.length !== b.length) return false;
-  if (!a.length)             return true;
-
-  const al = a[a.length - 1];
-  const bl = b[b.length - 1];
-  return al.id === bl.id && getChecksum(al) === getChecksum(bl);
+  // More robust check if message content itself can change without ID changing (e.g. streaming)
+  // or if order can change. For TQ, usually the array reference changes if content changes.
+  for (let i = 0; i < prev.messages.length; i++) {
+    if (prev.messages[i].id !== next.messages[i].id) return false;
+    // Only compare checksum if IDs are same but content might differ (e.g. if content is mutable)
+    // If TQ guarantees new message objects for new content, ID check is often enough.
+    if (getChecksum(prev.messages[i]) !== getChecksum(next.messages[i])) return false;
+  }
+  return true;
 }
 
 export default memo(ChatArea, areEqual);

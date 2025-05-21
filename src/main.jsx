@@ -1,8 +1,10 @@
+// src/main.jsx
+// Ensure gcTime (TQv5) or cacheTime (TQv4) is set appropriately in QueryClient defaultOptions
 import { render } from 'preact';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { persistQueryClient } from '@tanstack/react-query-persist-client';
-import { createIDBPersister } from './lib/idbPersister.js'; // Ensure this path is correct
+import { createIDBPersister } from './lib/idbPersister.js';
 
 import AuthGate from './components/AuthGate.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
@@ -12,38 +14,22 @@ import './styles.css';
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 1000 * 60 * 5, // 5 minutes: How long data is considered fresh
-      gcTime: 1000 * 60 * 60 * 24 * 7, // 7 days: How long inactive data stays in cache before GC
-      refetchOnWindowFocus: true, // Consider if this is desired, can be true or false
-      refetchOnMount: true, // Refetch on mount if data is stale
-      retry: 1, // Number of retries on error
+      staleTime: 1000 * 60 * 1, // Default stale time: 1 minute for most queries
+      gcTime: 1000 * 60 * 60 * 24 * 7, // 7 days GC time
+      refetchOnWindowFocus: false, // Personal preference, often set to false to reduce fetches
+      refetchOnMount: true, // Refetch if stale on mount
+      retry: 1, 
     },
   },
 });
 
-// Choose a unique key for your application's query cache in IndexedDB
-const idbPersister = createIDBPersister('konzukoAppTQCache-v1'); // Added a version to the key
+const idbPersister = createIDBPersister('konzukoAppTQCache-v1'); // Use a consistent key
 
 persistQueryClient({
   queryClient,
   persister: idbPersister,
   maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days: Data older than this in IndexedDB won't be restored.
-                                   // Should generally align with or be less than gcTime.
-  // buster: 'app-v1.0.0', // Optional: A string that can be used to invalidate all persisted data, e.g., on new app version
-  // dehydrateOptions: {
-  //   shouldDehydrateQuery: (query) => {
-  //     // Example: only persist queries that are successful and not fetching
-  //     return query.state.status === 'success' && !query.state.isFetching;
-  //   }
-  // },
-  // hydrateOptions: {
-  //   defaultOptions: {
-  //     queries: {
-  //       // Example: override staleTime for hydrated queries if needed
-  //       // staleTime: 1000 * 60, // 1 minute for hydrated data
-  //     }
-  //   }
-  // }
+  // buster: 'app-v1.0.1', // Increment to bust cache on new app versions if needed
 });
 
 render(
@@ -51,7 +37,6 @@ render(
     <ErrorBoundary>
       <AuthGate><App /></AuthGate>
     </ErrorBoundary>
-    {/* Mount Devtools only in development for cleaner production builds */}
     {import.meta.env.DEV && <ReactQueryDevtools initialIsOpen={false} />}
   </QueryClientProvider>,
   document.getElementById('app')

@@ -1,4 +1,5 @@
 // src/lib/idbPersister.js
+// NO CHANGES FROM PREVIOUS - THIS FILE IS LIKELY CORRECT
 import { get, set, del } from 'idb-keyval';
 
 /**
@@ -6,24 +7,24 @@ import { get, set, del } from 'idb-keyval';
  * @param {string} idbValidKey - The key to use in IndexedDB for storing the cache.
  * @returns {import('@tanstack/react-query-persist-client').Persister}
  */
-export function createIDBPersister(idbValidKey = 'reactQueryCache') { // Changed default key for clarity
+export function createIDBPersister(idbValidKey = 'reactQueryCache') {
   return {
     persistClient: async (client) => {
-      console.log('[IDBPersister] Persisting client to IndexedDB with key:', idbValidKey);
+      // console.log('[IDBPersister] Persisting client to IndexedDB with key:', idbValidKey);
       await set(idbValidKey, client);
     },
     restoreClient: async () => {
-      console.log('[IDBPersister] Attempting to restore client from IndexedDB with key:', idbValidKey);
+      // console.log('[IDBPersister] Attempting to restore client from IndexedDB with key:', idbValidKey);
       const client = await get(idbValidKey);
-      if (client) {
-        console.log('[IDBPersister] Client restored from IndexedDB.');
-      } else {
-        console.log('[IDBPersister] No client found in IndexedDB to restore.');
-      }
+      // if (client) {
+      //   console.log('[IDBPersister] Client restored from IndexedDB.');
+      // } else {
+      //   console.log('[IDBPersister] No client found in IndexedDB to restore.');
+      // }
       return client;
     },
     removeClient: async () => {
-      console.log('[IDBPersister] Removing client from IndexedDB with key:', idbValidKey);
+      // console.log('[IDBPersister] Removing client from IndexedDB with key:', idbValidKey);
       await del(idbValidKey);
     },
   };
