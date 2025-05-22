@@ -185,6 +185,18 @@ function ChatArea({
                 <MessageItem m={m} />
               )}
             </div>
+            {isLastUser && !currentMessageIsBeingEdited && (
+              <div className="message-bottom-actions">
+                <button
+                  className="button icon-button resend-button-bottom"
+                  disabled={loadingSend || actionsDisabled}
+                  onClick={() => handleResendMessage(m.id)}
+                  title="Resend message"
+                >
+                  Resend
+                </button>
+              </div>
+            )}
           </div>
         );
       })}

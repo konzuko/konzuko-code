@@ -1,0 +1,277 @@
+https://googleapis.github.io/js-genai/release_docs/interfaces/types.GenerateContentConfig.html#abortsignal
+
+@google/genaitypesGenerateContentConfig
+Interface GenerateContentConfig
+Optional model configuration parameters.
+
+For more information, see Content generation parameters <https://cloud.google.com/vertex-ai/generative-ai/docs/multimodal/content-generation-parameters>_.
+
+interface GenerateContentConfig {
+    abortSignal?: AbortSignal;
+    audioTimestamp?: boolean;
+    automaticFunctionCalling?: AutomaticFunctionCallingConfig;
+    cachedContent?: string;
+    candidateCount?: number;
+    frequencyPenalty?: number;
+    httpOptions?: HttpOptions;
+    labels?: Record<string, string>;
+    logprobs?: number;
+    maxOutputTokens?: number;
+    mediaResolution?: MediaResolution;
+    modelSelectionConfig?: ModelSelectionConfig;
+    presencePenalty?: number;
+    responseLogprobs?: boolean;
+    responseMimeType?: string;
+    responseModalities?: string[];
+    responseSchema?: unknown;
+    routingConfig?: GenerationConfigRoutingConfig;
+    safetySettings?: SafetySetting[];
+    seed?: number;
+    speechConfig?: SpeechConfigUnion;
+    stopSequences?: string[];
+    systemInstruction?: ContentUnion;
+    temperature?: number;
+    thinkingConfig?: ThinkingConfig;
+    toolConfig?: ToolConfig;
+    tools?: ToolListUnion;
+    topK?: number;
+    topP?: number;
+}
+Defined in types.ts:1521
+Properties
+P
+abortSignal?
+P
+audioTimestamp?
+P
+automaticFunctionCalling?
+P
+cachedContent?
+P
+candidateCount?
+P
+frequencyPenalty?
+P
+httpOptions?
+P
+labels?
+P
+logprobs?
+P
+maxOutputTokens?
+P
+mediaResolution?
+P
+modelSelectionConfig?
+P
+presencePenalty?
+P
+responseLogprobs?
+P
+responseMimeType?
+P
+responseModalities?
+P
+responseSchema?
+P
+routingConfig?
+P
+safetySettings?
+P
+seed?
+P
+speechConfig?
+P
+stopSequences?
+P
+systemInstruction?
+P
+temperature?
+P
+thinkingConfig?
+P
+toolConfig?
+P
+tools?
+P
+topK?
+P
+topP?
+Optional
+abortSignal
+abortSignal?: AbortSignal
+Abort signal which can be used to cancel the request.
+
+NOTE: AbortSignal is a client-only operation. Using it to cancel an operation will not cancel the request in the service. You will still be charged usage for any applicable operations.
+
+Defined in types.ts:1530
+Optional
+audioTimestamp
+audioTimestamp?: boolean
+If enabled, audio timestamp will be included in the request to the model.
+
+Defined in types.ts:1640
+Optional
+automaticFunctionCalling
+automaticFunctionCalling?: AutomaticFunctionCallingConfig
+The configuration for automatic function calling.
+
+Defined in types.ts:1643
+Optional
+cachedContent
+cachedContent?: string
+Resource name of a context cache that can be used in subsequent requests.
+
+Defined in types.ts:1626
+Optional
+candidateCount
+candidateCount?: number
+Number of response variations to return.
+
+Defined in types.ts:1556
+Optional
+frequencyPenalty
+frequencyPenalty?: number
+Positive values penalize tokens that repeatedly appear in the generated text, increasing the probability of generating more diverse content.
+
+Defined in types.ts:1581
+Optional
+httpOptions
+httpOptions?: HttpOptions
+Used to override HTTP request options.
+
+Defined in types.ts:1523
+Optional
+labels
+labels?: Record<string, string>
+Labels with user-defined metadata to break down billed charges.
+
+Defined in types.ts:1622
+Optional
+logprobs
+logprobs?: number
+Number of top candidate tokens to return the log probabilities for at each generation step.
+
+Defined in types.ts:1571
+Optional
+maxOutputTokens
+maxOutputTokens?: number
+Maximum number of tokens that can be generated in the response.
+
+Defined in types.ts:1559
+Optional
+mediaResolution
+mediaResolution?: MediaResolution
+If specified, the media resolution specified will be used.
+
+Defined in types.ts:1633
+Optional
+modelSelectionConfig
+modelSelectionConfig?: ModelSelectionConfig
+Configuration for model selection.
+
+Defined in types.ts:1609
+Optional
+presencePenalty
+presencePenalty?: number
+Positive values penalize tokens that already appear in the generated text, increasing the probability of generating more diverse content.
+
+Defined in types.ts:1576
+Optional
+responseLogprobs
+responseLogprobs?: boolean
+Whether to return the log probabilities of the tokens that were chosen by the model at each step.
+
+Defined in types.ts:1567
+Optional
+responseMimeType
+responseMimeType?: string
+Output response mimetype of the generated candidate text. Supported mimetype:
+
+text/plain: (default) Text output.
+application/json: JSON response in the candidates. The model needs to be prompted to output the appropriate response type, otherwise the behavior is undefined. This is a preview feature.
+Defined in types.ts:1595
+Optional
+responseModalities
+responseModalities?: string[]
+The requested modalities of the response. Represents the set of modalities that the model can return.
+
+Defined in types.ts:1630
+Optional
+responseSchema
+responseSchema?: unknown
+The Schema object allows the definition of input and output data types. These types can be objects, but also primitives and arrays. Represents a select subset of an OpenAPI 3.0 schema object. If set, a compatible response_mime_type must also be set. Compatible mimetypes: application/json: Schema for JSON response.
+
+Defined in types.ts:1603
+Optional
+routingConfig
+routingConfig?: GenerationConfigRoutingConfig
+Configuration for model router requests.
+
+Defined in types.ts:1606
+Optional
+safetySettings
+safetySettings?: SafetySetting[]
+Safety settings in the request to block unsafe content in the response.
+
+Defined in types.ts:1613
+Optional
+seed
+seed?: number
+When seed is fixed to a specific number, the model makes a best effort to provide the same response for repeated requests. By default, a random number is used.
+
+Defined in types.ts:1586
+Optional
+speechConfig
+speechConfig?: SpeechConfigUnion
+The speech generation configuration.
+
+Defined in types.ts:1636
+Optional
+stopSequences
+stopSequences?: string[]
+List of strings that tells the model to stop generating text if one of the strings is encountered in the response.
+
+Defined in types.ts:1563
+Optional
+systemInstruction
+systemInstruction?: ContentUnion
+Instructions for the model to steer it toward better performance. For example, "Answer as concisely as possible" or "Don't use technical terms in your response".
+
+Defined in types.ts:1535
+Optional
+temperature
+temperature?: number
+Value that controls the degree of randomness in token selection. Lower temperatures are good for prompts that require a less open-ended or creative response, while higher temperatures can lead to more diverse or creative results.
+
+Defined in types.ts:1541
+Optional
+thinkingConfig
+thinkingConfig?: ThinkingConfig
+The thinking features configuration.
+
+Defined in types.ts:1646
+Optional
+toolConfig
+toolConfig?: ToolConfig
+Associates model output to a specific function call.
+
+Defined in types.ts:1620
+Optional
+tools
+tools?: ToolListUnion
+Code that enables the system to interact with external systems to perform an action outside of the knowledge and scope of the model.
+
+Defined in types.ts:1617
+Optional
+topK
+topK?: number
+For each token selection step, the top_k tokens with the highest probabilities are sampled. Then tokens are further filtered based on top_p with the final token selected using temperature sampling. Use a lower number for less random responses and a higher number for more random responses.
+
+Defined in types.ts:1553
+Optional
+topP
+topP?: number
+Tokens are selected from the most to least probable until the sum of their probabilities equals this value. Use a lower value for less random responses and a higher value for more random responses.
+
+Defined in types.ts:1546

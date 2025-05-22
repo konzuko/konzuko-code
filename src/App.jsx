@@ -230,6 +230,7 @@ export default function App() {
       const { content: assistantContent } = await callApiForText({
         apiKey: payload.apiKey,
         messages: messagesForApi
+        // No signal passed here anymore
       });
       
       const assistantRow = await apiCreateMessage({
@@ -241,9 +242,11 @@ export default function App() {
     },
     onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['messages', variables.currentChatId] });
-      resetForm(); 
+      resetForm();
     },
     onError: (error, variables) => {
+      // Error could be AbortError if callApiForText internally uses a signal that aborts (e.g. timeout)
+      // But not from user cancellation via UI
       Toast(`Error sending message: ${error.message}`, 8000);
       queryClient.invalidateQueries({ queryKey: ['messages', variables.currentChatId] });
     }
@@ -297,6 +300,7 @@ export default function App() {
       const { content: assistantContent } = await callApiForText({
         apiKey: apiKey,
         messages: messagesForApi,
+        // No signal passed here
       });
       await apiCreateMessage({
         chat_id: currentChatId,
@@ -356,6 +360,7 @@ export default function App() {
       const { content: assistantContent } = await callApiForText({
         apiKey: apiKey,
         messages: messagesForApi,
+        // No signal passed here
       });
       await apiCreateMessage({
         chat_id: currentChatId,
@@ -498,6 +503,7 @@ export default function App() {
       setSettings(s => ({ ...s, showSettings: true }));
       return;
     }
+
     const newUserTextPrompt = buildNewUserPromptText(form, mode, pendingFiles, currentProjectRootName);
     const userMessageContentBlocks = [];
     pendingPDFs.forEach(p => userMessageContentBlocks.push({
@@ -536,7 +542,8 @@ export default function App() {
   
   const handleSaveEditTrigger = useCallback(() => { 
     if (!editingId || !currentChatId || editMessageMutation.isPending || globalBusy) return;
-    if (!settings.apiKey) {
+    
+    if (!settings.apiKey || String(settings.apiKey).trim() === "") {
         Toast("API Key not set. Cannot save edit.", 4000); return;
     }
     const originalMessage = currentChatMessages.find(m => m.id === editingId);
@@ -579,7 +586,8 @@ export default function App() {
   
   const handleResendMessageTrigger = useCallback((messageId) => { 
     if (!currentChatId || resendMessageMutation.isPending || globalBusy) return;
-    if (!settings.apiKey) {
+    
+    if (!settings.apiKey || String(settings.apiKey).trim() === "") {
         Toast("API Key not set. Cannot resend.", 4000); return;
     }
     resendMessageMutation.mutate({
@@ -772,6 +780,7 @@ export default function App() {
               form={form} setForm={setForm}
               loadingSend={promptBuilderLoadingSend} 
               handleSend={handleSend}
+              // No handleCancelSend passed
               showToast={Toast}
               imagePreviews={pendingImages}
               pdfPreviews={pendingPDFs}

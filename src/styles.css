@@ -466,6 +466,16 @@ html, body {
   border-radius: var(--radius);
 }
 
+.message-bottom-actions {
+  text-align: right;
+  margin-top: 8px;
+  padding-top: 4px;
+}
+.resend-button-bottom {
+  padding: 4px 8px;
+  font-size: 0.8rem;
+}
+
 @media (max-width: 768px) {
   .sidebar {
     width: 100%;
@@ -534,4 +544,3 @@ html, body {
     margin-right: 0;
   }
 }
-

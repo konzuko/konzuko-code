@@ -43,7 +43,7 @@ export default function PromptBuilder({
   mode, setMode,
 
   form, setForm,
-  loadingSend, handleSend,
+  loadingSend, handleSend, // handleCancelSend removed
   showToast,
 
   imagePreviews = [],          
@@ -185,14 +185,18 @@ export default function PromptBuilder({
         </div>
       )}
 
-      <div style={{ display:'flex', justifyContent:'flex-end', marginTop:'auto', paddingTop: '12px' }}> 
-        <button
-          className="button send-button"
-          disabled={loadingSend}
-          onClick={guardedSend}
-        >
-          {loadingSend ? 'Sending…' : 'Send'}
-        </button>
+      <div style={{ display:'flex', justifyContent:'flex-end', alignItems: 'center', marginTop:'auto', paddingTop: '12px' }}> 
+        {/* Cancel button removed */}
+        <div style={{ position: 'relative' }}> {/* Wrapper for potential spinner */}
+          <button
+            className="button send-button"
+            disabled={loadingSend}
+            onClick={guardedSend}
+          >
+            {loadingSend ? 'Sending…' : 'Send'}
+          </button>
+          {/* {loadingSend && <div className="spinner- naast-button"></div>} You could add a spinner here */}
+        </div>
       </div>
     </div>
   );
