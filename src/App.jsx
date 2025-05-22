@@ -48,7 +48,7 @@ const debounce = (func, delay) => {
   };
 };
 
-function buildNewUserPromptText(currentForm, currentMode, currentPendingFiles) {
+function buildNewUserPromptText(currentForm, currentMode, currentPendingFiles, projectRootName) {
     if (currentMode === 'DEVELOP') {
       const out = ['MODE: DEVELOP'];
       if (currentForm.developGoal.trim())         out.push(`GOAL: ${currentForm.developGoal.trim()}`);
@@ -56,13 +56,18 @@ function buildNewUserPromptText(currentForm, currentMode, currentPendingFiles) {
       if (currentForm.developReturnFormat.trim()) out.push(`RETURN FORMAT: ${currentForm.developReturnFormat.trim()}`);
       if (currentForm.developWarnings.trim())     out.push(`THINGS TO REMEMBER/WARNINGS: ${currentForm.developWarnings.trim()}`);
       if (currentForm.developContext.trim())      out.push(`CONTEXT: ${currentForm.developContext.trim()}`);
+
       const treePaths = currentPendingFiles.filter(f => f.insideProject).map(f => f.fullPath);
-      if (treePaths.length) {
-        out.push(`/* File structure:\n${asciiTree(treePaths)}\n*/`);
+      
+      // Only add projectRootName and file structure if a root is set AND there are files from that root
+      if (projectRootName && treePaths.length > 0) {
+        out.push(`${projectRootName}/`); // Project root name
+        out.push(asciiTree(treePaths));  // Directly followed by the tree
       }
+      
       currentPendingFiles.forEach(f => {
         out.push('```yaml');
-        out.push(`file: ${f.fullPath}`);
+        out.push(`file: ${f.fullPath}`); 
         if (f.note) out.push(`# ${f.note}`);
         out.push('```');
         out.push('```');
@@ -79,6 +84,8 @@ function buildNewUserPromptText(currentForm, currentMode, currentPendingFiles) {
 export default function App() {
   const queryClient = useQueryClient();
   const [currentChatId, setCurrentChatId] = useState(null);
+  const previousChatIdRef = useRef(null); 
+  const [currentProjectRootName, setCurrentProjectRootName] = useState(null);
 
   const [editingId, setEditing] = useState(null);
   const [editText, setEditText] = useState('');
@@ -98,15 +105,6 @@ export default function App() {
 
   const chatContainerRef = useRef(null);
 
-  // Fetch messages for the current chat.
-  // - `enabled: !!currentChatId`: Only fetches if a chat is selected.
-  // - `staleTime: Infinity`: Data is considered fresh indefinitely once fetched.
-  //   It will only refetch if the query key changes (currentChatId) or if explicitly invalidated.
-  // - `refetchOnMount: true`: Fetches when the chat is first focused (query becomes enabled)
-  //   if data is not in cache or is considered stale (which it always is with staleTime: Infinity,
-  //   forcing a fetch on first view unless data is already perfectly cached and fresh).
-  // - `refetchOnWindowFocus: false`, `refetchOnReconnect: false`: Prevents refetches on these events
-  //   for individual chat messages, relying on explicit invalidations for updates.
   const { data: currentChatMessagesData, isLoading: isLoadingMessages } = useQuery({
     queryKey: ['messages', currentChatId],
     queryFn: () => fetchMessages(currentChatId),
@@ -123,7 +121,8 @@ export default function App() {
     form,
     mode,
     pendingFiles,
-    pendingPDFs
+    pendingPDFs,
+    currentProjectRootName
   );
 
   // --- Mutations ---
@@ -132,7 +131,7 @@ export default function App() {
     onSuccess: (newlyCreatedChat) => {
       queryClient.invalidateQueries({ queryKey: ['chats'] }).then(() => {
         if (newlyCreatedChat && newlyCreatedChat.id) {
-          setCurrentChatId(newlyCreatedChat.id);
+          setCurrentChatId(newlyCreatedChat.id); 
         }
       });
       Toast('New chat created!', 2000);
@@ -242,7 +241,7 @@ export default function App() {
     },
     onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['messages', variables.currentChatId] });
-      resetForm();
+      resetForm(); 
     },
     onError: (error, variables) => {
       Toast(`Error sending message: ${error.message}`, 8000);
@@ -337,7 +336,6 @@ export default function App() {
     },
     onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['messages', currentChatId] });
-      // Toast('Message edited and conversation continued.', 3000); // Toast removed as per request
     },
     onError: (error, variables, context) => {
       if (context?.previousMessages) {
@@ -463,7 +461,6 @@ export default function App() {
 
   const handleNewChatTrigger = useCallback((data = {}) => {
     if (createChatMutation.isPending) return;
-    // "New Chat" now directly creates a chat in the DB.
     createChatMutation.mutate({ title: data.title || 'New Chat', model: data.model || GEMINI_MODEL_NAME });
   }, [createChatMutation]);
 
@@ -483,16 +480,16 @@ export default function App() {
     pendingImages.forEach(revokeOnce);
     setPendingImages([]);
     setPendingPDFs([]);
-    setPendingFiles([]);
+    setPendingFiles([]); 
     setForm(INITIAL_FORM_DATA);
   }
 
   function handleSend() {
-    if (promptBuilderLoadingSend || globalBusy) { // Check specific send-like loading or general global busy
+    if (promptBuilderLoadingSend || globalBusy) { 
       if(!currentChatId) Toast("Please select or create a chat first.", 3000);
       return;
     }
-    if (!currentChatId) { // Ensure currentChatId is not null/undefined before proceeding
+    if (!currentChatId) { 
         Toast("Please select or create a chat first.", 3000);
         return;
     }
@@ -501,7 +498,7 @@ export default function App() {
       setSettings(s => ({ ...s, showSettings: true }));
       return;
     }
-    const newUserTextPrompt = buildNewUserPromptText(form, mode, pendingFiles);
+    const newUserTextPrompt = buildNewUserPromptText(form, mode, pendingFiles, currentProjectRootName);
     const userMessageContentBlocks = [];
     pendingPDFs.forEach(p => userMessageContentBlocks.push({
       type: 'file', file: { file_id: p.fileId, original_name: p.name, mime_type: p.mimeType }
@@ -538,7 +535,6 @@ export default function App() {
   }
   
   const handleSaveEditTrigger = useCallback(() => { 
-    // Check specific edit mutation pending or global busy
     if (!editingId || !currentChatId || editMessageMutation.isPending || globalBusy) return;
     if (!settings.apiKey) {
         Toast("API Key not set. Cannot save edit.", 4000); return;
@@ -582,7 +578,6 @@ export default function App() {
   }, [editingId, editText, currentChatId, currentChatMessages, editMessageMutation, settings.apiKey, globalBusy, handleCancelEdit]);
   
   const handleResendMessageTrigger = useCallback((messageId) => { 
-    // Check specific resend mutation pending or global busy
     if (!currentChatId || resendMessageMutation.isPending || globalBusy) return;
     if (!settings.apiKey) {
         Toast("API Key not set. Cannot resend.", 4000); return;
@@ -595,7 +590,6 @@ export default function App() {
   }, [currentChatId, currentChatMessages, resendMessageMutation, settings.apiKey, globalBusy]);
 
   const handleDeleteMessageTrigger = useCallback((messageId) => {
-    // Check specific delete mutation pending or global busy
     if (deleteMessageMutation.isPending || !currentChatId || globalBusy) return;
     if (window.confirm('Are you sure you want to delete this message? You can undo this action from the toast.')) {
       deleteMessageMutation.mutate(messageId);
@@ -603,10 +597,18 @@ export default function App() {
   }, [deleteMessageMutation, currentChatId, globalBusy]);
 
   useEffect(() => {
-    if (editingId) { 
-      handleCancelEdit();
+    if (currentChatId !== previousChatIdRef.current) {
+      if (editingId) { 
+        handleCancelEdit();
+      }
+      setCurrentProjectRootName(null);
+      setPendingFiles([]);
+      pendingImages.forEach(revokeOnce);
+      setPendingImages([]);
+      setPendingPDFs([]);
     }
-  }, [currentChatId, handleCancelEdit]);
+    previousChatIdRef.current = currentChatId;
+  }, [currentChatId, editingId, handleCancelEdit, pendingImages]); 
 
 
   const scrollToPrev = useCallback(() => {
@@ -671,6 +673,19 @@ export default function App() {
     return apiCalculatedTokenCount + estimatedImageTokens;
   }, [apiCalculatedTokenCount, pendingImages, currentChatMessages]);
 
+  const handleProjectRootChange = useCallback((newRootName) => {
+    setCurrentProjectRootName(newRootName);
+    if (newRootName === null) {
+        // If FilePane clears its root, we ensure App's pendingFiles associated with a project are cleared.
+        // Non-project files (added individually) are kept.
+        // The chat switch useEffect is more comprehensive for full context reset.
+        setPendingFiles(files => files.filter(f => !f.insideProject)); 
+    }
+    // If a new root is set, FilePane's addFolder logic handles updating onFilesChange
+    // which in turn updates App's pendingFiles.
+  }, []);
+
+
   return (
     <div className="app-container">
       <ChatList
@@ -694,6 +709,7 @@ export default function App() {
           <div style={{marginLeft:'auto',display:'flex',gap:'0.5em', alignItems: 'center'}}>
             <div className="token-count-display">
               Tokens: {totalPromptTokenCount.toLocaleString()}
+              {isCountingApiTokens && <span style={{ marginLeft: '5px', fontStyle: 'italic' }}>(...)</span>}
             </div>
             <button className="button" onClick={handleCopyAll} disabled={!currentChatMessages || currentChatMessages.length === 0 || globalBusy }>Copy All Text</button>
           </div>
@@ -768,6 +784,7 @@ export default function App() {
               settings={settings}
               pendingFiles={pendingFiles}
               onFilesChange={setPendingFiles}
+              onProjectRootChange={handleProjectRootChange}
             />
           </div>
         </div>
@@ -775,4 +792,3 @@ export default function App() {
     </div>
   );
 }
-

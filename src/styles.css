@@ -341,6 +341,7 @@ html, body {
   margin-left: auto; 
   float: right; 
   border-top-right-radius: 0;
+  min-width: 80%;
 }
 .message-assistant {
   background: #2c3e50; 

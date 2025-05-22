@@ -54,7 +54,8 @@ export default function PromptBuilder({
   onAddPDF,
 
   settings, 
-  pendingFiles, onFilesChange
+  pendingFiles, onFilesChange,
+  onProjectRootChange // New prop
 }) {
   const formRef = useRef(form);
   const textareaRefs = useRef({}); 
@@ -145,7 +146,8 @@ export default function PromptBuilder({
           onSkip={n => showToast?.(`${n} file${n>1?'s':''} ignored`)}
           onAddImage={onAddImage}
           onAddPDF={onAddPDF}
-          settings={settings} 
+          settings={settings}
+          onProjectRootChange={onProjectRootChange} // Pass down
         />
       )}
 

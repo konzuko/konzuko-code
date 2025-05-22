@@ -92,7 +92,8 @@ export default function FilePane({
 
   onAddImage,
   onAddPDF,
-  settings 
+  settings,
+  onProjectRootChange // New prop
 }) {
   const [adding, setAdding]           = useState(false);
   const [projectRoot, setProjectRoot] = useState(null);
@@ -103,20 +104,32 @@ export default function FilePane({
 
   useEffect(() => {
     let live = true;
-    loadRoot().then(h => live && setProjectRoot(h)).catch(() => {});
+    loadRoot().then(h => {
+        if (live) {
+            setProjectRoot(h);
+            if (h) { // If a root was loaded from IDB, notify App
+                onProjectRootChange?.(h.name);
+            }
+        }
+    }).catch(() => {});
     return () => { live = false; };
-  }, []);
+  }, [onProjectRootChange]); // Added onProjectRootChange to dependency array
 
-  const clearAll = () => {
+  const clearAll = useCallback(() => {
     if (!files.length && !projectRoot && topEntries.length === 0 && Object.keys(entryFilter).length === 0) return;
     if (!confirm('Remove all selected files and clear project root?')) return;
-    clearRoot();
-    setProjectRoot(null);
+    
+    clearRoot().then(() => {
+      setProjectRoot(null);
+      onProjectRootChange?.(null); // Notify App that root is cleared
+    }).catch(err => console.error("Error clearing root:", err));
+    
     setEntryFilter({});
     setTopEntries([]);
-    setStep('FILTER');
-    onFilesChange([]);
-  };
+    setStep('FILTER'); // Or an appropriate initial step
+    onFilesChange([]); // Clear all files from the main list
+  }, [files.length, projectRoot, topEntries.length, Object.keys(entryFilter).length, onFilesChange, onProjectRootChange]);
+
 
   const addFiles = useCallback(async () => {
     if (!window.showOpenFilePicker) {
@@ -139,6 +152,8 @@ export default function FilePane({
         if (text.length > MAX_CHAR_LEN)  { skipped++; continue; }
 
         const ck = checksum32(text);
+        // For individually added files, projectRoot is passed to getFullPath.
+        // If projectRoot is null, insideProject will be false and fullPath will be f.name
         const { fullPath, insideProject } = await getFullPath(h, projectRoot);
         batch.push({ fullPath, text, checksum: ck, insideProject, name: f.name });
       }
@@ -146,7 +161,9 @@ export default function FilePane({
       if (skipped) onSkip?.(skipped);
       const merged = mergeFiles(files, batch);
       onFilesChange(merged);
-      setStep('FILES');
+      // Do not change step to 'FILES' here, as 'FILTER' step is for folder operations
+      // If a folder is already selected, files are just added.
+      // If no folder selected, and filter UI is not relevant, this is fine.
     } catch (err) {
       if (err.name !== 'AbortError') Toast('File pick error: ' + err.message, 4000);
     } finally {
@@ -189,30 +206,38 @@ export default function FilePane({
     }
     try {
       setAdding(true);
-      setEntryFilter({});
-      setTopEntries([]);
-      setStep('FILTER');
+      setEntryFilter({}); // Reset filter for new folder
+      setTopEntries([]);  // Reset top entries for new folder
+      setStep('FILTER');  // Always go to filter step for a new folder
 
       const dirHandle = await window.showDirectoryPicker();
+      
+      // Update project root state and notify App
+      setProjectRoot(dirHandle); 
+      onProjectRootChange?.(dirHandle.name);
+      await saveRoot(dirHandle); // Save to IDB
+
       const tops = [];
       for await (const [name, h] of dirHandle.entries()) {
         tops.push({ name, kind: h.kind });
       }
       setTopEntries(tops);
 
-      const batch = [];
+      const batch = []; // Files from the new directory
       const stats = { bigSize:0, bigChar:0, binary:0, limit:0, perm:0, fsErr:0 };
       await scanDir(dirHandle, batch, stats, dirHandle);
-      await saveRoot(dirHandle);
-      setProjectRoot(dirHandle);
-
-      const freshMap = {};
+      
+      const freshMap = {}; // Initial filter state: include all top-level entries
       tops.forEach(e => { freshMap[e.name] = true; });
       setEntryFilter(freshMap);
 
+      // When adding a new folder, decide how to handle existing files.
+      // Option: Keep files that are not part of *any* project root (insideProject === false)
+      const existingNonProjectFiles = files.filter(f => !f.insideProject);
       const initiallyFilteredBatch = batch.filter(f => isIncluded(f.fullPath, freshMap));
-      const merged   = mergeFiles(files, initiallyFilteredBatch);
+      const merged = mergeFiles(existingNonProjectFiles, initiallyFilteredBatch);
       onFilesChange(merged);
+
 
       const skipped = stats.bigSize + stats.bigChar + stats.binary +
                       stats.limit   + stats.perm    + stats.fsErr;
@@ -231,7 +256,7 @@ export default function FilePane({
     } finally {
       setAdding(false);
     }
-  }, [files, onFilesChange]);
+  }, [files, onFilesChange, onProjectRootChange]);
 
 
   const handleAddImages = useCallback(async () => {
@@ -425,9 +450,16 @@ export default function FilePane({
   }, [onAddPDF, settings]);
 
   useEffect(() => {
-    if (step !== 'FILES' || !topEntries.length) return;
+    if (step !== 'FILES' || !topEntries.length) return; // Only apply filter changes when in FILES step AND after a folder was processed
 
-    const newList = files.filter(f => isIncluded(f.fullPath, entryFilter));
+    // This effect re-filters `files` based on `entryFilter` changes
+    // It should primarily run after `setEntryFilter` is called and `step` is 'FILES'
+    const newList = files.filter(f => {
+        if (f.insideProject && projectRoot) { // Only filter project files
+            return isIncluded(f.fullPath, entryFilter);
+        }
+        return true; // Keep non-project files
+    });
     
     if (newList.length !== files.length || !files.every((f, i) => newList[i] && newList[i].fullPath === f.fullPath && newList[i].checksum === f.checksum)) {
         const excludedCount = files.length - newList.length;
@@ -436,7 +468,7 @@ export default function FilePane({
             Toast(`Excluded ${excludedCount} item${excludedCount > 1 ? 's' : ''} by filter`, 4000);
         }
     }
-  }, [entryFilter, files, step, onFilesChange, topEntries.length]);
+  }, [entryFilter, files, step, onFilesChange, topEntries.length, projectRoot]);
 
 
   return (
@@ -462,9 +494,9 @@ export default function FilePane({
           Clear List
         </button>
       </div>
-      {step === 'FILTER' && topEntries.length > 0 && (
+      {step === 'FILTER' && topEntries.length > 0 && projectRoot && (
         <div>
-          <h3>Select entries to include from '{projectRoot?.name || 'selected folder'}'</h3>
+          <h3>Select entries to include from '{projectRoot.name}'</h3>
           <div style={{
             maxHeight: '200px',
             overflowY: 'auto',
@@ -486,11 +518,11 @@ export default function FilePane({
             ))}
           </div>
           <button className="button" style={{ marginTop: 8 }} onClick={() => setStep('FILES')}>
-            Apply Filter & Continue
+            Apply Filter & View Files
           </button>
         </div>
       )}
-      {step === 'FILES' && (
+      {(step === 'FILES' || (step === 'FILTER' && (!projectRoot || topEntries.length === 0))) && ( // Show file list if in FILES step OR if in FILTER but no folder processed yet
         <>
           <strong>{files.length} / {FILE_LIMIT} text files selected</strong>
           {!!files.length && (
@@ -500,8 +532,8 @@ export default function FilePane({
                   {f.note
                     ? <span title={f.note}>{f.fullPath}</span>
                     : f.insideProject
-                      ? f.fullPath
-                      : <span title="This file is outside the selected project root. Its path is relative to its original location.">⚠ {f.fullPath}</span>
+                      ? f.fullPath // This is already relative to projectRoot if insideProject is true
+                      : <span title="This file is not part of the selected project root. Its path is its name.">📄 {f.fullPath}</span>
                   }
                   <button
                     className="remove-file-btn"
@@ -519,10 +551,10 @@ export default function FilePane({
               ))}
             </ul>
           )}
-          {files.length === 0 && step === 'FILES' && !topEntries.length && (
+          {files.length === 0 && (step === 'FILES' || (step === 'FILTER' && (!projectRoot || topEntries.length === 0))) && (
             <p style={{ color: 'var(--text-secondary)' }}>No text files added yet. Use the buttons above.</p>
           )}
-           {files.length === 0 && step === 'FILES' && topEntries.length > 0 && (
+           {files.length === 0 && step === 'FILES' && projectRoot && topEntries.length > 0 && ( // This case: files were filtered out
             <p style={{ color: 'var(--text-secondary)' }}>No text files matched the filter or found in the folder.</p>
           )}
         </>
@@ -530,4 +562,3 @@ export default function FilePane({
     </div>
   );
 }
-
