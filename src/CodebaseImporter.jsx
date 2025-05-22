@@ -1,4 +1,4 @@
-/* src/FilePane.jsx
+/* src/CodebaseImporter.jsx
    ------------------------------------------------------------
    Handles:
    • Text/code file selection (+Add Files)
@@ -85,7 +85,7 @@ function isIncluded(fullPath, filterMap) {
 /* =========================================================
    COMPONENT
 ========================================================= */
-export default function FilePane({
+export default function CodebaseImporter({
   files             = [],
   onFilesChange,
   onSkip,
@@ -431,7 +431,7 @@ export default function FilePane({
           throw new Error(`Gemini file upload for ${file.name} did not return expected data.`);
         }
       } catch (fileProcessingErr) {
-        console.error(`[FilePane - handleAddPDF] Error processing PDF ${currentFileName}:`, fileProcessingErr, fileProcessingErr.stack);
+        console.error(`[CodebaseImporter - handleAddPDF] Error processing PDF ${currentFileName}:`, fileProcessingErr, fileProcessingErr.stack);
         failedUploads.push({ name: currentFileName, reason: fileProcessingErr.message });
       }
     }
@@ -473,7 +473,7 @@ export default function FilePane({
 
   return (
     <div className="file-pane-container">
-      <h2>Project Files</h2>
+      <h2>Codebase Importer</h2>
       {projectRoot && (
         <div style={{ marginBottom: 8, fontSize: '0.85rem', opacity: 0.8 }}>
           Root: <code>{projectRoot.name}</code>

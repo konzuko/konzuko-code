@@ -4,7 +4,7 @@
 */
 import { useEffect, useRef, useMemo } from 'preact/hooks'; 
 import { del }               from 'idb-keyval'; 
-import FilePane              from './FilePane.jsx';
+import CodebaseImporter      from './CodebaseImporter.jsx'; // Updated import
 
 const autoResizeTextarea = (textarea, maxHeight) => {
   if (textarea) {
@@ -140,7 +140,7 @@ export default function PromptBuilder({
       ))}
 
       {mode === 'DEVELOP' && (
-        <FilePane
+        <CodebaseImporter // Updated component usage
           files={pendingFiles}
           onFilesChange={onFilesChange}
           onSkip={n => showToast?.(`${n} file${n>1?'s':''} ignored`)}
