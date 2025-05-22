@@ -2,10 +2,10 @@
 import { useState, useEffect, useCallback } from 'preact/hooks';
 import { useQueryClient, useMutation, useQuery } from '@tanstack/react-query';
 import {
-  createChat, // Corrected: No 'api' prefix
-  updateChatTitle, // Corrected: No 'api' prefix
-  deleteChat, // Corrected: No 'api' prefix
-  undoDeleteChat, // Corrected: No 'api' prefix
+  createChat,
+  updateChatTitle,
+  deleteChat as apiDeleteChat, // Renamed to avoid conflict with the handler function
+  undoDeleteChat,
   GEMINI_MODEL_NAME,
   fetchChats
 } from '../api.js';
@@ -23,7 +23,7 @@ export function useChatSessionManager() {
   });
 
   const createChatMutation = useMutation({
-    mutationFn: (newChatData) => createChat(newChatData), // Corrected
+    mutationFn: (newChatData) => createChat(newChatData),
     onSuccess: (newlyCreatedChat) => {
       queryClient.invalidateQueries({ queryKey: ['chats'] });
       queryClient.invalidateQueries({ queryKey: ['chatsInitialCheck'] });
@@ -38,7 +38,7 @@ export function useChatSessionManager() {
   });
 
   const undoDeleteChatMutation = useMutation({
-    mutationFn: (chatId) => undoDeleteChat(chatId), // Corrected
+    mutationFn: (chatId) => undoDeleteChat(chatId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['chats'] });
       Toast('Chat restored.', 2000);
@@ -48,8 +48,9 @@ export function useChatSessionManager() {
     },
   });
 
-  const deleteChatMutation = useMutation({
-    mutationFn: (chatId) => deleteChat(chatId), // Corrected
+  // This is the actual mutation that calls the API
+  const internalDeleteChatMutation = useMutation({
+    mutationFn: (chatId) => apiDeleteChat(chatId), // Uses the renamed apiDeleteChat
     onMutate: async (chatId) => {
       await queryClient.cancelQueries({ queryKey: ['chats'] });
       const previousChatsData = queryClient.getQueryData(['chats']);
@@ -81,7 +82,7 @@ export function useChatSessionManager() {
   });
 
   const updateChatTitleMutation = useMutation({
-    mutationFn: ({ id, title }) => updateChatTitle(id, title), // Corrected
+    mutationFn: ({ id, title }) => updateChatTitle(id, title),
     onMutate: async ({ id, title }) => {
       await queryClient.cancelQueries({ queryKey: ['chats'] });
       const previousChatsData = queryClient.getQueryData(['chats']);
@@ -116,9 +117,21 @@ export function useChatSessionManager() {
     createChatMutation.mutate({ title: data.title || 'New Chat', model: data.model || GEMINI_MODEL_NAME });
   }, [createChatMutation]);
 
+  // This is the function that will be exposed and called by App.jsx
+  const handleDeleteChat = useCallback((chatId) => {
+    if (internalDeleteChatMutation.isPending || undoDeleteChatMutation.isPending) return;
+    if (window.confirm('Are you sure you want to delete this chat? This action can be undone from the notification.')) {
+      internalDeleteChatMutation.mutate(chatId);
+    }
+  }, [internalDeleteChatMutation, undoDeleteChatMutation]);
+
+
   useEffect(() => {
-    if (initialChatsSuccess && initialChatsData) {
-      const totalChats = initialChatsData.pages.reduce((acc, page) => acc + (page.chats?.length || 0), 0);
+    if (initialChatsSuccess && initialChatsData && Array.isArray(initialChatsData.pages)) {
+      const totalChats = initialChatsData.pages.reduce((acc, page) => {
+        return acc + (Array.isArray(page.chats) ? page.chats.length : 0);
+      }, 0);
+
       if (totalChats === 0 && !createChatMutation.isPending && !currentChatId) {
         const existingChatCreation = queryClient.getMutationCache().getAll().find(m => m.options.mutationKey?.[0] === 'createChat' && m.state.status === 'pending');
         if(!existingChatCreation) {
@@ -130,7 +143,7 @@ export function useChatSessionManager() {
 
 
   const isLoadingSession = createChatMutation.isPending ||
-                           deleteChatMutation.isPending ||
+                           internalDeleteChatMutation.isPending || // Use internal mutation status
                            updateChatTitleMutation.isPending ||
                            undoDeleteChatMutation.isPending;
 
@@ -138,7 +151,7 @@ export function useChatSessionManager() {
     currentChatId,
     setCurrentChatId,
     createChat: handleCreateChat,
-    deleteChat: deleteChatMutation.mutate,
+    deleteChat: handleDeleteChat, // Expose the new handler
     updateChatTitle: updateChatTitleMutation.mutate,
     undoDeleteChat: undoDeleteChatMutation.mutate,
     isLoadingSession,

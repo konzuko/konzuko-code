@@ -1,10 +1,9 @@
 // src/hooks/usePromptBuilder.js
 import { useState, useEffect, useCallback } from 'preact/hooks';
-import { useFormData, useMode, INITIAL_FORM_DATA } from '../hooks.js'; // Corrected import path
+import { useFormData, useMode, INITIAL_FORM_DATA } from '../hooks.js';
 import { asciiTree } from '../lib/textUtils.js';
-// Toast is not used directly in this hook anymore, App.jsx handles toasts for send operations
 
-// Moved from App.jsx
+// buildNewUserPromptText function remains here as it's logic related to the prompt.
 function buildNewUserPromptText(currentForm, currentMode, currentPendingFiles, projectRootName) {
   if (currentMode === 'DEVELOP') {
     const out = ['MODE: DEVELOP'];
@@ -37,10 +36,9 @@ function buildNewUserPromptText(currentForm, currentMode, currentPendingFiles, p
 
 const revokeOnce = obj => { if (obj?.revoke) { obj.revoke(); obj.revoke = null; } };
 
-
 export function usePromptBuilder() {
-  const [form, setForm] = useFormData(); // Get setForm from useFormData
-  const [mode, setMode] = useMode();   // Get setMode from useMode
+  const [form, setForm] = useFormData();
+  const [mode, setMode] = useMode();
 
   const [pendingImages, setPendingImages] = useState([]);
   const [pendingPDFs, setPendingPDFs] = useState([]);
@@ -77,7 +75,6 @@ export function usePromptBuilder() {
     setPendingImages([]);
     setPendingPDFs([]);
     setPendingFiles([]);
-    // currentProjectRootName is reset via handleProjectRootChange(null) called by App.jsx on chat switch
     setForm(INITIAL_FORM_DATA);
   }, [pendingImages, setForm]);
 
@@ -88,12 +85,14 @@ export function usePromptBuilder() {
     }
   }, []);
 
+  // The JSX for mode selection buttons has been removed from here.
+  // It correctly resides in PromptBuilder.jsx.
 
   return {
     form,
-    setForm, // Expose setForm from useFormData
+    setForm,
     mode,
-    setMode, // Expose setMode from useMode
+    setMode,
     pendingImages,
     addPendingImage,
     removePendingImage,
