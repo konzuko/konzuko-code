@@ -278,6 +278,19 @@ html, body {
   min-width: 30px;
 }
 
+/* Specific styles for New Chat and Send buttons to make them blue */
+.button.new-chat-button,
+.button.send-button {
+  background-color: var(--accent);
+  color: #fff; /* White text on blue background */
+}
+
+.button.new-chat-button:hover:not(:disabled),
+.button.send-button:hover:not(:disabled) {
+  background-color: var(--accent-hover); /* Use hover color from accent variables */
+}
+
+
 .form-group {
   margin-bottom: var(--space-md);
 }
