@@ -3,11 +3,11 @@ import { useState, useCallback } from 'preact/hooks';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   fetchMessages,
-  createMessage, // Corrected
-  updateMessage, // Corrected
-  deleteMessage, // Corrected
-  undoDeleteMessage, // Corrected
-  archiveMessagesAfter, // Corrected
+  createMessage, 
+  updateMessage, 
+  deleteMessage, 
+  undoDeleteMessage, 
+  archiveMessagesAfter, 
   callApiForText,
 } from '../api.js';
 import Toast from '../components/Toast.jsx';
@@ -30,7 +30,8 @@ export function useMessageManager(currentChatId, apiKey) {
 
   const sendMessageMutation = useMutation({
     mutationFn: async (payload) => {
-      const userRow = await createMessage({ // Corrected
+      // payload includes: userMessageContentBlocks, existingMessages, onSendSuccess
+      const userRow = await createMessage({ 
         chat_id: currentChatId,
         role: 'user',
         content: payload.userMessageContentBlocks,
@@ -43,15 +44,22 @@ export function useMessageManager(currentChatId, apiKey) {
         messages: messagesForApi,
       });
 
-      const assistantRow = await createMessage({ // Corrected
+      const assistantRow = await createMessage({ 
         chat_id: currentChatId,
         role: 'assistant',
         content: [{ type: 'text', text: assistantContent }],
       });
-      return { userRow, assistantRow };
+      // Pass through the onSendSuccess callback
+      return { 
+        userRow, 
+        assistantRow, 
+        onSendSuccess: payload.onSendSuccess, 
+      };
     },
-    onSuccess: () => {
+    onSuccess: (data) => { // data now includes { userRow, assistantRow, onSendSuccess }
       queryClient.invalidateQueries({ queryKey: ['messages', currentChatId] });
+      // Call the success callback
+      data.onSendSuccess?.(); 
     },
     onError: (error) => {
       Toast(`Error sending message: ${error.message}`, 8000);
@@ -61,8 +69,8 @@ export function useMessageManager(currentChatId, apiKey) {
 
   const editMessageMutation = useMutation({
     mutationFn: async ({ messageId, newContentArray, originalMessages }) => {
-      const editedMessage = await updateMessage(messageId, newContentArray); // Corrected
-      await archiveMessagesAfter(currentChatId, editedMessage.created_at); // Corrected
+      const editedMessage = await updateMessage(messageId, newContentArray); 
+      await archiveMessagesAfter(currentChatId, editedMessage.created_at); 
 
       const editedMsgIndex = originalMessages.findIndex(m => m.id === messageId);
       if (editedMsgIndex === -1) throw new Error("Edited message not found for API call.");
@@ -72,7 +80,7 @@ export function useMessageManager(currentChatId, apiKey) {
         apiKey: apiKey,
         messages: messagesForApi,
       });
-      await createMessage({ // Corrected
+      await createMessage({ 
         chat_id: currentChatId,
         role: 'assistant',
         content: [{ type: 'text', text: assistantContent }],
@@ -119,13 +127,13 @@ export function useMessageManager(currentChatId, apiKey) {
       const anchorMessage = originalMessages.find(m => m.id === messageId);
       if (!anchorMessage) throw new Error("Anchor message for resend not found.");
       const anchorMsgIndex = originalMessages.findIndex(m => m.id === messageId);
-      await archiveMessagesAfter(currentChatId, anchorMessage.created_at); // Corrected
+      await archiveMessagesAfter(currentChatId, anchorMessage.created_at); 
       const messagesForApi = originalMessages.slice(0, anchorMsgIndex + 1);
       const { content: assistantContent } = await callApiForText({
         apiKey: apiKey,
         messages: messagesForApi,
       });
-      await createMessage({ // Corrected
+      await createMessage({ 
         chat_id: currentChatId,
         role: 'assistant',
         content: [{ type: 'text', text: assistantContent }],
@@ -143,7 +151,7 @@ export function useMessageManager(currentChatId, apiKey) {
   });
 
   const undoDeleteMessageMutation = useMutation({
-    mutationFn: (messageId) => undoDeleteMessage(messageId), // Corrected
+    mutationFn: (messageId) => undoDeleteMessage(messageId), 
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['messages', currentChatId] });
       Toast('Message restored.', 2000);
@@ -154,7 +162,7 @@ export function useMessageManager(currentChatId, apiKey) {
   });
 
   const deleteMessageMutation = useMutation({
-    mutationFn: (messageId) => deleteMessage(messageId), // Corrected
+    mutationFn: (messageId) => deleteMessage(messageId), 
     onMutate: async (messageId) => {
       await queryClient.cancelQueries({ queryKey: ['messages', currentChatId] });
       const previousMessages = queryClient.getQueryData(['messages', currentChatId]);
@@ -253,7 +261,7 @@ export function useMessageManager(currentChatId, apiKey) {
     startEdit: handleStartEdit,
     cancelEdit: handleCancelEdit,
     saveEdit: handleSaveEdit,
-    sendMessage: sendMessageMutation.mutate,
+    sendMessage: sendMessageMutation.mutate, 
     resendMessage: handleResendMessage,
     deleteMessage: handleDeleteMessage,
     isLoadingOps,

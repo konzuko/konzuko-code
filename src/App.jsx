@@ -36,6 +36,7 @@ const debounce = (func, delay) => {
 export default function App() {
   const [settings, setSettings] = useSettings();
   const previousChatIdRef = useRef(null);
+  const sentPromptStateRef = useRef(null); // Ref to store prompt state at the moment of sending
 
   const {
     currentChatId,
@@ -43,8 +44,8 @@ export default function App() {
     createChat,
     deleteChat,
     updateChatTitle,
-    isLoadingSession, // True if chat list operations are happening (create, delete, rename)
-    isCreatingChat,   // Specific state for new chat button
+    isLoadingSession, 
+    isCreatingChat,   
   } = useChatSessionManager();
 
   const {
@@ -59,15 +60,13 @@ export default function App() {
     sendMessage,
     resendMessage,
     deleteMessage,
-    isLoadingOps: isLoadingMessageOps, // True if any message operation is in progress
-    isSendingMessage, // Specific state for send button in PromptBuilder
-    isSavingEdit,     // Specific state for save button in ChatArea
-    // isResendingMessage, // Can be added if needed for specific UI
-    // isDeletingMessage,  // Can be added if needed for specific UI
+    isLoadingOps: isLoadingMessageOps, 
+    isSendingMessage, 
+    isSavingEdit,     
   } = useMessageManager(currentChatId, settings.apiKey);
 
   const {
-    form,
+    form, 
     setForm,
     mode,
     setMode,
@@ -80,7 +79,7 @@ export default function App() {
     setPendingFiles,
     currentProjectRootName,
     handleProjectRootChange,
-    userPromptText,
+    userPromptText, 
     resetPrompt,
   } = usePromptBuilder();
 
@@ -136,23 +135,18 @@ export default function App() {
     debouncedApiCallRef.current(itemsForApiCount, settings.apiKey, modelToUse);
   }, [itemsForApiCount, settings.apiKey, settings.model, callWorkerForTokenCount]);
 
-  // globalBusy should reflect operations that make the *entire app* or major sections unstable for interaction.
-  // Chat list operations (isLoadingSession) fit this.
-  // Individual message operations (isLoadingMessageOps) might not need to block everything.
   const globalBusy = useMemo(() =>
-    isLoadingSession, // Only disable global things if chat session ops are in progress
+    isLoadingSession, 
     [isLoadingSession]
   );
 
-  // This specifically controls the "Send" button in PromptBuilder
   const promptBuilderLoadingSend = useMemo(() =>
-    isSendingMessage, // Use the specific flag from useMessageManager
+    isSendingMessage, 
     [isSendingMessage]
   );
 
-  // This controls actions within ChatArea (edit, resend, delete message buttons)
   const chatAreaActionsDisabled = useMemo(() =>
-    isLoadingMessageOps || isLoadingSession, // Disable if any message op OR session op is happening
+    isLoadingMessageOps || isLoadingSession, 
     [isLoadingMessageOps, isLoadingSession]
   );
 
@@ -175,8 +169,9 @@ export default function App() {
   useEffect(() => {
     if (currentChatId !== previousChatIdRef.current) {
       if (editingId) cancelEdit();
-      resetPrompt();
-      handleProjectRootChange(null);
+      resetPrompt(); 
+      handleProjectRootChange(null); 
+      sentPromptStateRef.current = null; // Clear sent state on chat switch
       if (previousChatIdRef.current !== null) {
         setTimeout(() => scrollToBottom('auto'), 0);
       }
@@ -186,8 +181,7 @@ export default function App() {
 
 
   function handleSend() {
-    // Use promptBuilderLoadingSend for this specific action
-    if (promptBuilderLoadingSend || globalBusy) { // globalBusy check here is okay as sending is a major action
+    if (promptBuilderLoadingSend || globalBusy) {
       if (!currentChatId) Toast("Please select or create a chat first.", 3000);
       return;
     }
@@ -200,6 +194,14 @@ export default function App() {
       setSettings(s => ({ ...s, showSettings: true }));
       return;
     }
+
+    // Capture the state of the prompt *as it is being sent*
+    // Store in the ref
+    sentPromptStateRef.current = {
+      userPromptText: userPromptText,
+      pendingImages: [...pendingImages.map(img => ({ url: img.url, name: img.name }))],
+      pendingPDFs: [...pendingPDFs.map(pdf => ({ fileId: pdf.fileId, name: pdf.name }))],
+    };
 
     const userMessageContentBlocks = [];
     pendingPDFs.forEach(p => userMessageContentBlocks.push({
@@ -217,11 +219,42 @@ export default function App() {
       return;
     }
 
-    sendMessage({
+    const onSendSuccessCallback = () => {
+      const sentState = sentPromptStateRef.current;
+      if (!sentState) { // Should not happen if sentPromptStateRef was set before send
+        resetPrompt();
+        return;
+      }
+
+      const currentImagesComparable = pendingImages.map(img => ({ url: img.url, name: img.name }));
+      const currentPDFsComparable = pendingPDFs.map(pdf => ({ fileId: pdf.fileId, name: pdf.name }));
+
+      const textualContentChanged = userPromptText !== sentState.userPromptText;
+      
+      const imagesChanged = currentImagesComparable.length !== sentState.pendingImages.length ||
+                           !currentImagesComparable.every((img, i) =>
+                             sentState.pendingImages[i] &&
+                             img.url === sentState.pendingImages[i].url &&
+                             img.name === sentState.pendingImages[i].name
+                           );
+      const pdfsChanged = currentPDFsComparable.length !== sentState.pendingPDFs.length ||
+                          !currentPDFsComparable.every((pdf, i) =>
+                            sentState.pendingPDFs[i] &&
+                            pdf.fileId === sentState.pendingPDFs[i].fileId &&
+                            pdf.name === sentState.pendingPDFs[i].name
+                          );
+
+      if (!textualContentChanged && !imagesChanged && !pdfsChanged) {
+        resetPrompt();
+      }
+      sentPromptStateRef.current = null; // Clear the ref after use
+    };
+
+    sendMessage({ 
       userMessageContentBlocks,
       existingMessages: messages,
+      onSendSuccess: onSendSuccessCallback, 
     });
-    resetPrompt();
   }
 
 
@@ -269,8 +302,6 @@ export default function App() {
         onNewChatTrigger={createChat}
         onDeleteChatTrigger={deleteChat}
         onUpdateChatTitleTrigger={handleUpdateChatTitleTrigger}
-        // ChatList is disabled if session operations are happening or a new chat is specifically being created.
-        // It's NOT disabled if only a message is sending within the current chat.
         appDisabled={isLoadingSession || isCreatingChat}
       />
       <div className="main-content">
@@ -278,7 +309,7 @@ export default function App() {
           <button
             className="button"
             onClick={() => setSettings(s => ({ ...s, showSettings: !s.showSettings }))}
-            disabled={globalBusy} // Settings button can be disabled by globalBusy (session ops)
+            disabled={globalBusy} 
           >
             {settings.showSettings ? 'Close Settings' : 'Open Settings'}
           </button>
@@ -288,7 +319,6 @@ export default function App() {
               Tokens: {totalPromptTokenCount.toLocaleString()}
               {isCountingApiTokens && <span style={{ marginLeft: '5px', fontStyle: 'italic' }}>(...)</span>}
             </div>
-            {/* Copy All Text button can be disabled by globalBusy (session ops) or if message ops are happening */}
             <button className="button" onClick={handleCopyAll} disabled={!messages || messages.length === 0 || globalBusy || isLoadingMessageOps }>Copy All Text</button>
           </div>
         </div>
@@ -319,7 +349,6 @@ export default function App() {
         <div className="content-container">
           <div className="chat-container" ref={scrollContainerRef}>
             <div className="chat-nav-rail">
-              {/* Scroll buttons are NOT disabled by message sending, only by session operations */}
               <button className="button icon-button" onClick={scrollToPrev} title="Scroll Up" disabled={isLoadingSession}>↑</button>
               <button className="button icon-button" onClick={scrollToNext} title="Scroll Down" disabled={isLoadingSession}>↓</button>
             </div>
@@ -329,10 +358,7 @@ export default function App() {
                 messages={messages}
                 editingId={editingId}
                 editText={editText}
-                // loadingSend for ChatArea's internal "Resend" button (if it were separate)
-                // For now, the main "Send" is in PromptBuilder.
-                // Individual message actions (edit, resend, delete) are controlled by chatAreaActionsDisabled.
-                loadingSend={isSendingMessage} // Or a more specific isResending for its own resend
+                loadingSend={isSendingMessage} 
                 savingEdit={isSavingEdit}
                 setEditText={setEditText}
                 handleSaveEdit={saveEdit}
@@ -340,7 +366,7 @@ export default function App() {
                 handleStartEdit={startEdit}
                 handleResendMessage={resendMessage}
                 handleDeleteMessage={deleteMessage}
-                actionsDisabled={chatAreaActionsDisabled} // Use the more granular disabling
+                actionsDisabled={chatAreaActionsDisabled} 
               />
             )}
             {!isLoadingMessages && currentChatId && messages?.length === 0 && (
@@ -354,7 +380,7 @@ export default function App() {
               setMode={setMode}
               form={form}
               setForm={setForm}
-              loadingSend={promptBuilderLoadingSend} // Specifically for the "Send" button
+              loadingSend={promptBuilderLoadingSend} 
               handleSend={handleSend}
               showToast={Toast}
               imagePreviews={pendingImages}
