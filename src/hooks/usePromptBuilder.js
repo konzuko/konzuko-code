@@ -29,7 +29,7 @@ function buildNewUserPromptText(currentForm, currentMode, currentPendingFiles, p
     });
     return out.join('\n');
   }
-  if (currentMode === 'COMMIT') return 'MODE: COMMIT\nGenerate a git-style commit message for everything accomplished since last commit. If there was no previous commit, generate a commit message based on everything accomplished. Be detailed and comprehensive';
+  if (currentMode === 'COMMIT') return 'MODE: COMMIT\nIdentify the last commit done in this chat, then identify everything accomplished since then. Generate a git-style commit message for everything accomplished. If there was no previous commit, generate a commit message based on everything accomplished since the beginning of this chat. Be detailed and comprehensive';
   if (currentMode === 'CODE CHECK') return 'MODE: CODE CHECK\nPlease analyze any errors or pitfalls.';
   return '';
 }

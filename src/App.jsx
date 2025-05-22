@@ -1,10 +1,10 @@
 // src/App.jsx
 import {
-  useState,
   useEffect,
-  useCallback,
-  useRef,
-  useMemo
+  useMemo,
+  useState,
+  useRef, // Added useRef back
+  useCallback // Added useCallback back (used for callWorkerForTokenCount and handleUpdateChatTitleTrigger)
 } from 'preact/hooks';
 
 import ChatList from './ChatList.jsx';
@@ -18,6 +18,7 @@ import { useSettings } from './hooks.js';
 import { useChatSessionManager } from './hooks/useChatSessionManager.js';
 import { useMessageManager } from './hooks/useMessageManager.js';
 import { usePromptBuilder } from './hooks/usePromptBuilder.js';
+import { useScrollNavigation } from './hooks/useScrollNavigation.js';
 
 import { useTokenizableContent } from './hooks/useTokenizableContent.js';
 import { IMAGE_TOKEN_ESTIMATE } from './config.js';
@@ -41,7 +42,7 @@ export default function App() {
     setCurrentChatId,
     createChat,
     deleteChat,
-    updateChatTitle: mutateUpdateChatTitle, // Renamed to avoid confusion with the handler
+    updateChatTitle, // This is the mutate function from the hook
     isLoadingSession,
     isCreatingChat,
   } = useChatSessionManager();
@@ -80,13 +81,19 @@ export default function App() {
     resetPrompt,
   } = usePromptBuilder();
 
+  const {
+    scrollContainerRef,
+    scrollToPrev,
+    scrollToNext,
+    scrollToBottom,
+  } = useScrollNavigation();
+
 
   const [apiCalculatedTokenCount, setApiCalculatedTokenCount] = useState(0);
   const [isCountingApiTokens, setIsCountingApiTokens] = useState(false);
   const tokenCountVersionRef = useRef(0);
   const debouncedApiCallRef = useRef(null);
 
-  const chatContainerRef = useRef(null);
 
   const itemsForApiCount = useTokenizableContent(
     messages,
@@ -94,7 +101,7 @@ export default function App() {
     pendingPDFs
   );
 
-  const callWorkerForTokenCount = useCallback((currentItemsForApi, currentApiKey, currentModel) => {
+   const callWorkerForTokenCount = useCallback((currentItemsForApi, currentApiKey, currentModel) => {
     const currentVersion = ++tokenCountVersionRef.current;
     if (!currentApiKey || String(currentApiKey).trim() === "") {
       if (tokenCountVersionRef.current === currentVersion) {
@@ -137,15 +144,32 @@ export default function App() {
     [isLoadingMessageOps]
   );
 
+  useEffect(() => {
+    if (messages.length > 0) {
+        const lastMessage = messages[messages.length - 1];
+        if (lastMessage.role === 'assistant' || (lastMessage.role === 'user' && !editingId)) {
+            const box = scrollContainerRef.current;
+            if (box && (box.scrollHeight - box.scrollTop - box.clientHeight > 100)) {
+                // User has scrolled up significantly, don't auto-scroll
+            } else {
+                scrollToBottom('smooth');
+            }
+        }
+    }
+  }, [messages, editingId, scrollToBottom, scrollContainerRef]);
+
 
   useEffect(() => {
     if (currentChatId !== previousChatIdRef.current) {
       if (editingId) cancelEdit();
       resetPrompt();
       handleProjectRootChange(null);
+      if (previousChatIdRef.current !== null) {
+        setTimeout(() => scrollToBottom('auto'), 0);
+      }
     }
     previousChatIdRef.current = currentChatId;
-  }, [currentChatId, editingId, cancelEdit, resetPrompt, handleProjectRootChange]);
+  }, [currentChatId, editingId, cancelEdit, resetPrompt, handleProjectRootChange, scrollToBottom]);
 
 
   function handleSend() {
@@ -186,34 +210,6 @@ export default function App() {
     resetPrompt();
   }
 
-  const scrollToPrev = useCallback(() => {
-    const box = chatContainerRef.current; if (!box) return;
-    const messagesInView = Array.from(box.querySelectorAll('.message'));
-    if (!messagesInView.length) return;
-    const viewportTop = box.scrollTop;
-    let targetScroll = 0;
-    for (let i = messagesInView.length - 1; i >= 0; i--) {
-      const msg = messagesInView[i];
-      if (msg.offsetTop < viewportTop - 10) { targetScroll = msg.offsetTop; break; }
-    }
-    box.scrollTo({ top: targetScroll, behavior: 'smooth' });
-  }, []);
-
-  const scrollToNext = useCallback(() => {
-    const box = chatContainerRef.current; if (!box) return;
-    const viewportBottom = box.scrollTop + box.clientHeight;
-    if (box.scrollHeight - viewportBottom < 50) {
-      box.scrollTo({ top: box.scrollHeight, behavior: 'smooth' }); return;
-    }
-    const messagesInView = Array.from(box.querySelectorAll('.message'));
-    if (!messagesInView.length) return;
-    let targetScroll = box.scrollHeight;
-    for (let i = 0; i < messagesInView.length; i++) {
-      const msg = messagesInView[i];
-      if (msg.offsetTop >= viewportBottom) { targetScroll = msg.offsetTop; break; }
-    }
-    box.scrollTo({ top: targetScroll, behavior: 'smooth' });
-  }, []);
 
   const handleCopyAll = () => {
     const txt = messages.map(m => {
@@ -241,15 +237,14 @@ export default function App() {
     return apiCalculatedTokenCount + estimatedImageTokens;
   }, [apiCalculatedTokenCount, pendingImages, messages]);
 
-  // Handler function to correctly call the mutation
   const handleUpdateChatTitleTrigger = useCallback((id, title) => {
     if (!id) {
         console.error("handleUpdateChatTitleTrigger called with undefined id");
         Toast("Error: Could not update title due to missing ID.", 4000);
         return;
     }
-    mutateUpdateChatTitle({ id, title });
-  }, [mutateUpdateChatTitle]);
+    updateChatTitle({ id, title });
+  }, [updateChatTitle]);
 
 
   return (
@@ -259,7 +254,7 @@ export default function App() {
         onSelectChat={setCurrentChatId}
         onNewChatTrigger={createChat}
         onDeleteChatTrigger={deleteChat}
-        onUpdateChatTitleTrigger={handleUpdateChatTitleTrigger} // Pass the new handler
+        onUpdateChatTitleTrigger={handleUpdateChatTitleTrigger}
         appDisabled={globalBusy || isCreatingChat}
       />
       <div className="main-content">
@@ -305,7 +300,7 @@ export default function App() {
           </div>
         )}
         <div className="content-container">
-          <div className="chat-container" ref={chatContainerRef}>
+          <div className="chat-container" ref={scrollContainerRef}>
             <div className="chat-nav-rail">
               <button className="button icon-button" onClick={scrollToPrev} title="Scroll Up" disabled={globalBusy}>↑</button>
               <button className="button icon-button" onClick={scrollToNext} title="Scroll Down" disabled={globalBusy}>↓</button>
