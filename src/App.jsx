@@ -3,8 +3,8 @@ import {
   useEffect,
   useMemo,
   useState,
-  useRef, // Added useRef back
-  useCallback // Added useCallback back (used for callWorkerForTokenCount and handleUpdateChatTitleTrigger)
+  useRef,
+  useCallback
 } from 'preact/hooks';
 
 import ChatList from './ChatList.jsx';
@@ -42,9 +42,9 @@ export default function App() {
     setCurrentChatId,
     createChat,
     deleteChat,
-    updateChatTitle, // This is the mutate function from the hook
-    isLoadingSession,
-    isCreatingChat,
+    updateChatTitle,
+    isLoadingSession, // True if chat list operations are happening (create, delete, rename)
+    isCreatingChat,   // Specific state for new chat button
   } = useChatSessionManager();
 
   const {
@@ -59,8 +59,11 @@ export default function App() {
     sendMessage,
     resendMessage,
     deleteMessage,
-    isLoadingOps: isLoadingMessageOps,
-    isSavingEdit,
+    isLoadingOps: isLoadingMessageOps, // True if any message operation is in progress
+    isSendingMessage, // Specific state for send button in PromptBuilder
+    isSavingEdit,     // Specific state for save button in ChatArea
+    // isResendingMessage, // Can be added if needed for specific UI
+    // isDeletingMessage,  // Can be added if needed for specific UI
   } = useMessageManager(currentChatId, settings.apiKey);
 
   const {
@@ -133,16 +136,26 @@ export default function App() {
     debouncedApiCallRef.current(itemsForApiCount, settings.apiKey, modelToUse);
   }, [itemsForApiCount, settings.apiKey, settings.model, callWorkerForTokenCount]);
 
-
+  // globalBusy should reflect operations that make the *entire app* or major sections unstable for interaction.
+  // Chat list operations (isLoadingSession) fit this.
+  // Individual message operations (isLoadingMessageOps) might not need to block everything.
   const globalBusy = useMemo(() =>
-    isLoadingSession || isLoadingMessageOps,
-    [isLoadingSession, isLoadingMessageOps]
+    isLoadingSession, // Only disable global things if chat session ops are in progress
+    [isLoadingSession]
   );
 
+  // This specifically controls the "Send" button in PromptBuilder
   const promptBuilderLoadingSend = useMemo(() =>
-    isLoadingMessageOps,
-    [isLoadingMessageOps]
+    isSendingMessage, // Use the specific flag from useMessageManager
+    [isSendingMessage]
   );
+
+  // This controls actions within ChatArea (edit, resend, delete message buttons)
+  const chatAreaActionsDisabled = useMemo(() =>
+    isLoadingMessageOps || isLoadingSession, // Disable if any message op OR session op is happening
+    [isLoadingMessageOps, isLoadingSession]
+  );
+
 
   useEffect(() => {
     if (messages.length > 0) {
@@ -173,7 +186,8 @@ export default function App() {
 
 
   function handleSend() {
-    if (promptBuilderLoadingSend || globalBusy) {
+    // Use promptBuilderLoadingSend for this specific action
+    if (promptBuilderLoadingSend || globalBusy) { // globalBusy check here is okay as sending is a major action
       if (!currentChatId) Toast("Please select or create a chat first.", 3000);
       return;
     }
@@ -255,14 +269,16 @@ export default function App() {
         onNewChatTrigger={createChat}
         onDeleteChatTrigger={deleteChat}
         onUpdateChatTitleTrigger={handleUpdateChatTitleTrigger}
-        appDisabled={globalBusy || isCreatingChat}
+        // ChatList is disabled if session operations are happening or a new chat is specifically being created.
+        // It's NOT disabled if only a message is sending within the current chat.
+        appDisabled={isLoadingSession || isCreatingChat}
       />
       <div className="main-content">
         <div className="top-bar">
           <button
             className="button"
             onClick={() => setSettings(s => ({ ...s, showSettings: !s.showSettings }))}
-            disabled={globalBusy}
+            disabled={globalBusy} // Settings button can be disabled by globalBusy (session ops)
           >
             {settings.showSettings ? 'Close Settings' : 'Open Settings'}
           </button>
@@ -272,7 +288,8 @@ export default function App() {
               Tokens: {totalPromptTokenCount.toLocaleString()}
               {isCountingApiTokens && <span style={{ marginLeft: '5px', fontStyle: 'italic' }}>(...)</span>}
             </div>
-            <button className="button" onClick={handleCopyAll} disabled={!messages || messages.length === 0 || globalBusy}>Copy All Text</button>
+            {/* Copy All Text button can be disabled by globalBusy (session ops) or if message ops are happening */}
+            <button className="button" onClick={handleCopyAll} disabled={!messages || messages.length === 0 || globalBusy || isLoadingMessageOps }>Copy All Text</button>
           </div>
         </div>
         {settings.showSettings && (
@@ -302,8 +319,9 @@ export default function App() {
         <div className="content-container">
           <div className="chat-container" ref={scrollContainerRef}>
             <div className="chat-nav-rail">
-              <button className="button icon-button" onClick={scrollToPrev} title="Scroll Up" disabled={globalBusy}>↑</button>
-              <button className="button icon-button" onClick={scrollToNext} title="Scroll Down" disabled={globalBusy}>↓</button>
+              {/* Scroll buttons are NOT disabled by message sending, only by session operations */}
+              <button className="button icon-button" onClick={scrollToPrev} title="Scroll Up" disabled={isLoadingSession}>↑</button>
+              <button className="button icon-button" onClick={scrollToNext} title="Scroll Down" disabled={isLoadingSession}>↓</button>
             </div>
             {isLoadingMessages && currentChatId && <div className="chat-loading-placeholder">Loading messages...</div>}
             {!isLoadingMessages && currentChatId && messages?.length > 0 && (
@@ -311,7 +329,10 @@ export default function App() {
                 messages={messages}
                 editingId={editingId}
                 editText={editText}
-                loadingSend={promptBuilderLoadingSend}
+                // loadingSend for ChatArea's internal "Resend" button (if it were separate)
+                // For now, the main "Send" is in PromptBuilder.
+                // Individual message actions (edit, resend, delete) are controlled by chatAreaActionsDisabled.
+                loadingSend={isSendingMessage} // Or a more specific isResending for its own resend
                 savingEdit={isSavingEdit}
                 setEditText={setEditText}
                 handleSaveEdit={saveEdit}
@@ -319,7 +340,7 @@ export default function App() {
                 handleStartEdit={startEdit}
                 handleResendMessage={resendMessage}
                 handleDeleteMessage={deleteMessage}
-                actionsDisabled={globalBusy}
+                actionsDisabled={chatAreaActionsDisabled} // Use the more granular disabling
               />
             )}
             {!isLoadingMessages && currentChatId && messages?.length === 0 && (
@@ -333,7 +354,7 @@ export default function App() {
               setMode={setMode}
               form={form}
               setForm={setForm}
-              loadingSend={promptBuilderLoadingSend}
+              loadingSend={promptBuilderLoadingSend} // Specifically for the "Send" button
               handleSend={handleSend}
               showToast={Toast}
               imagePreviews={pendingImages}
