@@ -7,12 +7,14 @@ import { useMemo } from 'preact/hooks';
 export function useTokenizableContent(
     currentChatMessages,
     userPromptText, // This is the pre-constructed text from usePromptBuilder
-    currentPendingPDFs
+    currentPendingPDFs,
+    isSending // New parameter to indicate if a message is currently being sent
 ) {
     return useMemo(() => {
         const itemsForApiCount = [];
 
         // 1. Add existing chat messages
+        // This will include the new user message after an optimistic update if isSending is true.
         if (currentChatMessages && currentChatMessages.length > 0) {
             currentChatMessages.forEach(msg => {
                 const contentBlocks = Array.isArray(msg.content)
@@ -32,20 +34,25 @@ export function useTokenizableContent(
             });
         }
 
-        // 2. Add the main user prompt text (which now includes form inputs, file contents, and file tree)
-        if (userPromptText && String(userPromptText).trim() !== "") {
-            itemsForApiCount.push({ type: 'text', value: userPromptText });
-        }
+        // 2. If NOT currently sending, add the content for the next message from the prompt builder state.
+        //    If isSending is true, this content is assumed to be part of currentChatMessages due to optimistic update.
+        if (!isSending) {
+            // Add the main user prompt text (which now includes form inputs, file contents, and file tree)
+            if (userPromptText && String(userPromptText).trim() !== "") {
+                itemsForApiCount.push({ type: 'text', value: userPromptText });
+            }
 
-        // 3. Add any newly pending PDFs for the current message
-        // (Images are handled by estimation, text files are part of userPromptText)
-        if (currentPendingPDFs && currentPendingPDFs.length > 0) {
-            currentPendingPDFs.forEach(pdf => {
-                itemsForApiCount.push({ type: 'pdf', uri: pdf.fileId, mimeType: pdf.mimeType });
-            });
+            // Add any newly pending PDFs for the current message
+            // (Images are handled by estimation, text files are part of userPromptText)
+            if (currentPendingPDFs && currentPendingPDFs.length > 0) {
+                currentPendingPDFs.forEach(pdf => {
+                    itemsForApiCount.push({ type: 'pdf', uri: pdf.fileId, mimeType: pdf.mimeType });
+                });
+            }
         }
 
         return itemsForApiCount;
 
-    }, [currentChatMessages, userPromptText, currentPendingPDFs]);
+    }, [currentChatMessages, userPromptText, currentPendingPDFs, isSending]);
 }
+

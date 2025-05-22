@@ -77,8 +77,8 @@ export default function App() {
     addPendingPDF,
     pendingFiles,
     setPendingFiles,
-    currentProjectRootName,
-    handleProjectRootChange,
+    currentProjectRootName, // This is from usePromptBuilder
+    handleProjectRootChange, // This is from usePromptBuilder
     userPromptText, 
     resetPrompt,
   } = usePromptBuilder();
@@ -97,10 +97,12 @@ export default function App() {
   const debouncedApiCallRef = useRef(null);
 
 
+  // Pass isSendingMessage to useTokenizableContent
   const itemsForApiCount = useTokenizableContent(
     messages,
     userPromptText,
-    pendingPDFs
+    pendingPDFs,
+    isSendingMessage // Pass the flag here
   );
 
    const callWorkerForTokenCount = useCallback((currentItemsForApi, currentApiKey, currentModel) => {
@@ -170,14 +172,14 @@ export default function App() {
     if (currentChatId !== previousChatIdRef.current) {
       if (editingId) cancelEdit();
       resetPrompt(); 
-      handleProjectRootChange(null); 
+      // handleProjectRootChange(null); // This is now called inside resetPrompt
       sentPromptStateRef.current = null; // Clear sent state on chat switch
       if (previousChatIdRef.current !== null) {
         setTimeout(() => scrollToBottom('auto'), 0);
       }
     }
     previousChatIdRef.current = currentChatId;
-  }, [currentChatId, editingId, cancelEdit, resetPrompt, handleProjectRootChange, scrollToBottom]);
+  }, [currentChatId, editingId, cancelEdit, resetPrompt, scrollToBottom]);
 
 
   function handleSend() {
@@ -195,8 +197,6 @@ export default function App() {
       return;
     }
 
-    // Capture the state of the prompt *as it is being sent*
-    // Store in the ref
     sentPromptStateRef.current = {
       userPromptText: userPromptText,
       pendingImages: [...pendingImages.map(img => ({ url: img.url, name: img.name }))],
@@ -221,7 +221,7 @@ export default function App() {
 
     const onSendSuccessCallback = () => {
       const sentState = sentPromptStateRef.current;
-      if (!sentState) { // Should not happen if sentPromptStateRef was set before send
+      if (!sentState) { 
         resetPrompt();
         return;
       }
@@ -247,7 +247,7 @@ export default function App() {
       if (!textualContentChanged && !imagesChanged && !pdfsChanged) {
         resetPrompt();
       }
-      sentPromptStateRef.current = null; // Clear the ref after use
+      sentPromptStateRef.current = null; 
     };
 
     sendMessage({ 
@@ -270,7 +270,11 @@ export default function App() {
 
   const totalPromptTokenCount = useMemo(() => {
     let estimatedImageTokens = 0;
-    estimatedImageTokens += pendingImages.length * IMAGE_TOKEN_ESTIMATE;
+    
+    if (!isSendingMessage) {
+      estimatedImageTokens += pendingImages.length * IMAGE_TOKEN_ESTIMATE;
+    }
+
     (messages || []).forEach(msg => {
       const contentBlocks = Array.isArray(msg.content)
         ? msg.content
@@ -282,7 +286,7 @@ export default function App() {
       });
     });
     return apiCalculatedTokenCount + estimatedImageTokens;
-  }, [apiCalculatedTokenCount, pendingImages, messages]);
+  }, [apiCalculatedTokenCount, pendingImages, messages, isSendingMessage]); 
 
   const handleUpdateChatTitleTrigger = useCallback((id, title) => {
     if (!id) {
@@ -391,7 +395,8 @@ export default function App() {
               settings={settings}
               pendingFiles={pendingFiles}
               onFilesChange={setPendingFiles}
-              onProjectRootChange={handleProjectRootChange}
+              onProjectRootChange={handleProjectRootChange} // Passed to CodebaseImporter for it to notify builder
+              promptBuilderRootName={currentProjectRootName} // Passed to CodebaseImporter for it to listen to builder's root state
             />
           </div>
         </div>
@@ -399,3 +404,4 @@ export default function App() {
     </div>
   );
 }
+

@@ -50,7 +50,7 @@ export function usePromptBuilder() {
     return () => {
       imagesToRevokeOnUnmount.forEach(revokeOnce);
     };
-  }, []);
+  }, []); // Removed pendingImages from dependency array as it causes re-runs clearing new images if not careful
 
   const userPromptText = buildNewUserPromptText(form, mode, pendingFiles, currentProjectRootName);
 
@@ -60,8 +60,11 @@ export function usePromptBuilder() {
 
   const removePendingImage = useCallback((index) => {
     setPendingImages(prev => {
+      const imageToRevoke = prev[index];
       const newImages = prev.filter((_, j) => j !== index);
-      revokeOnce(prev[index]);
+      if (imageToRevoke) { // Ensure imageToRevoke exists before calling revokeOnce
+        revokeOnce(imageToRevoke);
+      }
       return newImages;
     });
   }, []);
@@ -70,23 +73,27 @@ export function usePromptBuilder() {
     setPendingPDFs(prev => [...prev, pdf]);
   }, []);
 
-  const resetPrompt = useCallback(() => {
-    pendingImages.forEach(revokeOnce);
-    setPendingImages([]);
-    setPendingPDFs([]);
-    setPendingFiles([]);
-    setForm(INITIAL_FORM_DATA);
-  }, [pendingImages, setForm]);
-
   const handleProjectRootChange = useCallback((newRootName) => {
     setCurrentProjectRootName(newRootName);
     if (newRootName === null) {
+        // When project root is cleared, remove files that were part of that project
         setPendingFiles(files => files.filter(f => !f.insideProject));
     }
-  }, []);
+    // If newRootName is set, files are added/filtered by CodebaseImporter,
+    // which then calls onFilesChange (setPendingFiles).
+  }, [setCurrentProjectRootName, setPendingFiles]);
 
-  // The JSX for mode selection buttons has been removed from here.
-  // It correctly resides in PromptBuilder.jsx.
+
+  const resetPrompt = useCallback(() => {
+    // Revoke URLs for current pending images before clearing the array
+    pendingImages.forEach(revokeOnce);
+    setPendingImages([]);
+    setPendingPDFs([]);
+    setPendingFiles([]); // Clears files from the builder's perspective
+    setForm(INITIAL_FORM_DATA);
+    handleProjectRootChange(null); // Signal to clear the project root concept
+  }, [pendingImages, setForm, handleProjectRootChange, setPendingImages, setPendingPDFs, setPendingFiles]);
+
 
   return {
     form,

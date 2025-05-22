@@ -43,7 +43,7 @@ export default function PromptBuilder({
   mode, setMode,
 
   form, setForm,
-  loadingSend, handleSend, // handleCancelSend removed
+  loadingSend, handleSend, 
   showToast,
 
   imagePreviews = [],          
@@ -55,7 +55,8 @@ export default function PromptBuilder({
 
   settings, 
   pendingFiles, onFilesChange,
-  onProjectRootChange // New prop
+  onProjectRootChange, // Callback for CodebaseImporter to notify builder of root changes
+  promptBuilderRootName // Builder's current root name, for CodebaseImporter to listen to
 }) {
   const formRef = useRef(form);
   const textareaRefs = useRef({}); 
@@ -129,7 +130,7 @@ export default function PromptBuilder({
             ref={el => textareaRefs.current[key] = el}
             rows={rows}
             className="form-textarea"
-            style={{ maxHeight: `${MAX_PROMPT_TEXTAREA_HEIGHT}px` }} // CSS also respects this if JS fails
+            style={{ maxHeight: `${MAX_PROMPT_TEXTAREA_HEIGHT}px` }} 
             value={form[key]}
             onInput={e => {
               setForm(f => ({ ...f, [key]: e.target.value }));
@@ -140,14 +141,15 @@ export default function PromptBuilder({
       ))}
 
       {mode === 'DEVELOP' && (
-        <CodebaseImporter // Updated component usage
+        <CodebaseImporter 
           files={pendingFiles}
           onFilesChange={onFilesChange}
           onSkip={n => showToast?.(`${n} file${n>1?'s':''} ignored`)}
           onAddImage={onAddImage}
           onAddPDF={onAddPDF}
           settings={settings}
-          onProjectRootChange={onProjectRootChange} // Pass down
+          onProjectRootChange={onProjectRootChange} 
+          currentProjectRootNameFromBuilder={promptBuilderRootName} // Pass down the builder's root name
         />
       )}
 
@@ -186,8 +188,7 @@ export default function PromptBuilder({
       )}
 
       <div style={{ display:'flex', justifyContent:'flex-end', alignItems: 'center', marginTop:'auto', paddingTop: '12px' }}> 
-        {/* Cancel button removed */}
-        <div style={{ position: 'relative' }}> {/* Wrapper for potential spinner */}
+        <div style={{ position: 'relative' }}> 
           <button
             className="button send-button"
             disabled={loadingSend}
@@ -195,9 +196,9 @@ export default function PromptBuilder({
           >
             {loadingSend ? 'Sending…' : 'Send'}
           </button>
-          {/* {loadingSend && <div className="spinner- naast-button"></div>} You could add a spinner here */}
         </div>
       </div>
     </div>
   );
 }
+
