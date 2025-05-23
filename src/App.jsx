@@ -140,7 +140,8 @@ export default function App() {
 
   useEffect(() => {
     if (!debouncedApiCallRef.current) {
-      debouncedApiCallRef.current = debounce(callWorkerForTokenCount, 750);
+      // Updated debounce delay to 2000ms (2 seconds)
+      debouncedApiCallRef.current = debounce(callWorkerForTokenCount, 2000);
     }
     const modelToUse = settings.model || GEMINI_MODEL_NAME;
     debouncedApiCallRef.current(itemsForApiCount, settings.apiKey, modelToUse);

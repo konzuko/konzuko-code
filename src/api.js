@@ -2,7 +2,7 @@
    File: src/api.js
 ====================================================================== */
 
-console.log('API.JS FILE LOADED (for @google/genai & TanStack Query) - VERSION TQ_004_OPTIMISTIC_UNDO - TIMESTAMP', new Date().toISOString());
+console.log('API.JS FILE LOADED (for @google/genai & TanStack Query) - VERSION TQ_004_OPTIMISTIC_UNDO_WITH_GEMINI_LOGGING - TIMESTAMP', new Date().toISOString());
 
 import { supabase }                      from './lib/supabase.js'
 import { GEMINI_API_TIMEOUT_MS }         from './config.js'
@@ -29,11 +29,15 @@ function validateKey(raw = '') {
 
 async function convertImageUrlToPart(imageUrlBlock) {
     if (!imageUrlBlock.image_url || !imageUrlBlock.image_url.url) {
+        console.warn('[API - convertImageUrlToPart] Invalid image_url block:', imageUrlBlock);
         return { text: `[Invalid image_url block]` };
     }
     try {
         const res = await fetch(imageUrlBlock.image_url.url);
-        if (!res.ok) throw new Error(`Fetch ${res.status} from ${imageUrlBlock.image_url.url}`);
+        if (!res.ok) {
+            console.error(`[API - convertImageUrlToPart] Fetch failed ${res.status} from ${imageUrlBlock.image_url.url}`);
+            throw new Error(`Fetch ${res.status} from ${imageUrlBlock.image_url.url}`);
+        }
         const blob = await res.blob();
         const base64 = await new Promise((resolve, reject) => {
             const fr = new FileReader();
@@ -48,7 +52,7 @@ async function convertImageUrlToPart(imageUrlBlock) {
             },
         };
     } catch (e) {
-        console.error(`Error in convertImageUrlToPart for ${imageUrlBlock.image_url.original_name} (${imageUrlBlock.image_url.url}):`, e);
+        console.error(`[API - convertImageUrlToPart] Error for ${imageUrlBlock.image_url.original_name} (${imageUrlBlock.image_url.url}):`, e);
         return { text: `[⚠ could not fetch image: ${imageUrlBlock.image_url.original_name}]` };
     }
 }
@@ -68,25 +72,36 @@ export async function callApiForText({
   apiKey   = '', 
   signal
 } = {}) {
+  const callTimestamp = new Date().toISOString();
+  console.log(`[API - callApiForText @ ${callTimestamp}] Initiating call.`);
+
   let validatedKey;
   try {
     validatedKey = validateKey(apiKey); 
   } catch (err) {
+    console.error(`[API - callApiForText @ ${callTimestamp}] API Key validation failed:`, err.message);
     throw err; 
   }
+
   if (signal?.aborted) {
-    const abortError = new Error('Request aborted by caller');
+    const abortError = new Error('Request aborted by caller before API call');
     abortError.name = 'AbortError';
+    console.warn(`[API - callApiForText @ ${callTimestamp}] Request aborted by caller (pre-call).`);
     throw abortError; 
   }
+
   let ai;
   try {
     ai = new GoogleGenAI({ apiKey: validatedKey });
   } catch (err) {
+    console.error(`[API - callApiForText @ ${callTimestamp}] @google/genai SDK initialisation failed:`, err.message, err);
     throw new Error('@google/genai SDK initialisation failed: ' + err.message); 
   }
+
   let systemInstructionText = "";
   const historyContents = [];
+  console.log(`[API - callApiForText @ ${callTimestamp}] Processing ${messages.length} input messages.`);
+
   for (const msg of messages) {
     const parts = [];
     const contentBlocks = Array.isArray(msg.content)
@@ -118,17 +133,19 @@ export async function callApiForText({
       }
     }
   }
+
   if (historyContents.length === 0 && !systemInstructionText) {
+    console.error(`[API - callApiForText @ ${callTimestamp}] No content (history or system instruction) to send to the model.`);
     throw new Error("No content to send to the model."); 
   }
+
   const requestPayload = {
     model: GEMINI_MODEL_NAME,
     contents: historyContents,
     config: {
-      temperature: 0.0, // Goal: Set temperature to 0
-      topP: 0.95, // Default topP, can be adjusted if needed, but not requested
-      // topK: Default topK can also be set here if desired
-      safetySettings: [ // Goal: Hatespeech and all those filters should be turned off
+      temperature: 0.0,
+      topP: 0.95,
+      safetySettings: [
         { category: "HARM_CATEGORY_HARASSMENT", threshold: "OFF" },
         { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "OFF" },
         { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "OFF" },
@@ -137,32 +154,52 @@ export async function callApiForText({
       ...(systemInstructionText && { systemInstruction: systemInstructionText }),
     },
   };
+
   if (requestPayload.contents.length === 0 && !requestPayload.config.systemInstruction) {
+      console.error(`[API - callApiForText @ ${callTimestamp}] Final check: No contents or system instruction to send to API.`);
       throw new Error("No contents or system instruction to send to API."); 
   }
+
+  console.log(`[API - callApiForText @ ${callTimestamp}] Sending request to Gemini. Model: ${requestPayload.model}, History items: ${historyContents.length}, System instruction present: ${!!systemInstructionText}`);
+  // For very detailed debugging, you might log the full payload, but be mindful of size and PII:
+  // console.log(`[API - callApiForText @ ${callTimestamp}] Request Payload:`, JSON.stringify(requestPayload, null, 2));
+
+
   let timeoutId;
   const controller = new AbortController(); 
   if(signal) {
-    signal.addEventListener('abort', () => controller.abort());
+    signal.addEventListener('abort', () => {
+        console.warn(`[API - callApiForText @ ${callTimestamp}] External signal aborted. Aborting Gemini request.`);
+        controller.abort();
+    });
   }
+
   try {
     const generatePromise = ai.models.generateContent(requestPayload, { signal: controller.signal });
     const timeoutPromise = new Promise((_, rej) => {
       timeoutId = setTimeout(() => {
+        console.warn(`[API - callApiForText @ ${callTimestamp}] Request timed out after ${GEMINI_API_TIMEOUT_MS}ms. Aborting Gemini request.`);
         controller.abort(); 
-        rej(new Error('Request timed out'));
-      }, GEMINI_API_TIMEOUT_MS); // Use the updated constant name
+        rej(new Error(`Request timed out after ${GEMINI_API_TIMEOUT_MS / 1000}s`));
+      }, GEMINI_API_TIMEOUT_MS);
     });
+
     const response = await Promise.race([generatePromise, timeoutPromise]);
-    clearTimeout(timeoutId);
+    clearTimeout(timeoutId); // Clear timeout if generatePromise resolved or rejected first
+
+    console.log(`[API - callApiForText @ ${callTimestamp}] Received response from Gemini.`);
+    // Log the full raw response for detailed inspection:
+    // console.log(`[API - callApiForText @ ${callTimestamp}] Raw Gemini Response:`, JSON.stringify(response, null, 2));
+
     let textContent = "";
     if (response && response.candidates && response.candidates.length > 0) {
         const candidate = response.candidates[0];
-        // Even with filters OFF, the API might still block for extremely egregious content (e.g. CSAM, which is non-configurable)
-        // or if "OFF" isn't fully respected for all categories by the API endpoint for this model version.
-        // It's good practice to check finishReason.
+        console.log(`[API - callApiForText @ ${callTimestamp}] Candidate finishReason: ${candidate.finishReason}`);
+        if (candidate.safetyRatings) {
+            console.log(`[API - callApiForText @ ${callTimestamp}] Candidate safetyRatings:`, JSON.stringify(candidate.safetyRatings));
+        }
+
         if (candidate.finishReason === "SAFETY" || (candidate.safetyRatings && candidate.safetyRatings.some(r => r.blocked))) {
-            // Construct a more informative error message if possible
             let safetyMessage = `Content generation stopped due to safety reasons. Finish reason: ${candidate.finishReason}.`;
             if (candidate.safetyRatings) {
                 const blockedCategories = candidate.safetyRatings.filter(r => r.blocked).map(r => r.category).join(', ');
@@ -170,8 +207,10 @@ export async function callApiForText({
                     safetyMessage += ` Blocked categories: ${blockedCategories}.`;
                 }
             }
+            console.error(`[API - callApiForText @ ${callTimestamp}] Safety block: ${safetyMessage}`);
             throw new Error(safetyMessage);
         }
+
         if (candidate.content && candidate.content.parts && candidate.content.parts.length > 0) {
             for (const part of candidate.content.parts) {
                 if (part.text) {
@@ -179,24 +218,33 @@ export async function callApiForText({
                 }
             }
         }
-    } else if (response && typeof response.text === 'string') { 
+    } else if (response && typeof response.text === 'string') { // Fallback for simpler response structures if any
         textContent = response.text;
     }
+    
     if (textContent) {
+      console.log(`[API - callApiForText @ ${callTimestamp}] Extracted text content successfully. Length: ${textContent.length}`);
       return { content: textContent }; 
     } else {
-      // This can happen if the response is empty but not blocked, or if the structure is unexpected.
-      // If finishReason is MAX_TOKENS with 0 tokens generated, or OTHER, this might be hit.
       const finishReason = response?.candidates?.[0]?.finishReason;
-      if (finishReason && finishReason !== "STOP") {
-        throw new Error(`No text content generated by the model. Finish reason: ${finishReason}.`);
-      }
-      throw new Error('No text content generated by the model.'); 
+      const errMessage = `No text content generated by the model. Finish reason: ${finishReason || 'N/A'}. Full response logged above.`;
+      console.warn(`[API - callApiForText @ ${callTimestamp}] ${errMessage}`);
+      throw new Error(errMessage); 
     }
+
   } catch (err) {
-    clearTimeout(timeoutId);
-    if (err.name === 'AbortError' && signal?.aborted) throw err; 
-    if (err.name === 'AbortError' && !signal?.aborted) throw new Error('Request timed out'); 
+    clearTimeout(timeoutId); // Ensure timeout is cleared on any error
+    console.error(`[API - callApiForText @ ${callTimestamp}] Error during Gemini call or processing:`, err.message, err.name, err.stack, err);
+    
+    if (err.name === 'AbortError' && signal?.aborted) {
+        console.warn(`[API - callApiForText @ ${callTimestamp}] Confirmed AbortError due to external signal.`);
+        throw err; // Re-throw the original abort error
+    }
+    if (err.name === 'AbortError' && !signal?.aborted) { // This means timeoutPromise likely won
+        console.warn(`[API - callApiForText @ ${callTimestamp}] Confirmed AbortError due to timeout.`);
+        throw new Error(`Request timed out after ${GEMINI_API_TIMEOUT_MS / 1000}s`); 
+    }
+    // For other errors, re-throw them.
     throw err; 
   }
 }
