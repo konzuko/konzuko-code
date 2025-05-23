@@ -64,7 +64,7 @@ export default function App() {
     isLoadingOps: isLoadingMessageOps, 
     isSendingMessage, 
     isSavingEdit,
-    isResendingMessage, // Added from useMessageManager
+    isResendingMessage, 
   } = useMessageManager(currentChatId, settings.apiKey);
 
   const {
@@ -93,10 +93,12 @@ export default function App() {
   } = useScrollNavigation();
 
   const handleSelectChat = useCallback((newChatId) => {
-    if (newChatId === currentChatId) return;
+    if (newChatId === currentChatId && !isSwitchingChat) return; // Avoid re-triggering if already selected and not in switch
+    if (isSwitchingChat && newChatId === currentChatId) return; // Avoid re-triggering if already switching to this ID
+
     setIsSwitchingChat(true);
     originalSetCurrentChatId(newChatId);
-  }, [currentChatId, originalSetCurrentChatId]);
+  }, [currentChatId, originalSetCurrentChatId, isSwitchingChat]);
 
 
   const [apiCalculatedTokenCount, setApiCalculatedTokenCount] = useState(0);
@@ -159,7 +161,6 @@ export default function App() {
     [isLoadingMessageOps, isLoadingSession, isSwitchingChat]
   );
 
-  // MODIFIED: Disable Send button if sending a new message, saving an edit, OR resending a message
   const promptBuilderLoadingSend = useMemo(() =>
     isSendingMessage || isSavingEdit || isResendingMessage, 
     [isSendingMessage, isSavingEdit, isResendingMessage]
@@ -185,7 +186,18 @@ export default function App() {
     let scrollRafId;
     let transitionEndRafId;
 
+    // This effect should only run when currentChatId actually changes from its previous value.
+    // The `isSwitchingChat` state handles the two-phase render.
     if (currentChatId !== previousChatIdRef.current) {
+      // If isSwitchingChat is not yet true, it means handleSelectChat wasn't the trigger,
+      // which could happen on initial load or if currentChatId is set externally.
+      // In such cases, we might not need the full two-phase switching logic,
+      // but deferring cleanup is still good.
+      if (!isSwitchingChat && previousChatIdRef.current !== null) { // Check if it's a switch, not initial load
+         // This case might need careful handling if currentChatId can be set by means other than handleSelectChat
+         // For now, assume handleSelectChat is the primary way to switch.
+      }
+
       sentPromptStateRef.current = null; 
 
       cleanupRafId = requestAnimationFrame(() => {
@@ -201,9 +213,15 @@ export default function App() {
         });
       }
       
-      transitionEndRafId = requestAnimationFrame(() => {
-          setIsSwitchingChat(false);
-      });
+      // This rAF ensures that isSwitchingChat is set to false *after*
+      // the browser has had a chance to paint the initial forced loading state
+      // and after other rAFs for cleanup/scroll are scheduled.
+      // It should only run if isSwitchingChat was true.
+      if (isSwitchingChat) {
+        transitionEndRafId = requestAnimationFrame(() => {
+            setIsSwitchingChat(false);
+        });
+      }
       
       previousChatIdRef.current = currentChatId;
     }
@@ -212,7 +230,8 @@ export default function App() {
       if (scrollRafId) cancelAnimationFrame(scrollRafId);
       if (transitionEndRafId) cancelAnimationFrame(transitionEndRafId);
     };
-  }, [currentChatId]); 
+  }, [currentChatId]); // Only currentChatId. Other values are stable or read within rAF.
+                       // isSwitchingChat is managed by handleSelectChat and this effect.
 
   function handleSend() {
     if (promptBuilderLoadingSend || globalBusy) { 

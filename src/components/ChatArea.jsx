@@ -13,7 +13,8 @@ const flatten = c =>
 
 function ChatArea({
   messages = [],
-  isLoading, // New prop
+  isLoading, 
+  forceLoading, // New prop: If true, always show loading state initially
   editingId,
   editText,
   loadingSend,
@@ -38,7 +39,7 @@ function ChatArea({
     }
   }, [editingId, editText]);
 
-  if (isLoading) {
+  if (forceLoading || isLoading) { // Prioritize forceLoading
     return <div className="chat-loading-placeholder">Loading messages...</div>;
   }
 
@@ -175,18 +176,17 @@ function ChatArea({
 }
 
 function areEqual(prev, next) {
-  if (prev.isLoading !== next.isLoading) return false; // Added
+  if (prev.forceLoading !== next.forceLoading) return false; 
+  if (prev.isLoading !== next.isLoading) return false; 
   if (prev.editingId   !== next.editingId)   return false;
   if (prev.editText    !== next.editText)    return false;
   if (prev.loadingSend !== next.loadingSend) return false;
   if (prev.savingEdit  !== next.savingEdit)  return false;
   if (prev.actionsDisabled !== next.actionsDisabled) return false;
 
-  // If isLoading is true for next, messages might not be relevant yet,
-  // but if it was also true for prev, and other props are same, it's equal.
-  // If next.isLoading is false, then messages become critical.
-  if (next.isLoading) { // If next is loading, only other props matter for avoiding re-render
-    return prev.isLoading === next.isLoading &&
+  if (next.forceLoading || next.isLoading) {
+    return prev.forceLoading === next.forceLoading &&
+           prev.isLoading === next.isLoading &&
            prev.editingId === next.editingId &&
            prev.editText === next.editText &&
            prev.loadingSend === next.loadingSend &&
@@ -194,10 +194,11 @@ function areEqual(prev, next) {
            prev.actionsDisabled === next.actionsDisabled;
   }
 
-  // From here, next.isLoading is false.
   if (prev.messages === next.messages) return true;
+  if (!prev.messages && !next.messages) return true; 
+  if (!prev.messages || !next.messages) return false; 
   if (prev.messages.length !== next.messages.length) return false;
-  if (!prev.messages.length && !next.messages.length) return true; // Both empty
+  if (prev.messages.length === 0 && next.messages.length === 0) return true;
 
   for (let i = 0; i < prev.messages.length; i++) {
     if (prev.messages[i].id !== next.messages[i].id) return false;
