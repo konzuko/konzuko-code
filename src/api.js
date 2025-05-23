@@ -5,7 +5,7 @@
 console.log('API.JS FILE LOADED (for @google/genai & TanStack Query) - VERSION TQ_004_OPTIMISTIC_UNDO - TIMESTAMP', new Date().toISOString());
 
 import { supabase }                      from './lib/supabase.js'
-import { OPENAI_TIMEOUT_MS }             from './config.js'
+import { GEMINI_API_TIMEOUT_MS }         from './config.js'
 import {
     GoogleGenAI,
     // HarmCategory, // Not directly used as string values are used
@@ -151,7 +151,7 @@ export async function callApiForText({
       timeoutId = setTimeout(() => {
         controller.abort(); 
         rej(new Error('Request timed out'));
-      }, OPENAI_TIMEOUT_MS);
+      }, GEMINI_API_TIMEOUT_MS); // Use the updated constant name
     });
     const response = await Promise.race([generatePromise, timeoutPromise]);
     clearTimeout(timeoutId);
@@ -331,3 +331,4 @@ export async function undoDeleteMessage(id) {
   if (error) throw error;
   return data;
 }
+
