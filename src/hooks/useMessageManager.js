@@ -267,6 +267,7 @@ export function useMessageManager(currentChatId, apiKey) {
     isLoadingOps,
     isSendingMessage: sendMessageMutation.isPending,
     isSavingEdit: editMessageMutation.isPending,
-    isResendingMessage: resendMessageMutation.isPending,
+    isResendingMessage: resendMessageMutation.isPending, // Ensure this is returned
   };
 }
+

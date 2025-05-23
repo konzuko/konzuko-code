@@ -37,10 +37,11 @@ export default function App() {
   const [settings, setSettings] = useSettings();
   const previousChatIdRef = useRef(null);
   const sentPromptStateRef = useRef(null); 
+  const [isSwitchingChat, setIsSwitchingChat] = useState(false); 
 
   const {
     currentChatId,
-    setCurrentChatId,
+    setCurrentChatId: originalSetCurrentChatId, 
     createChat,
     deleteChat,
     updateChatTitle,
@@ -62,7 +63,8 @@ export default function App() {
     deleteMessage,
     isLoadingOps: isLoadingMessageOps, 
     isSendingMessage, 
-    isSavingEdit,     
+    isSavingEdit,
+    isResendingMessage, // Added from useMessageManager
   } = useMessageManager(currentChatId, settings.apiKey);
 
   const {
@@ -89,6 +91,12 @@ export default function App() {
     scrollToNext,
     scrollToBottom,
   } = useScrollNavigation();
+
+  const handleSelectChat = useCallback((newChatId) => {
+    if (newChatId === currentChatId) return;
+    setIsSwitchingChat(true);
+    originalSetCurrentChatId(newChatId);
+  }, [currentChatId, originalSetCurrentChatId]);
 
 
   const [apiCalculatedTokenCount, setApiCalculatedTokenCount] = useState(0);
@@ -137,87 +145,81 @@ export default function App() {
   }, [itemsForApiCount, settings.apiKey, settings.model, callWorkerForTokenCount]);
 
   const chatListDisabled = useMemo(() => 
-    isCreatingChat,
-    [isCreatingChat]
+    isCreatingChat || isSwitchingChat, 
+    [isCreatingChat, isSwitchingChat]
   );
 
   const globalBusy = useMemo(() =>
-    isLoadingSession, 
-    [isLoadingSession]
+    isLoadingSession || isSwitchingChat, 
+    [isLoadingSession, isSwitchingChat]
   );
   
   const chatAreaActionsDisabled = useMemo(() =>
-    isLoadingMessageOps || isLoadingSession, 
-    [isLoadingMessageOps, isLoadingSession]
+    isLoadingMessageOps || isLoadingSession || isSwitchingChat, 
+    [isLoadingMessageOps, isLoadingSession, isSwitchingChat]
   );
 
+  // MODIFIED: Disable Send button if sending a new message, saving an edit, OR resending a message
   const promptBuilderLoadingSend = useMemo(() =>
-    isSendingMessage, 
-    [isSendingMessage]
+    isSendingMessage || isSavingEdit || isResendingMessage, 
+    [isSendingMessage, isSavingEdit, isResendingMessage]
   );
 
 
   useEffect(() => {
-    // This effect handles scrolling to bottom when new messages arrive in the *current* chat.
-    if (messages.length > 0 && currentChatId) { 
+    if (messages.length > 0 && currentChatId && !isSwitchingChat) { 
         const lastMessage = messages[messages.length - 1];
         if (lastMessage.role === 'assistant' || (lastMessage.role === 'user' && !editingId)) {
             const box = scrollContainerRef.current;
             if (box && (box.scrollHeight - box.scrollTop - box.clientHeight > 100)) {
-                // User has scrolled up significantly, don't auto-scroll.
             } else {
                 scrollToBottom('smooth');
             }
         }
     }
-  }, [messages, editingId, scrollToBottom, scrollContainerRef, currentChatId]);
+  }, [messages, editingId, scrollToBottom, scrollContainerRef, currentChatId, isSwitchingChat]);
 
 
   useEffect(() => {
-    // This effect handles actions when the chat ID itself changes.
     let cleanupRafId;
     let scrollRafId;
+    let transitionEndRafId;
 
     if (currentChatId !== previousChatIdRef.current) {
-      
-      sentPromptStateRef.current = null; // Quick ref update, can stay synchronous
+      sentPromptStateRef.current = null; 
 
-      // Defer UI cleanup tasks to execute just before the next repaint cycle.
-      // This prioritizes rendering the new chat's loading state.
       cleanupRafId = requestAnimationFrame(() => {
-        if (editingId) { // Check and cancel edit inside the animation frame
+        if (editingId) { 
           cancelEdit();
         }
-        resetPrompt(); // Reset prompt state inside the animation frame
+        resetPrompt(); 
       });
 
       if (currentChatId) { 
-        // Also defer scroll to the next available animation frame.
-        // This ensures scrolling happens after the ChatArea is likely mounted
-        // and its initial loading state is visible.
         scrollRafId = requestAnimationFrame(() => {
             scrollToBottom('auto'); 
         });
       }
       
-      previousChatIdRef.current = currentChatId; // Quick ref update
+      transitionEndRafId = requestAnimationFrame(() => {
+          setIsSwitchingChat(false);
+      });
+      
+      previousChatIdRef.current = currentChatId;
     }
     return () => {
-      // Cleanup for the animation frames if the component unmounts
-      // or if the effect re-runs before the rAF callbacks execute.
-      if (cleanupRafId) {
-        cancelAnimationFrame(cleanupRafId); 
-      }
-      if (scrollRafId) {
-        cancelAnimationFrame(scrollRafId);
-      }
+      if (cleanupRafId) cancelAnimationFrame(cleanupRafId); 
+      if (scrollRafId) cancelAnimationFrame(scrollRafId);
+      if (transitionEndRafId) cancelAnimationFrame(transitionEndRafId);
     };
-  }, [currentChatId, editingId, cancelEdit, resetPrompt, scrollToBottom]);
-
+  }, [currentChatId]); 
 
   function handleSend() {
     if (promptBuilderLoadingSend || globalBusy) { 
       if (!currentChatId) Toast("Please select or create a chat first.", 3000);
+      if (isSavingEdit) Toast("An edit is currently in progress. Please wait.", 3000);
+      else if (isResendingMessage) Toast("A message is currently being resent. Please wait.", 3000);
+      else if (isSendingMessage) Toast("A message is currently being sent. Please wait.", 3000);
       return;
     }
     if (!currentChatId) {
@@ -335,7 +337,7 @@ export default function App() {
     <div className="app-container">
       <ChatList
         currentChatId={currentChatId}
-        onSelectChat={setCurrentChatId}
+        onSelectChat={handleSelectChat} 
         onNewChatTrigger={createChat}
         onDeleteChatTrigger={deleteChat}
         onUpdateChatTitleTrigger={handleUpdateChatTitleTrigger}
@@ -350,7 +352,7 @@ export default function App() {
           >
             {settings.showSettings ? 'Close Settings' : 'Open Settings'}
           </button>
-          <span style={{ margin: '0 1em', fontWeight: 'bold' }}>konzukoCode</span>
+          <span style={{ margin: '0 1em', fontWeight: 'bold' }}>Konzuko AI</span>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.5em', alignItems: 'center' }}>
             <div className="token-count-display">
               Tokens: {totalPromptTokenCount.toLocaleString()}
@@ -394,6 +396,7 @@ export default function App() {
                 key={currentChatId} 
                 messages={messages}
                 isLoading={isLoadingMessages}
+                forceLoading={isSwitchingChat} 
                 editingId={editingId}
                 editText={editText}
                 loadingSend={isSendingMessage}
