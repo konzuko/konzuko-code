@@ -93,8 +93,8 @@ export default function App() {
   } = useScrollNavigation();
 
   const handleSelectChat = useCallback((newChatId) => {
-    if (newChatId === currentChatId && !isSwitchingChat) return; // Avoid re-triggering if already selected and not in switch
-    if (isSwitchingChat && newChatId === currentChatId) return; // Avoid re-triggering if already switching to this ID
+    if (newChatId === currentChatId && !isSwitchingChat) return; 
+    if (isSwitchingChat && newChatId === currentChatId) return; 
 
     setIsSwitchingChat(true);
     originalSetCurrentChatId(newChatId);
@@ -140,7 +140,6 @@ export default function App() {
 
   useEffect(() => {
     if (!debouncedApiCallRef.current) {
-      // Updated debounce delay to 2000ms (2 seconds)
       debouncedApiCallRef.current = debounce(callWorkerForTokenCount, 2000);
     }
     const modelToUse = settings.model || GEMINI_MODEL_NAME;
@@ -187,18 +186,7 @@ export default function App() {
     let scrollRafId;
     let transitionEndRafId;
 
-    // This effect should only run when currentChatId actually changes from its previous value.
-    // The `isSwitchingChat` state handles the two-phase render.
     if (currentChatId !== previousChatIdRef.current) {
-      // If isSwitchingChat is not yet true, it means handleSelectChat wasn't the trigger,
-      // which could happen on initial load or if currentChatId is set externally.
-      // In such cases, we might not need the full two-phase switching logic,
-      // but deferring cleanup is still good.
-      if (!isSwitchingChat && previousChatIdRef.current !== null) { // Check if it's a switch, not initial load
-         // This case might need careful handling if currentChatId can be set by means other than handleSelectChat
-         // For now, assume handleSelectChat is the primary way to switch.
-      }
-
       sentPromptStateRef.current = null; 
 
       cleanupRafId = requestAnimationFrame(() => {
@@ -214,11 +202,7 @@ export default function App() {
         });
       }
       
-      // This rAF ensures that isSwitchingChat is set to false *after*
-      // the browser has had a chance to paint the initial forced loading state
-      // and after other rAFs for cleanup/scroll are scheduled.
-      // It should only run if isSwitchingChat was true.
-      if (isSwitchingChat) {
+      if (isSwitchingChat) { // Check current isSwitchingChat value
         transitionEndRafId = requestAnimationFrame(() => {
             setIsSwitchingChat(false);
         });
@@ -231,8 +215,10 @@ export default function App() {
       if (scrollRafId) cancelAnimationFrame(scrollRafId);
       if (transitionEndRafId) cancelAnimationFrame(transitionEndRafId);
     };
-  }, [currentChatId]); // Only currentChatId. Other values are stable or read within rAF.
-                       // isSwitchingChat is managed by handleSelectChat and this effect.
+  }, [currentChatId, isSwitchingChat, editingId, resetPrompt, cancelEdit, scrollToBottom]);
+  // Dependencies updated to include isSwitchingChat and other relevant states/callbacks.
+  // resetPrompt is not perfectly stable if pendingImages changes, but its effect here is guarded
+  // by `currentChatId !== previousChatIdRef.current`, so spurious runs of the main block are avoided.
 
   function handleSend() {
     if (promptBuilderLoadingSend || globalBusy) { 
@@ -276,11 +262,16 @@ export default function App() {
 
     const onSendSuccessCallback = () => {
       const sentState = sentPromptStateRef.current;
-      if (!sentState) { 
-        resetPrompt();
+      
+      // If sentState is null, it means a chat switch occurred after this message
+      // was initiated. The chat switch logic already handled resetting the prompt.
+      // So, do not reset the prompt again here to avoid wiping new input.
+      if (!sentState) {
+        sentPromptStateRef.current = null; // Ensure it remains null
         return;
       }
 
+      // If chat was NOT switched, sentState is valid. Proceed with comparison.
       const currentImagesComparable = pendingImages.map(img => ({ url: img.url, name: img.name }));
       const currentPDFsComparable = pendingPDFs.map(pdf => ({ fileId: pdf.fileId, name: pdf.name }));
 
@@ -299,10 +290,12 @@ export default function App() {
                             pdf.name === sentState.pendingPDFs[i].name
                           );
 
+      // Only reset the prompt if the content hasn't changed since this specific 'send' action
+      // AND the chat wasn't switched (which is covered by the !sentState check above).
       if (!textualContentChanged && !imagesChanged && !pdfsChanged) {
         resetPrompt();
       }
-      sentPromptStateRef.current = null; 
+      sentPromptStateRef.current = null; // Nullify after use for this send operation.
     };
 
     sendMessage({ 
