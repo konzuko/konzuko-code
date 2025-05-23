@@ -5,37 +5,7 @@
 import { useEffect, useRef, useMemo } from 'preact/hooks'; 
 import { del }               from 'idb-keyval'; 
 import CodebaseImporter      from './CodebaseImporter.jsx'; // Updated import
-
-const autoResizeTextarea = (textarea, maxHeight) => {
-  if (textarea) {
-    textarea.style.overflowY = 'hidden'; // Prevent scrollbar flash during calculation
-    textarea.style.height = 'auto';    // Reset height to get accurate scrollHeight
-
-    const computedStyle = getComputedStyle(textarea);
-    const paddingTop = parseFloat(computedStyle.paddingTop);
-    const paddingBottom = parseFloat(computedStyle.paddingBottom);
-    const borderTop = parseFloat(computedStyle.borderTopWidth);
-    const borderBottom = parseFloat(computedStyle.borderBottomWidth);
-    
-    const currentScrollHeight = textarea.scrollHeight;
-    
-    if (maxHeight && currentScrollHeight > maxHeight) {
-      textarea.style.height = `${maxHeight}px`;
-      textarea.style.overflowY = 'auto'; 
-    } else {
-      const minRows = parseInt(textarea.getAttribute('rows') || '1', 10);
-      const lineHeight = parseFloat(computedStyle.lineHeight);
-      const minHeightBasedOnRows = (minRows * lineHeight) + paddingTop + paddingBottom + borderTop + borderBottom;
-      
-      textarea.style.height = `${Math.max(currentScrollHeight, minHeightBasedOnRows)}px`;
-      if (textarea.scrollHeight > parseFloat(textarea.style.height)) {
-          textarea.style.overflowY = 'auto';
-      } else {
-          textarea.style.overflowY = 'hidden';
-      }
-    }
-  }
-};
+import { autoResizeTextarea } from './lib/domUtils.js'; // Import from lib
 
 const MAX_PROMPT_TEXTAREA_HEIGHT = 250; // px
 
@@ -114,7 +84,7 @@ export default function PromptBuilder({
     <div className="template-container">
 
       <div className="mode-selector form-group">
-        {['DEVELOP', 'COMMIT', 'CODE CHECK'].map(m => (
+        {['DEVELOP', 'CODE CHECK', 'COMMIT'].map(m => ( // Swapped 'CODE CHECK' and 'COMMIT'
           <button
             key={m}
             className={mode === m ? 'button active' : 'button'}
@@ -201,4 +171,3 @@ export default function PromptBuilder({
     </div>
   );
 }
-
