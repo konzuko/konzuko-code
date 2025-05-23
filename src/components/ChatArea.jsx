@@ -4,17 +4,16 @@ import { useEffect, useRef } from 'preact/hooks';
 import MessageItem from './MessageItem.jsx';
 import useCopyToClipboard from '../hooks/useCopyToClipboard.js';
 import { getChecksum } from '../lib/checksumCache.js';
-import { autoResizeTextarea } from '../lib/domUtils.js'; // Import the utility
+import { autoResizeTextarea } from '../lib/domUtils.js';
 
 const flatten = c =>
   Array.isArray(c)
     ? c.filter(b => b.type === 'text').map(b => b.text).join('')
     : String(c ?? '');
 
-// autoResizeTextarea function is now imported from domUtils.js
-
 function ChatArea({
   messages = [],
+  isLoading, // New prop
   editingId,
   editText,
   loadingSend,
@@ -36,10 +35,16 @@ function ChatArea({
   useEffect(() => {
     if (editingId && editingTextareaRef.current) {
       autoResizeTextarea(editingTextareaRef.current, MAX_EDIT_TEXTAREA_HEIGHT);
-      // editingTextareaRef.current.focus();
-      // editingTextareaRef.current.select();
     }
   }, [editingId, editText]);
+
+  if (isLoading) {
+    return <div className="chat-loading-placeholder">Loading messages...</div>;
+  }
+
+  if (!messages || messages.length === 0) {
+    return <div className="chat-empty-placeholder">No messages in this chat yet. Send one!</div>;
+  }
 
   return (
     <>
@@ -170,15 +175,29 @@ function ChatArea({
 }
 
 function areEqual(prev, next) {
+  if (prev.isLoading !== next.isLoading) return false; // Added
   if (prev.editingId   !== next.editingId)   return false;
   if (prev.editText    !== next.editText)    return false;
   if (prev.loadingSend !== next.loadingSend) return false;
   if (prev.savingEdit  !== next.savingEdit)  return false;
   if (prev.actionsDisabled !== next.actionsDisabled) return false;
 
+  // If isLoading is true for next, messages might not be relevant yet,
+  // but if it was also true for prev, and other props are same, it's equal.
+  // If next.isLoading is false, then messages become critical.
+  if (next.isLoading) { // If next is loading, only other props matter for avoiding re-render
+    return prev.isLoading === next.isLoading &&
+           prev.editingId === next.editingId &&
+           prev.editText === next.editText &&
+           prev.loadingSend === next.loadingSend &&
+           prev.savingEdit === next.savingEdit &&
+           prev.actionsDisabled === next.actionsDisabled;
+  }
+
+  // From here, next.isLoading is false.
   if (prev.messages === next.messages) return true;
   if (prev.messages.length !== next.messages.length) return false;
-  if (!prev.messages.length && !next.messages.length) return true;
+  if (!prev.messages.length && !next.messages.length) return true; // Both empty
 
   for (let i = 0; i < prev.messages.length; i++) {
     if (prev.messages[i].id !== next.messages[i].id) return false;
@@ -188,3 +207,4 @@ function areEqual(prev, next) {
 }
 
 export default memo(ChatArea, areEqual);
+

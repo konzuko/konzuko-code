@@ -36,7 +36,7 @@ const debounce = (func, delay) => {
 export default function App() {
   const [settings, setSettings] = useSettings();
   const previousChatIdRef = useRef(null);
-  const sentPromptStateRef = useRef(null); // Ref to store prompt state at the moment of sending
+  const sentPromptStateRef = useRef(null); 
 
   const {
     currentChatId,
@@ -77,8 +77,8 @@ export default function App() {
     addPendingPDF,
     pendingFiles,
     setPendingFiles,
-    currentProjectRootName, // This is from usePromptBuilder
-    handleProjectRootChange, // This is from usePromptBuilder
+    currentProjectRootName, 
+    handleProjectRootChange, 
     userPromptText, 
     resetPrompt,
   } = usePromptBuilder();
@@ -97,12 +97,11 @@ export default function App() {
   const debouncedApiCallRef = useRef(null);
 
 
-  // Pass isSendingMessage to useTokenizableContent
   const itemsForApiCount = useTokenizableContent(
     messages,
     userPromptText,
     pendingPDFs,
-    isSendingMessage // Pass the flag here
+    isSendingMessage 
   );
 
    const callWorkerForTokenCount = useCallback((currentItemsForApi, currentApiKey, currentModel) => {
@@ -137,9 +136,19 @@ export default function App() {
     debouncedApiCallRef.current(itemsForApiCount, settings.apiKey, modelToUse);
   }, [itemsForApiCount, settings.apiKey, settings.model, callWorkerForTokenCount]);
 
+  const chatListDisabled = useMemo(() => 
+    isCreatingChat,
+    [isCreatingChat]
+  );
+
   const globalBusy = useMemo(() =>
     isLoadingSession, 
     [isLoadingSession]
+  );
+  
+  const chatAreaActionsDisabled = useMemo(() =>
+    isLoadingMessageOps || isLoadingSession, 
+    [isLoadingMessageOps, isLoadingSession]
   );
 
   const promptBuilderLoadingSend = useMemo(() =>
@@ -147,43 +156,67 @@ export default function App() {
     [isSendingMessage]
   );
 
-  const chatAreaActionsDisabled = useMemo(() =>
-    isLoadingMessageOps || isLoadingSession, 
-    [isLoadingMessageOps, isLoadingSession]
-  );
-
 
   useEffect(() => {
-    if (messages.length > 0) {
+    // This effect handles scrolling to bottom when new messages arrive in the *current* chat.
+    if (messages.length > 0 && currentChatId) { 
         const lastMessage = messages[messages.length - 1];
         if (lastMessage.role === 'assistant' || (lastMessage.role === 'user' && !editingId)) {
             const box = scrollContainerRef.current;
             if (box && (box.scrollHeight - box.scrollTop - box.clientHeight > 100)) {
-                // User has scrolled up significantly, don't auto-scroll
+                // User has scrolled up significantly, don't auto-scroll.
             } else {
                 scrollToBottom('smooth');
             }
         }
     }
-  }, [messages, editingId, scrollToBottom, scrollContainerRef]);
+  }, [messages, editingId, scrollToBottom, scrollContainerRef, currentChatId]);
 
 
   useEffect(() => {
+    // This effect handles actions when the chat ID itself changes.
+    let cleanupRafId;
+    let scrollRafId;
+
     if (currentChatId !== previousChatIdRef.current) {
-      if (editingId) cancelEdit();
-      resetPrompt(); 
-      // handleProjectRootChange(null); // This is now called inside resetPrompt
-      sentPromptStateRef.current = null; // Clear sent state on chat switch
-      if (previousChatIdRef.current !== null) {
-        setTimeout(() => scrollToBottom('auto'), 0);
+      
+      sentPromptStateRef.current = null; // Quick ref update, can stay synchronous
+
+      // Defer UI cleanup tasks to execute just before the next repaint cycle.
+      // This prioritizes rendering the new chat's loading state.
+      cleanupRafId = requestAnimationFrame(() => {
+        if (editingId) { // Check and cancel edit inside the animation frame
+          cancelEdit();
+        }
+        resetPrompt(); // Reset prompt state inside the animation frame
+      });
+
+      if (currentChatId) { 
+        // Also defer scroll to the next available animation frame.
+        // This ensures scrolling happens after the ChatArea is likely mounted
+        // and its initial loading state is visible.
+        scrollRafId = requestAnimationFrame(() => {
+            scrollToBottom('auto'); 
+        });
       }
+      
+      previousChatIdRef.current = currentChatId; // Quick ref update
     }
-    previousChatIdRef.current = currentChatId;
+    return () => {
+      // Cleanup for the animation frames if the component unmounts
+      // or if the effect re-runs before the rAF callbacks execute.
+      if (cleanupRafId) {
+        cancelAnimationFrame(cleanupRafId); 
+      }
+      if (scrollRafId) {
+        cancelAnimationFrame(scrollRafId);
+      }
+    };
   }, [currentChatId, editingId, cancelEdit, resetPrompt, scrollToBottom]);
 
 
   function handleSend() {
-    if (promptBuilderLoadingSend || globalBusy) {
+    if (promptBuilderLoadingSend || globalBusy) { 
       if (!currentChatId) Toast("Please select or create a chat first.", 3000);
       return;
     }
@@ -306,7 +339,7 @@ export default function App() {
         onNewChatTrigger={createChat}
         onDeleteChatTrigger={deleteChat}
         onUpdateChatTitleTrigger={handleUpdateChatTitleTrigger}
-        appDisabled={isLoadingSession || isCreatingChat}
+        appDisabled={chatListDisabled}
       />
       <div className="main-content">
         <div className="top-bar">
@@ -317,7 +350,7 @@ export default function App() {
           >
             {settings.showSettings ? 'Close Settings' : 'Open Settings'}
           </button>
-          <span style={{ margin: '0 1em', fontWeight: 'bold' }}>Konzuko AI</span>
+          <span style={{ margin: '0 1em', fontWeight: 'bold' }}>konzukoCode</span>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.5em', alignItems: 'center' }}>
             <div className="token-count-display">
               Tokens: {totalPromptTokenCount.toLocaleString()}
@@ -353,16 +386,17 @@ export default function App() {
         <div className="content-container">
           <div className="chat-container" ref={scrollContainerRef}>
             <div className="chat-nav-rail">
-              <button className="button icon-button" onClick={scrollToPrev} title="Scroll Up" disabled={isLoadingSession}>↑</button>
-              <button className="button icon-button" onClick={scrollToNext} title="Scroll Down" disabled={isLoadingSession}>↓</button>
+              <button className="button icon-button" onClick={scrollToPrev} title="Scroll Up" disabled={globalBusy}>↑</button>
+              <button className="button icon-button" onClick={scrollToNext} title="Scroll Down" disabled={globalBusy}>↓</button>
             </div>
-            {isLoadingMessages && currentChatId && <div className="chat-loading-placeholder">Loading messages...</div>}
-            {!isLoadingMessages && currentChatId && messages?.length > 0 && (
+            {currentChatId ? (
               <ChatArea
+                key={currentChatId} 
                 messages={messages}
+                isLoading={isLoadingMessages}
                 editingId={editingId}
                 editText={editText}
-                loadingSend={isSendingMessage} 
+                loadingSend={isSendingMessage}
                 savingEdit={isSavingEdit}
                 setEditText={setEditText}
                 handleSaveEdit={saveEdit}
@@ -370,13 +404,11 @@ export default function App() {
                 handleStartEdit={startEdit}
                 handleResendMessage={resendMessage}
                 handleDeleteMessage={deleteMessage}
-                actionsDisabled={chatAreaActionsDisabled} 
+                actionsDisabled={chatAreaActionsDisabled}
               />
+            ) : (
+              <div className="chat-empty-placeholder">Select or create a chat to begin.</div>
             )}
-            {!isLoadingMessages && currentChatId && messages?.length === 0 && (
-              <div className="chat-empty-placeholder">No messages in this chat yet. Send one!</div>
-            )}
-            {!currentChatId && <div className="chat-empty-placeholder">Select or create a chat to begin.</div>}
           </div>
           <div className="prompt-builder-area">
             <PromptBuilder
@@ -395,8 +427,8 @@ export default function App() {
               settings={settings}
               pendingFiles={pendingFiles}
               onFilesChange={setPendingFiles}
-              onProjectRootChange={handleProjectRootChange} // Passed to CodebaseImporter for it to notify builder
-              promptBuilderRootName={currentProjectRootName} // Passed to CodebaseImporter for it to listen to builder's root state
+              onProjectRootChange={handleProjectRootChange} 
+              promptBuilderRootName={currentProjectRootName} 
             />
           </div>
         </div>
