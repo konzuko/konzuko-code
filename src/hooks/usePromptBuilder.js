@@ -22,9 +22,10 @@ function buildNewUserPromptText(currentForm, currentMode, currentPendingFiles, p
     if (safeTrim(currentForm.developWarnings)) {
       out.push(`THINGS TO REMEMBER/WARNINGS: ${safeTrim(currentForm.developWarnings)}`);
     }
-    if (safeTrim(currentForm.developContext)) {
-      out.push(`CONTEXT: ${safeTrim(currentForm.developContext)}`);
-    }
+    // Removed CONTEXT section
+    // if (safeTrim(currentForm.developContext)) {
+    //   out.push(`CONTEXT: ${safeTrim(currentForm.developContext)}`);
+    // }
 
     const treePaths = currentPendingFiles.filter(f => f.insideProject).map(f => f.fullPath);
     if (projectRootName && treePaths.length > 0) {
@@ -84,7 +85,7 @@ export function usePromptBuilder() {
     return () => {
       imagesToRevokeOnUnmount.forEach(revokeOnce);
     };
-  }, []);
+  }, []); // Removed pendingImages from dependency array as it causes re-runs and premature revocations
 
   const userPromptText = buildNewUserPromptText(
     form,
@@ -112,18 +113,19 @@ export function usePromptBuilder() {
   const handleProjectRootChange = useCallback(newRootName => {
     setCurrentProjectRootName(newRootName);
     if (newRootName === null) {
+      // When project root is cleared, remove files that were part of that project
       setPendingFiles(files => files.filter(f => !f.insideProject));
     }
   }, []);
 
   const resetPrompt = useCallback(() => {
-    pendingImages.forEach(revokeOnce);
+    pendingImages.forEach(revokeOnce); // Revoke any existing images
     setPendingImages([]);
     setPendingPDFs([]);
-    setPendingFiles([]);
-    setForm(INITIAL_FORM_DATA);
-    handleProjectRootChange(null);
-  }, [pendingImages, setForm, handleProjectRootChange]);
+    setPendingFiles([]); // Clear text files
+    setForm(INITIAL_FORM_DATA); // Reset form fields to their initial state
+    handleProjectRootChange(null); // Reset project root concept
+  }, [pendingImages, setForm, handleProjectRootChange]); // Added pendingImages to deps for revokeOnce
 
   return {
     form,
@@ -133,10 +135,10 @@ export function usePromptBuilder() {
     pendingImages,
     addPendingImage,
     removePendingImage,
-    setPendingImages,
+    setPendingImages, // Keep this if direct setting is needed elsewhere, though usually add/remove are preferred
     pendingPDFs,
     addPendingPDF,
-    setPendingPDFs,
+    setPendingPDFs, // Keep for similar reasons
     pendingFiles,
     setPendingFiles,
     currentProjectRootName,
@@ -145,3 +147,4 @@ export function usePromptBuilder() {
     resetPrompt
   };
 }
+

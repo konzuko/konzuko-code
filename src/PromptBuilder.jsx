@@ -58,7 +58,7 @@ export default function PromptBuilder({
     ['FEATURES',     'developFeatures',     2],
     ['RETURN FORMAT','developReturnFormat', 2],
     ['THINGS TO REMEMBER/WARNINGS','developWarnings',2],
-    ['CONTEXT',      'developContext',      4]
+    // ['CONTEXT',      'developContext',      4] // Removed as per request
   ], []);
 
   useEffect(() => {
@@ -171,3 +171,4 @@ export default function PromptBuilder({
     </div>
   );
 }
+

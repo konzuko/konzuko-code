@@ -31,7 +31,7 @@ export const INITIAL_FORM_DATA = {
   developFeatures: '',
   developReturnFormat: 'return the complete refactored code for the respective changed files in FULL with NO OMISSIONS so that i can paste it directly into my ide',
   developWarnings: '',
-  developContext: '',
+  // developContext: '', // Removed as per request
   fixCode: '',
   fixErrors: ''
 };
@@ -257,3 +257,4 @@ export function useUndoableDelete(showToast) {
     [showToast]
   );
 }
+
