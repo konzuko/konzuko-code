@@ -11,16 +11,16 @@ function buildNewUserPromptText(currentForm, currentMode, currentPendingFiles, p
     const out = ['MODE: DEVELOP'];
 
     if (safeTrim(currentForm.developGoal)) {
-      out.push(`GOAL: ${safeTrim(currentForm.developGoal)}`);
+      out.push(`GOAL ${safeTrim(currentForm.developGoal)}`);
     }
     if (safeTrim(currentForm.developFeatures)) {
-      out.push(`FEATURES: ${safeTrim(currentForm.developFeatures)}`);
+      out.push(`FEATURES ${safeTrim(currentForm.developFeatures)}`);
     }
     if (safeTrim(currentForm.developReturnFormat)) {
-      out.push(`RETURN FORMAT: ${safeTrim(currentForm.developReturnFormat)}`);
+      out.push(`RETURN FORMAT ${safeTrim(currentForm.developReturnFormat)}`);
     }
     if (safeTrim(currentForm.developWarnings)) {
-      out.push(`THINGS TO REMEMBER/WARNINGS: ${safeTrim(currentForm.developWarnings)}`);
+      out.push(`THINGS TO REMEMBER/WARNINGS ${safeTrim(currentForm.developWarnings)}`);
     }
 
     const treePaths = currentPendingFiles.filter(f => f.insideProject).map(f => f.fullPath);
@@ -44,7 +44,7 @@ function buildNewUserPromptText(currentForm, currentMode, currentPendingFiles, p
 
   if (currentMode === 'COMMIT') {
     return (
-      'MODE: COMMIT\n' +
+      '## MODE # COMMIT\n' +
       'Identify the last commit done in this chat, then identify everything ' +
       'accomplished since then. Generate a git-style commit message for ' +
       'everything accomplished. If there was no previous commit, generate ' +
@@ -55,19 +55,16 @@ function buildNewUserPromptText(currentForm, currentMode, currentPendingFiles, p
 
   if (currentMode === 'CODE CHECK') {
     return (
-      'MODE: CODE CHECK\n' +
+      '## MODE # CODE CHECK\n' +
       "Analyze the provided code (and relevant context from our conversation) for potential issues. Systematically check against each of the following categories:\n\n" +
-      "1.  Syntax Errors: Identify any syntax mistakes.\n" +
-      "2.  Logical Errors: Pinpoint flaws in the code's logic or if it deviates from intended behavior.\n" +
-      "3.  Runtime Errors (Exceptions): Foresee potential crashes or exceptions during execution.\n" +
-      "4.  Concurrency Issues: (If applicable) Detect race conditions, deadlocks, or other multi-threading/asynchronous problems.\n" +
-      "5.  Semantic Errors: Check for incorrect use of language features or if the code's meaning is flawed.\n" +
-      "6.  Performance Issues: Identify bottlenecks, inefficient algorithms, excessive resource usage, or areas for optimization.\n" +
-      "7.  Security Issues: Uncover vulnerabilities such as injection, XSS, insecure data handling, auth/authz flaws, etc.\n" +
-      "8.  Testing & Validation Issues: Assess testability, sufficiency of input validation, and potential missing test cases or edge cases.\n" +
-      "9.  Code Quality & Maintainability Issues: Evaluate clarity, readability, structure, complexity, adherence to best practices (naming, comments, DRY, SOLID principles if applicable).\n" +
-      "10. Dependency or Environment Issues: Note potential problems with external dependencies, library versions, or assumptions about the runtime environment.\n\n" +
-      "For each category, provide specific findings, examples where possible, and explain the potential impact. If a category is not applicable or no issues are found, please explicitly state so for that category."
+      "1.  Logical Errors: Pinpoint flaws in the code's logic or if it deviates from intended behavior.\n" +
+      "2.  Runtime Errors (Exceptions): Foresee potential crashes or exceptions during execution.\n" +
+      "3.  Concurrency Issues: (If applicable) Detect race conditions, deadlocks, or other multi-threading/asynchronous problems.\n" +
+      "4.  Semantic Errors: Check for incorrect use of language features or if the code's meaning is flawed.\n" +
+      "5.  Performance Issues: Identify bottlenecks, inefficient algorithms, excessive resource usage, or areas for optimization.\n" +
+      "6.  Security Issues: Uncover vulnerabilities such as injection, XSS, insecure data handling, auth/authz flaws, etc.\n" +
+      "7.  Code Quality & Maintainability Issues: Evaluate clarity, readability, structure, complexity, adherence to best practices (naming, comments, DRY, SOLID principles if applicable).\n" +
+      "\nReturn in order of High and Low Severity, provide specific findings, examples where possible, and explain the potential impact. For any cateogories you don't find errors, just let us know that you don't find any errors at the end."
     );
   }
 
