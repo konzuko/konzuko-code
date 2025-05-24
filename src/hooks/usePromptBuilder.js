@@ -22,10 +22,6 @@ function buildNewUserPromptText(currentForm, currentMode, currentPendingFiles, p
     if (safeTrim(currentForm.developWarnings)) {
       out.push(`THINGS TO REMEMBER/WARNINGS: ${safeTrim(currentForm.developWarnings)}`);
     }
-    // Removed CONTEXT section
-    // if (safeTrim(currentForm.developContext)) {
-    //   out.push(`CONTEXT: ${safeTrim(currentForm.developContext)}`);
-    // }
 
     const treePaths = currentPendingFiles.filter(f => f.insideProject).map(f => f.fullPath);
     if (projectRootName && treePaths.length > 0) {
@@ -58,7 +54,21 @@ function buildNewUserPromptText(currentForm, currentMode, currentPendingFiles, p
   }
 
   if (currentMode === 'CODE CHECK') {
-    return 'MODE: CODE CHECK\nPlease analyze any errors or pitfalls.';
+    return (
+      'MODE: CODE CHECK\n' +
+      "Analyze the provided code (and relevant context from our conversation) for potential issues. Systematically check against each of the following categories:\n\n" +
+      "1.  Syntax Errors: Identify any syntax mistakes.\n" +
+      "2.  Logical Errors: Pinpoint flaws in the code's logic or if it deviates from intended behavior.\n" +
+      "3.  Runtime Errors (Exceptions): Foresee potential crashes or exceptions during execution.\n" +
+      "4.  Concurrency Issues: (If applicable) Detect race conditions, deadlocks, or other multi-threading/asynchronous problems.\n" +
+      "5.  Semantic Errors: Check for incorrect use of language features or if the code's meaning is flawed.\n" +
+      "6.  Performance Issues: Identify bottlenecks, inefficient algorithms, excessive resource usage, or areas for optimization.\n" +
+      "7.  Security Issues: Uncover vulnerabilities such as injection, XSS, insecure data handling, auth/authz flaws, etc.\n" +
+      "8.  Testing & Validation Issues: Assess testability, sufficiency of input validation, and potential missing test cases or edge cases.\n" +
+      "9.  Code Quality & Maintainability Issues: Evaluate clarity, readability, structure, complexity, adherence to best practices (naming, comments, DRY, SOLID principles if applicable).\n" +
+      "10. Dependency or Environment Issues: Note potential problems with external dependencies, library versions, or assumptions about the runtime environment.\n\n" +
+      "For each category, provide specific findings, examples where possible, and explain the potential impact. If a category is not applicable or no issues are found, please explicitly state so for that category."
+    );
   }
 
   return '';
@@ -85,7 +95,7 @@ export function usePromptBuilder() {
     return () => {
       imagesToRevokeOnUnmount.forEach(revokeOnce);
     };
-  }, []); // Removed pendingImages from dependency array as it causes re-runs and premature revocations
+  }, []);
 
   const userPromptText = buildNewUserPromptText(
     form,
@@ -113,19 +123,18 @@ export function usePromptBuilder() {
   const handleProjectRootChange = useCallback(newRootName => {
     setCurrentProjectRootName(newRootName);
     if (newRootName === null) {
-      // When project root is cleared, remove files that were part of that project
       setPendingFiles(files => files.filter(f => !f.insideProject));
     }
   }, []);
 
   const resetPrompt = useCallback(() => {
-    pendingImages.forEach(revokeOnce); // Revoke any existing images
+    pendingImages.forEach(revokeOnce); 
     setPendingImages([]);
     setPendingPDFs([]);
-    setPendingFiles([]); // Clear text files
-    setForm(INITIAL_FORM_DATA); // Reset form fields to their initial state
-    handleProjectRootChange(null); // Reset project root concept
-  }, [pendingImages, setForm, handleProjectRootChange]); // Added pendingImages to deps for revokeOnce
+    setPendingFiles([]); 
+    setForm(INITIAL_FORM_DATA); 
+    handleProjectRootChange(null); 
+  }, [pendingImages, setForm, handleProjectRootChange]); 
 
   return {
     form,
@@ -135,10 +144,10 @@ export function usePromptBuilder() {
     pendingImages,
     addPendingImage,
     removePendingImage,
-    setPendingImages, // Keep this if direct setting is needed elsewhere, though usually add/remove are preferred
+    setPendingImages, 
     pendingPDFs,
     addPendingPDF,
-    setPendingPDFs, // Keep for similar reasons
+    setPendingPDFs, 
     pendingFiles,
     setPendingFiles,
     currentProjectRootName,
