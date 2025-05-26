@@ -10,7 +10,7 @@ import {
 import ChatList from './ChatList.jsx';
 import PromptBuilder from './PromptBuilder.jsx';
 import ChatArea from './components/ChatArea.jsx';
-import Toast from './components/Toast.jsx';
+import Toast from './components/Toast.jsx'; // Ensure Toast is imported here
 
 import { GEMINI_MODEL_NAME } from './api.js';
 
@@ -202,7 +202,7 @@ export default function App() {
         });
       }
       
-      if (isSwitchingChat) { // Check current isSwitchingChat value
+      if (isSwitchingChat) { 
         transitionEndRafId = requestAnimationFrame(() => {
             setIsSwitchingChat(false);
         });
@@ -216,9 +216,7 @@ export default function App() {
       if (transitionEndRafId) cancelAnimationFrame(transitionEndRafId);
     };
   }, [currentChatId, isSwitchingChat, editingId, resetPrompt, cancelEdit, scrollToBottom]);
-  // Dependencies updated to include isSwitchingChat and other relevant states/callbacks.
-  // resetPrompt is not perfectly stable if pendingImages changes, but its effect here is guarded
-  // by `currentChatId !== previousChatIdRef.current`, so spurious runs of the main block are avoided.
+  
 
   function handleSend() {
     if (promptBuilderLoadingSend || globalBusy) { 
@@ -263,15 +261,11 @@ export default function App() {
     const onSendSuccessCallback = () => {
       const sentState = sentPromptStateRef.current;
       
-      // If sentState is null, it means a chat switch occurred after this message
-      // was initiated. The chat switch logic already handled resetting the prompt.
-      // So, do not reset the prompt again here to avoid wiping new input.
       if (!sentState) {
-        sentPromptStateRef.current = null; // Ensure it remains null
+        sentPromptStateRef.current = null; 
         return;
       }
 
-      // If chat was NOT switched, sentState is valid. Proceed with comparison.
       const currentImagesComparable = pendingImages.map(img => ({ url: img.url, name: img.name }));
       const currentPDFsComparable = pendingPDFs.map(pdf => ({ fileId: pdf.fileId, name: pdf.name }));
 
@@ -290,12 +284,10 @@ export default function App() {
                             pdf.name === sentState.pendingPDFs[i].name
                           );
 
-      // Only reset the prompt if the content hasn't changed since this specific 'send' action
-      // AND the chat wasn't switched (which is covered by the !sentState check above).
       if (!textualContentChanged && !imagesChanged && !pdfsChanged) {
         resetPrompt();
       }
-      sentPromptStateRef.current = null; // Nullify after use for this send operation.
+      sentPromptStateRef.current = null; 
     };
 
     sendMessage({ 
@@ -434,7 +426,7 @@ export default function App() {
               setForm={setForm}
               loadingSend={promptBuilderLoadingSend} 
               handleSend={handleSend}
-              showToast={Toast}
+              showToast={Toast} // Pass the Toast function here
               imagePreviews={pendingImages}
               pdfPreviews={pendingPDFs}
               onRemoveImage={removePendingImage}
@@ -452,4 +444,3 @@ export default function App() {
     </div>
   );
 }
-

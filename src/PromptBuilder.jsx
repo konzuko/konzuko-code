@@ -4,8 +4,8 @@
 */
 import { useEffect, useRef, useMemo } from 'preact/hooks'; 
 import { del }               from 'idb-keyval'; 
-import CodebaseImporter      from './CodebaseImporter.jsx'; // Updated import
-import { autoResizeTextarea } from './lib/domUtils.js'; // Import from lib
+import CodebaseImporter      from './CodebaseImporter.jsx'; 
+import { autoResizeTextarea } from './lib/domUtils.js'; 
 
 const MAX_PROMPT_TEXTAREA_HEIGHT = 250; // px
 
@@ -14,7 +14,7 @@ export default function PromptBuilder({
 
   form, setForm,
   loadingSend, handleSend, 
-  showToast,
+  showToast, // This is the Toast function from App.jsx
 
   imagePreviews = [],          
   pdfPreviews   = [],          
@@ -25,8 +25,8 @@ export default function PromptBuilder({
 
   settings, 
   pendingFiles, onFilesChange,
-  onProjectRootChange, // Callback for CodebaseImporter to notify builder of root changes
-  promptBuilderRootName // Builder's current root name, for CodebaseImporter to listen to
+  onProjectRootChange, 
+  promptBuilderRootName 
 }) {
   const formRef = useRef(form);
   const textareaRefs = useRef({}); 
@@ -58,7 +58,6 @@ export default function PromptBuilder({
     ['FEATURES',     'developFeatures',     2],
     ['RETURN FORMAT','developReturnFormat', 2],
     ['THINGS TO REMEMBER/WARNINGS','developWarnings',2],
-    // ['CONTEXT',      'developContext',      4] // Removed as per request
   ], []);
 
   useEffect(() => {
@@ -73,7 +72,7 @@ export default function PromptBuilder({
 
   function guardedSend() {
     if (mode === 'DEVELOP' && !form.developGoal.trim()) {
-      showToast?.('GOAL is required');
+      showToast?.('GOAL is required', 3000); // Added duration
       return;
     }
     handleSend();
@@ -84,7 +83,7 @@ export default function PromptBuilder({
     <div className="template-container">
 
       <div className="mode-selector form-group">
-        {['DEVELOP', 'CODE CHECK', 'COMMIT'].map(m => ( // Swapped 'CODE CHECK' and 'COMMIT'
+        {['DEVELOP', 'CODE CHECK', 'COMMIT'].map(m => ( 
           <button
             key={m}
             className={mode === m ? 'button active' : 'button'}
@@ -114,12 +113,12 @@ export default function PromptBuilder({
         <CodebaseImporter 
           files={pendingFiles}
           onFilesChange={onFilesChange}
-          onSkip={n => showToast?.(`${n} file${n>1?'s':''} ignored`)}
+          toastFn={showToast} // Pass showToast as toastFn
           onAddImage={onAddImage}
           onAddPDF={onAddPDF}
           settings={settings}
           onProjectRootChange={onProjectRootChange} 
-          currentProjectRootNameFromBuilder={promptBuilderRootName} // Pass down the builder's root name
+          currentProjectRootNameFromBuilder={promptBuilderRootName} 
         />
       )}
 
@@ -171,4 +170,3 @@ export default function PromptBuilder({
     </div>
   );
 }
-

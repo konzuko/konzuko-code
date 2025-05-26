@@ -1,4 +1,3 @@
-
 /*
   Toast   – stackable, HMR-safe, auto-cleaning
 
@@ -25,10 +24,11 @@ function ensureRoot() {
   Object.assign(rootEl.style, {
     position   : 'fixed',
     bottom     : '20px',
-    left       : '90%', // Changed from 50% to move 40% to the right (center at 90vw)
-    transform  : 'translateX(-50%)', // Keeps the toast centered on its new 'left' position
+    left       : '90%', 
+    transform  : 'translateX(-50%)', 
     display    : 'flex',
     flexDirection: 'column',
+    alignItems : 'center', // Center toasts horizontally if they don't take full width
     gap        : '8px',
     zIndex     : 9999
   });
@@ -45,7 +45,7 @@ if (import.meta.hot) {
 }
 
 /* ────────── main helper ────────── */
-export default function Toast(msg, ms = 4000, onAction) {
+export default function Toast(msg, ms = 4000, onAction, actionText = "Undo") {
   const host = ensureRoot();
 
   /* individual mount node */
@@ -75,16 +75,20 @@ export default function Toast(msg, ms = 4000, onAction) {
       style={{
         background   : '#333',
         color        : '#fff',
-        padding      : '8px 16px',
+        padding      : '10px 16px', // Slightly more padding for multi-line
         borderRadius : 4,
-        display      : 'inline-flex',
-        gap          : 12,
-        alignItems   : 'center',
+        display      : 'flex',    // Changed to flex for better internal layout
+        flexDirection: 'column',  // Stack message and button vertically
+        gap          : '8px',     // Gap between message and button
+        alignItems   : 'flex-start', // Align content to the start (left)
         fontSize     : '0.9rem',
-        boxShadow    : '0 2px 6px rgba(0,0,0,0.4)'
+        boxShadow    : '0 2px 8px rgba(0,0,0,0.5)', // Slightly stronger shadow
+        maxWidth     : '450px',     // Max width for readability
+        width        : 'auto',      // Allow it to shrink if content is narrow
+        textAlign    : 'left',      // Ensure text is left-aligned
       }}
     >
-      <span>{msg}</span>
+      <span style={{ whiteSpace: 'pre-line' }}>{msg}</span>
       {onAction && (
         <button
           onClick={handleUndo}
@@ -92,13 +96,15 @@ export default function Toast(msg, ms = 4000, onAction) {
             background   : '#555',
             border       : 'none',
             color        : '#fff',
-            padding      : '4px 10px',
+            padding      : '6px 12px', // Slightly larger button
             borderRadius : 4,
             cursor       : 'pointer',
-            minWidth     : '48px'  /* avoid width jump */
+            minWidth     : '60px',
+            alignSelf    : 'flex-end', // Align button to the right
+            marginTop    : '4px',      // Margin if needed, gap might cover it
           }}
         >
-          Undo
+          {actionText}
         </button>
       )}
     </div>
@@ -115,5 +121,3 @@ export default function Toast(msg, ms = 4000, onAction) {
 
 /* named re-export for convenience */
 export const showToast = Toast;
-
-

@@ -18,11 +18,10 @@ import {
 } from './lib/fileTypeGuards.js';
 import { FILE_LIMIT }             from './config.js';
 import { checksum32 }             from './lib/checksum.js';
-import Toast                      from './components/Toast.jsx';
+// Toast is now passed as a prop: toastFn
 import { compressImageToWebP }    from './lib/imageUtils.js';
 import { supabase }               from './lib/supabase.js';
 
-/* ─────────── misc helpers ─────────── */
 const NOTE =
   'checksum suffix added because this file is named exactly the same as another, yet its content is different';
 
@@ -41,7 +40,7 @@ function withHash(path, ck, taken) {
 }
 
 function mergeFiles(existing = [], incoming = []) {
-  const taken = new Map();  // fullPath → Set<checksum>
+  const taken = new Map();
   const out   = [...existing];
 
   existing.forEach(f => {
@@ -51,7 +50,7 @@ function mergeFiles(existing = [], incoming = []) {
   });
 
   for (const f of incoming) {
-    if (out.length >= FILE_LIMIT) break;
+    if (out.length >= FILE_LIMIT) break; 
 
     const s = taken.get(f.fullPath);
     if (!s) {
@@ -82,26 +81,90 @@ function isIncluded(fullPath, filterMap) {
   return true;
 }
 
-/* =========================================================
-   COMPONENT
-========================================================= */
-export default function CodebaseImporter({
-  files             = [],
-  onFilesChange,
-  onSkip,
+// UPDATED HELPER to format rejection messages
+function formatRejectionMessage(rejectionStats) {
+  const {
+    count = 0, 
+    tooLarge = 0,
+    tooLong = 0,
+    unsupportedType = 0, // This now means "not a text/code file we import"
+    limitReached = 0,
+    permissionDenied = 0,
+    readError = 0,
+  } = rejectionStats;
 
+  if (count === 0) return null; 
+
+  const lines = [];
+  let isErrorPresent = false; // Flag to track if any "real" errors occurred
+
+  // Start with the informational header
+  lines.push("This isn't an error; skipping irrelevant files is expected.");
+
+  if (tooLarge > 0) {
+    lines.push(`- ${tooLarge} file${tooLarge > 1 ? 's were' : ' was'} skipped because they were over the ${MAX_TEXT_FILE_SIZE / 1024}KB size limit.`);
+  }
+  if (tooLong > 0) {
+    lines.push(`- ${tooLong} file${tooLong > 1 ? 's' : ''} had too much text (over ${MAX_CHAR_LEN / 1000}k characters) and were skipped.`);
+  }
+  if (unsupportedType > 0) {
+    // Phrasing changed to be more informational
+    lines.push(`- ${unsupportedType} file${unsupportedType > 1 ? 's were' : ' was'} skipped because they are images or video, so not relevant.`);
+  }
+  
+  if (permissionDenied > 0) {
+    isErrorPresent = true; // This is a user-actionable error
+    const itemStr = permissionDenied > 1 ? 'items (files or folders)' : 'item (a file or folder)';
+    const message = 
+      `- ${permissionDenied} ${itemStr}: Your computer's operating system (like Windows, macOS, or Linux) prevented this application from reading it.\n` +
+      `  This usually means the user account your web browser is running as does not have 'Read' permission for that specific file or folder on your computer.\n` +
+      `  To fix this: You'll need to adjust the permissions for that ${itemStr} directly on your computer. \n` +
+      `  For example:\n` +
+      `    - On Windows: Right-click the file/folder > Properties > Security tab.\n` +
+      `    - On macOS: Select the file/folder > File menu > Get Info > Sharing & Permissions section.`;
+    lines.push(message);
+  }
+
+  if (readError > 0) {
+    isErrorPresent = true; // This is also an error
+    lines.push(`- ${readError} file${readError > 1 ? 's' : ''} could not be read due to a general system error on your computer (not a permission issue).`);
+  }
+  if (limitReached > 0) {
+    lines.push(`- ${limitReached} file${limitReached > 1 ? 's were' : ' was'} skipped because the maximum import limit of ${FILE_LIMIT} files was reached.`);
+  }
+  
+  // If the only line is the header and count > 0, it means specific reasons weren't categorized
+  // or all rejections were of a type not explicitly listed above (which shouldn't happen with current logic).
+  if (lines.length === 1 && count > 0) {
+    // Fallback if no specific reasons were added but files were skipped.
+    lines.push(`- ${count} other file${count > 1 ? 's were' : ' was'} skipped for various reasons.`);
+  } else if (lines.length === 1 && count === 0) { // Only header, no rejections
+    return null; 
+  }
+
+  // If there were no "real" errors (permissionDenied or readError), and other skips occurred,
+  // the initial informational header is sufficient.
+  // If there *were* errors, the header still applies, but the error details are also present.
+  
+  return lines.join('\n\n'); // Join with double newline for better separation
+}
+
+
+export default function CodebaseImporter({
+  files = [],
+  onFilesChange,
+  toastFn, 
   onAddImage,
   onAddPDF,
   settings,
   onProjectRootChange, 
   currentProjectRootNameFromBuilder 
 }) {
-  const [adding, setAdding]           = useState(false);
+  const [adding, setAdding] = useState(false);
   const [projectRoot, setProjectRoot] = useState(null); 
-
   const [entryFilter, setEntryFilter] = useState({});
-  const [step, setStep]               = useState('FILTER'); 
-  const [topEntries, setTopEntries]   = useState([]);
+  const [step, setStep] = useState('FILTER'); 
+  const [topEntries, setTopEntries] = useState([]);
 
   useEffect(() => {
     let live = true;
@@ -123,8 +186,6 @@ export default function CodebaseImporter({
 
   useEffect(() => {
     if (currentProjectRootNameFromBuilder === null && projectRoot !== null) {
-      // Builder signaled that the root concept should be cleared.
-      // Clear IDB, then internal state.
       clearRoot()
         .catch(err => console.warn("CodebaseImporter: Failed to clear root from IDB during reset via prop", err))
         .finally(() => {
@@ -155,70 +216,135 @@ export default function CodebaseImporter({
 
   const addFiles = useCallback(async () => {
     if (!window.showOpenFilePicker) {
-        Toast('File picker is not supported in this browser.', 4000);
+        toastFn?.('File picker is not supported in this browser.', 4000);
         return;
     }
     try {
       setAdding(true);
       const handles = await window.showOpenFilePicker({ multiple: true });
-      const batch   = [];
-      let skipped   = 0;
+      const batch = [];
+      const rejectionStats = { count: 0, tooLarge: 0, tooLong: 0, unsupportedType: 0, limitReached: 0, permissionDenied: 0, readError: 0 };
 
       for (const h of handles) {
-        if (files.length + batch.length >= FILE_LIMIT) { skipped++; continue; }
+        if (files.length + batch.length >= FILE_LIMIT) {
+          rejectionStats.limitReached++;
+          rejectionStats.count++;
+          continue;
+        }
+        
         const f = await h.getFile();
-        if (f.size > MAX_TEXT_FILE_SIZE) { skipped++; continue; }
-        if (!isTextLike(f))              { skipped++; continue; }
+        let rejectedThisFile = false;
 
-        const text = await f.text();
-        if (text.length > MAX_CHAR_LEN)  { skipped++; continue; }
+        if (f.size > MAX_TEXT_FILE_SIZE) {
+          rejectionStats.tooLarge++;
+          rejectedThisFile = true;
+        }
+        
+        if (!isTextLike(f)) { // This checks for non-text types (images, binaries, etc.)
+          if (!rejectedThisFile) rejectionStats.unsupportedType++;
+          rejectedThisFile = true; 
+        }
+        
+        if (!rejectedThisFile) { 
+            const text = await f.text();
+            if (text.length > MAX_CHAR_LEN) {
+              rejectionStats.tooLong++;
+              rejectedThisFile = true;
+            }
+        }
 
-        const ck = checksum32(text);
+        if (rejectedThisFile) {
+          rejectionStats.count++;
+          continue;
+        }
+
+        const textContent = await f.text(); 
+        const ck = checksum32(textContent);
         const { fullPath, insideProject } = await getFullPath(h, projectRoot); 
-        batch.push({ fullPath, text, checksum: ck, insideProject, name: f.name });
+        batch.push({ fullPath, text: textContent, checksum: ck, insideProject, name: f.name });
       }
 
-      if (skipped) onSkip?.(skipped);
+      const rejectionMessage = formatRejectionMessage(rejectionStats);
+      if (rejectionMessage) {
+        const duration = (rejectionStats.permissionDenied > 0 || rejectionStats.readError > 0) ? 20000 : 15000;
+        toastFn?.(rejectionMessage, duration);
+      }
+      
       const merged = mergeFiles(files, batch);
       onFilesChange(merged);
     } catch (err) {
-      if (err.name !== 'AbortError') Toast('File pick error: ' + err.message, 4000);
+      if (err.name !== 'AbortError') toastFn?.('File pick error: ' + err.message, 5000);
     } finally {
       setAdding(false);
     }
-  }, [files, onFilesChange, onSkip, projectRoot]); 
+  }, [files, onFilesChange, projectRoot, toastFn]); 
 
-  async function scanDir(handle, out, stats, rootHandle, currentPath = '') {
+  async function scanDirAndUpdateStats(handle, out, stats, rootHandle, currentPath = '') {
+    const currentTotalFilesConsidered = files.filter(f => f.insideProject && f.fullPath.startsWith(rootHandle.name + '/')).length + out.length;
+
     for await (const [name, h] of handle.entries()) {
-      if (out.length >= FILE_LIMIT) { stats.limit++; continue; }
+      if (currentTotalFilesConsidered >= FILE_LIMIT) { // Check against overall limit
+        stats.limitReached++; 
+        stats.count++;
+        // Do not 'continue' here, as we want to count all files that *would* be skipped by limit
+        // The actual addition to 'out' will be prevented later if limit is truly met.
+        // This ensures limitReached count is accurate for the toast.
+      }
       const entryPath = currentPath ? `${currentPath}/${name}` : name;
+      let rejectedThisFile = false;
       try {
         if (h.kind === 'file') {
-          const f = await h.getFile();
-          if (f.size > MAX_TEXT_FILE_SIZE) { stats.bigSize++; continue; }
-          if (!isTextLike(f))              { stats.binary++;  continue; }
-          const text = await f.text();
-          if (text.length > MAX_CHAR_LEN)  { stats.bigChar++; continue; }
+          // Only attempt to add if we are not already over the limit for *actual additions*
+          if (files.filter(f => f.insideProject && f.fullPath.startsWith(rootHandle.name + '/')).length + out.length < FILE_LIMIT) {
+            const f = await h.getFile();
+            if (f.size > MAX_TEXT_FILE_SIZE) { stats.tooLarge++; rejectedThisFile = true; }
+            
+            if (!isTextLike(f)) { 
+              if(!rejectedThisFile) stats.unsupportedType++; 
+              rejectedThisFile = true; 
+            }
+            
+            if (!rejectedThisFile) {
+              const text = await f.text();
+              if (text.length > MAX_CHAR_LEN) { stats.tooLong++; rejectedThisFile = true; }
+              
+              if (!rejectedThisFile) {
+                  const ck = checksum32(text);
+                  out.push({ fullPath: entryPath, text, checksum: ck, insideProject: true, name: f.name });
+              }
+            }
+          } else { // If we are at/over the limit for additions, count this file towards limitReached
+            if (!stats.limitReachedAlreadyIncrementedForThisFile) { // Avoid double counting if already done above
+                stats.limitReached++;
+            }
+            rejectedThisFile = true; // Mark as rejected for counting purposes
+          }
+          if (rejectedThisFile) stats.count++;
 
-          const ck = checksum32(text);
-          out.push({ fullPath: entryPath, text, checksum: ck, insideProject: true, name: f.name });
         } else if (h.kind === 'directory') {
-          await scanDir(h, out, stats, rootHandle, entryPath);
+          await scanDirAndUpdateStats(h, out, stats, rootHandle, entryPath);
         }
       } catch (err) {
+        stats.count++; 
         if (err.name === 'NotAllowedError' || err.name === 'SecurityError') {
-          stats.perm++;
+          stats.permissionDenied++;
         } else {
-          stats.fsErr++;
-          console.warn(`FS error scanning ${h.name}:`, err);
+          stats.readError++;
+          console.warn(`FS error scanning ${entryPath}:`, err);
         }
+      }
+      // Reset flag for next file in loop
+      stats.limitReachedAlreadyIncrementedForThisFile = false; 
+      if (currentTotalFilesConsidered >= FILE_LIMIT && !rejectedThisFile) {
+        // If the file *would* have been accepted but we are at limit, ensure it's counted for limitReached
+        // This case is mostly for directories that are entered when limit is already hit.
       }
     }
   }
 
   const addFolder = useCallback(async () => {
     if (!window.showDirectoryPicker) {
-        Toast('Directory picker is not supported in this browser.', 4000);
+        toastFn?.('Directory picker is not supported in this browser.', 4000);
         return;
     }
     try {
@@ -239,43 +365,60 @@ export default function CodebaseImporter({
       }
       setTopEntries(tops);
 
-      const batch = []; 
-      const stats = { bigSize:0, bigChar:0, binary:0, limit:0, perm:0, fsErr:0 };
-      await scanDir(dirHandle, batch, stats, dirHandle);
+      const batchFromScan = []; 
+      const folderRejectionStats = { 
+        count: 0, tooLarge: 0, tooLong: 0, unsupportedType: 0, 
+        permissionDenied: 0, readError: 0, limitReached: 0 
+      };
+      await scanDirAndUpdateStats(dirHandle, batchFromScan, folderRejectionStats, dirHandle);
       
       const freshMap = {}; 
       tops.forEach(e => { freshMap[e.name] = true; });
       setEntryFilter(freshMap);
 
       const existingNonProjectFiles = files.filter(f => !f.insideProject);
-      const initiallyFilteredBatch = batch.filter(f => isIncluded(f.fullPath, freshMap));
-      const merged = mergeFiles(existingNonProjectFiles, initiallyFilteredBatch);
+      const filesPassingFilter = batchFromScan.filter(f => isIncluded(f.fullPath, freshMap));
+      
+      const merged = mergeFiles(existingNonProjectFiles, filesPassingFilter);
       onFilesChange(merged);
-
-
-      const skipped = stats.bigSize + stats.bigChar + stats.binary +
-                      stats.limit   + stats.perm    + stats.fsErr;
-      if (skipped) {
-        const parts = [];
-        if (stats.bigSize) parts.push(`${stats.bigSize} >${MAX_TEXT_FILE_SIZE / 1024} KB`);
-        if (stats.bigChar) parts.push(`${stats.bigChar} >${MAX_CHAR_LEN / 1000}k chars`);
-        if (stats.binary)  parts.push(`${stats.binary} binary`);
-        if (stats.limit)   parts.push(`${stats.limit} over limit`);
-        if (stats.perm)    parts.push(`${stats.perm} permission denied`);
-        if (stats.fsErr)   parts.push(`${stats.fsErr} fs errors`);
-        Toast(`Skipped ${skipped} file${skipped>1?'s':''} – ${parts.join(', ')}`, 5000);
+      
+      const rejectionMessage = formatRejectionMessage(folderRejectionStats);
+      if (rejectionMessage) {
+        const duration = (folderRejectionStats.permissionDenied > 0 || folderRejectionStats.readError > 0) ? 20000 : 15000;
+        toastFn?.(rejectionMessage, duration);
       }
+
     } catch (err) {
-      if (err.name !== 'AbortError') Toast('Folder pick error: ' + err.message, 4000);
+      if (err.name !== 'AbortError') toastFn?.('Folder pick error: ' + err.message, 5000);
     } finally {
       setAdding(false);
     }
-  }, [files, onFilesChange, onProjectRootChange]);
+  }, [files, onFilesChange, onProjectRootChange, toastFn, entryFilter]);
+
+  useEffect(() => {
+    if (!projectRoot || topEntries.length === 0 || step !== 'FILES') return; 
+    
+    let filesAfterNewFilter = files.filter(f => !f.insideProject); // Keep non-project files
+    let excludedByThisFilterChange = 0;
+
+    const allProjectFilesBeforeThisFilter = files.filter(f => f.insideProject); 
+    const projectFilesKeptByNewFilter = allProjectFilesBeforeThisFilter.filter(f => isIncluded(f.fullPath, entryFilter));
+    
+    excludedByThisFilterChange = allProjectFilesBeforeThisFilter.length - projectFilesKeptByNewFilter.length;
+    filesAfterNewFilter = filesAfterNewFilter.concat(projectFilesKeptByNewFilter);
+
+    if (filesAfterNewFilter.length !== files.length || !files.every((f, i) => filesAfterNewFilter[i] && filesAfterNewFilter[i].checksum === f.checksum)) {
+        onFilesChange(filesAfterNewFilter);
+        if (excludedByThisFilterChange > 0) {
+            toastFn?.(`Filtered out ${excludedByThisFilterChange} item${excludedByThisFilterChange > 1 ? 's' : ''} based on your selection.`, 4000);
+        }
+    }
+  }, [entryFilter, step, projectRoot, topEntries, files, onFilesChange, toastFn]);
 
 
   const handleAddImages = useCallback(async () => {
     if (!window.showOpenFilePicker) {
-        Toast('File picker is not supported in this browser.', 4000);
+        toastFn?.('File picker is not supported in this browser.', 4000);
         return;
     }
     let handles;
@@ -294,13 +437,14 @@ export default function CodebaseImporter({
         });
     } catch (pickerErr) {
         if (pickerErr.name !== 'AbortError') {
-            Toast('Image picker error: ' + pickerErr.message, 4000);
+            toastFn?.('Image picker error: ' + pickerErr.message, 4000);
         }
         return; 
     }
 
     setAdding(true);
     const failedUploads = [];
+    let successfulUploads = 0;
 
     for (const h of handles) {
       let currentFileName = "Unnamed file";
@@ -320,6 +464,7 @@ export default function CodebaseImporter({
         if (pubErr) throw pubErr;
 
         onAddImage?.({ name: file.name, url: pub.publicUrl, revoke: null });
+        successfulUploads++;
       } catch (fileProcessingErr) {
         console.error(`Error processing image ${currentFileName}:`, fileProcessingErr);
         failedUploads.push({ name: currentFileName, reason: fileProcessingErr.message });
@@ -327,21 +472,23 @@ export default function CodebaseImporter({
     }
 
     if (failedUploads.length > 0) {
-        const errorLimit = 3;
+        const errorLimit = 2; 
         let summary = `${failedUploads.length} image${failedUploads.length > 1 ? 's' : ''} failed to upload: `;
         summary += failedUploads.slice(0, errorLimit).map(f => f.name).join(', ');
         if (failedUploads.length > errorLimit) {
             summary += ` and ${failedUploads.length - errorLimit} more.`;
         }
         summary += " Check console for details."
-        Toast(summary, 5000);
+        toastFn?.(summary, 8000);
+    } else if (successfulUploads > 0) {
+        toastFn?.(`${successfulUploads} image${successfulUploads > 1 ? 's' : ''} added.`, 3000);
     }
     setAdding(false);
-  }, [onAddImage]);
+  }, [onAddImage, toastFn]);
 
   const handlePasteImage = useCallback(async () => {
     if (!navigator.clipboard?.read) {
-      Toast('Paste requires a secure context (HTTPS) and compatible browser.', 4000);
+      toastFn?.('Paste requires a secure context (HTTPS) and compatible browser.', 4000);
       return;
     }
     try {
@@ -367,32 +514,32 @@ export default function CodebaseImporter({
         if (pubErr) throw pubErr;
 
         onAddImage?.({ name, url: pub.publicUrl, revoke: null });
-        Toast('Image pasted & added', 1500);
+        toastFn?.('Image pasted & added.', 2000);
         imagePasted = true;
         break; 
       }
       if (!imagePasted) {
-          Toast('No image found in clipboard.', 3000);
+          toastFn?.('No image found in clipboard.', 3000);
       }
     } catch (err) {
       if (err.name === 'NotAllowedError') {
-        Toast('Browser denied clipboard access. Please check permissions.', 4000);
+        toastFn?.('Browser denied clipboard access. Please check permissions.', 5000);
       } else {
         console.error("Paste image error:", err);
-        Toast('Paste image failed: ' + err.message, 4000);
+        toastFn?.('Paste image failed: ' + err.message, 5000);
       }
     } finally {
       setAdding(false);
     }
-  }, [onAddImage]);
+  }, [onAddImage, toastFn]);
 
   const handleAddPDF = useCallback(async () => {
     if (!settings || !settings.apiKey || String(settings.apiKey).trim() === "") {
-      Toast('Gemini API Key not set. Please set it in application settings.', 4000);
+      toastFn?.('Gemini API Key not set. Please set it in application settings.', 5000);
       return;
     }
     if (!window.showOpenFilePicker) {
-      Toast('File picker is not supported in this browser.', 4000);
+      toastFn?.('File picker is not supported in this browser.', 4000);
       return;
     }
 
@@ -404,18 +551,19 @@ export default function CodebaseImporter({
         });
     } catch (pickerErr) {
         if (pickerErr.name !== 'AbortError') {
-            Toast('PDF picker error: ' + pickerErr.message, 4000);
+            toastFn?.('PDF picker error: ' + pickerErr.message, 4000);
         }
         return; 
     }
     
     setAdding(true);
     const failedUploads = [];
+    let successfulUploads = 0;
     let genAI;
     try {
         genAI = new GoogleGenAI({ apiKey: settings.apiKey });
     } catch(sdkErr) {
-        Toast('Failed to initialize Gemini SDK: ' + sdkErr.message, 5000);
+        toastFn?.('Failed to initialize Gemini SDK: ' + sdkErr.message, 5000);
         setAdding(false);
         return;
     }
@@ -441,6 +589,7 @@ export default function CodebaseImporter({
             mimeType: uploadedFile.mimeType || 'application/pdf',
             resourceName: uploadedFile.name 
           });
+          successfulUploads++;
         } else {
           throw new Error(`Gemini file upload for ${file.name} did not return expected data.`);
         }
@@ -451,38 +600,19 @@ export default function CodebaseImporter({
     }
 
     if (failedUploads.length > 0) {
-        const errorLimit = 3;
+        const errorLimit = 2;
         let summary = `${failedUploads.length} PDF${failedUploads.length > 1 ? 's' : ''} failed to upload: `;
         summary += failedUploads.slice(0, errorLimit).map(f => f.name).join(', ');
         if (failedUploads.length > errorLimit) {
             summary += ` and ${failedUploads.length - errorLimit} more.`;
         }
         summary += " Check console for details."
-        Toast(summary, 5000);
+        toastFn?.(summary, 8000);
+    } else if (successfulUploads > 0) {
+        toastFn?.(`${successfulUploads} PDF${successfulUploads > 1 ? 's' : ''} added.`, 3000);
     }
     setAdding(false);
-  }, [onAddPDF, settings]);
-
-  useEffect(() => {
-    if (!projectRoot || topEntries.length === 0) return; 
-
-    if (step === 'FILES') {
-        const currentProjectFiles = files.filter(f => f.insideProject);
-        const nonProjectFiles = files.filter(f => !f.insideProject);
-        
-        const filteredProjectFiles = currentProjectFiles.filter(f => isIncluded(f.fullPath, entryFilter));
-        
-        const finalFiles = mergeFiles(nonProjectFiles, filteredProjectFiles);
-
-        if (finalFiles.length !== files.length || !files.every((f, i) => finalFiles[i] && finalFiles[i].fullPath === f.fullPath && finalFiles[i].checksum === f.checksum)) {
-            onFilesChange(finalFiles);
-            const excludedCount = currentProjectFiles.length - filteredProjectFiles.length;
-             if (excludedCount > 0) {
-                 Toast(`Excluded ${excludedCount} item${excludedCount > 1 ? 's' : ''} by filter`, 2000);
-             }
-        }
-    }
-  }, [entryFilter, step, projectRoot, topEntries, files, onFilesChange]);
+  }, [onAddPDF, settings, toastFn]);
 
 
   return (
@@ -579,4 +709,3 @@ export default function CodebaseImporter({
     </div>
   );
 }
-
