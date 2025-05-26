@@ -1,9 +1,9 @@
 /* src/PromptBuilder.jsx
-   - Accepts currentChatId prop.
+   - Accepts currentChatId, sendDisabled, and sendButtonText props.
    - Uses sendDisabled for button disable state.
-   - Dynamically sets button text based on states.
+   - Uses sendButtonText for the button's dynamic text.
 */
-import { useEffect, useRef, useMemo } from 'preact/hooks';
+import { useEffect, useRef, useMemo } from 'preact/hooks'; // Removed useState as local buttonText logic is gone
 import { del } from 'idb-keyval';
 import CodebaseImporter from './CodebaseImporter.jsx';
 import { autoResizeTextarea } from './lib/domUtils.js';
@@ -17,7 +17,8 @@ export default function PromptBuilder({
   form,
   setForm,
 
-  sendDisabled, // This prop now correctly reflects if the send button should be disabled
+  sendDisabled,     // Receives the computed disabled state from App.jsx
+  sendButtonText,   // Receives the computed button text from App.jsx
   handleSend,
   showToast,
 
@@ -28,14 +29,14 @@ export default function PromptBuilder({
   onAddImage,
   onAddPDF,
 
-  settings,
+  settings, // Still needed for CodebaseImporter
 
   pendingFiles,
   onFilesChange,
   onProjectRootChange,
   promptBuilderRootName,
 
-  currentChatId, // Added prop to receive currentChatId
+  currentChatId, // Still needed for CodebaseImporter (potentially) or other internal logic if any
 }) {
   const formRef = useRef(form);
   const textareaRefs = useRef({});
@@ -93,27 +94,7 @@ export default function PromptBuilder({
     handleSend();
   }
 
-  // Determine button text based on various states
-  // Note: App.jsx's `sendButtonDisabled` includes `isSendingMessage`, `isSavingEdit`, `isResendingMessage`, `isHardTokenLimitReached`.
-  // We need more granular info from App.jsx if we want "Saving..." or "Resending..." text.
-  // For now, this logic tries to infer based on what `sendDisabled` implies.
-  const buttonText = useMemo(() => {
-    // If sendDisabled is true, it could be for multiple reasons.
-    // The most specific reasons (API key, chat ID) should take precedence for the message
-    // if they are the cause of `sendDisabled` (though `sendDisabled` itself doesn't directly reflect these).
-    // This logic is a bit of a workaround because PromptBuilder doesn't know *why* sendDisabled is true.
-    // Ideally, App.jsx would pass a more specific `sendButtonContext` or individual loading flags.
-
-    if (!settings.apiKey) return 'Set API Key'; // This check is independent of sendDisabled
-    if (!currentChatId) return 'Select Chat';   // This check is independent of sendDisabled
-    
-    // If sendDisabled is true, it implies either a hard token limit or an ongoing operation.
-    // We can't distinguish between "Sending...", "Saving...", "Resending..." from just `sendDisabled`.
-    // So, "Processing..." is a generic term if disabled for reasons other than API key/chat ID.
-    if (sendDisabled) return 'Processing…'; 
-    
-    return 'Send';
-  }, [sendDisabled, settings.apiKey, currentChatId]);
+  // Removed local buttonText useMemo, as it's now passed as a prop 'sendButtonText'
 
   return (
     <div className="template-container">
@@ -235,10 +216,10 @@ export default function PromptBuilder({
       >
         <button
           className="button send-button"
-          disabled={sendDisabled}
+          disabled={sendDisabled} // Use the prop passed from App.jsx
           onClick={guardedSend}
         >
-          {buttonText}
+          {sendButtonText} {/* Use the prop passed from App.jsx */}
         </button>
       </div>
     </div>
