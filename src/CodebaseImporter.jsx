@@ -16,9 +16,8 @@ import {
   MAX_TEXT_FILE_SIZE,
   MAX_CHAR_LEN
 } from './lib/fileTypeGuards.js';
-import { FILE_LIMIT }             from './config.js';
+import { FILE_LIMIT }             from './config.js'; // This is now the 3000 internal limit
 import { checksum32 }             from './lib/checksum.js';
-// Toast is now passed as a prop: toastFn
 import { compressImageToWebP }    from './lib/imageUtils.js';
 import { supabase }               from './lib/supabase.js';
 
@@ -50,7 +49,7 @@ function mergeFiles(existing = [], incoming = []) {
   });
 
   for (const f of incoming) {
-    if (out.length >= FILE_LIMIT) break; 
+    if (out.length >= FILE_LIMIT) break; // Respect internal FILE_LIMIT (now 3000)
 
     const s = taken.get(f.fullPath);
     if (!s) {
@@ -81,72 +80,59 @@ function isIncluded(fullPath, filterMap) {
   return true;
 }
 
-// UPDATED HELPER to format rejection messages
 function formatRejectionMessage(rejectionStats) {
   const {
-    count = 0, 
     tooLarge = 0,
-    tooLong = 0,
-    unsupportedType = 0, // This now means "not a text/code file we import"
-    limitReached = 0,
+    tooLong = 0, 
+    unsupportedType = 0,
+    limitReached = 0, 
     permissionDenied = 0,
     readError = 0,
   } = rejectionStats;
 
-  if (count === 0) return null; 
-
   const lines = [];
-  let isErrorPresent = false; // Flag to track if any "real" errors occurred
-
-  // Start with the informational header
-  lines.push("This isn't an error; skipping irrelevant files is expected.");
+  let hasSkipsOrErrors = false;
 
   if (tooLarge > 0) {
     lines.push(`- ${tooLarge} file${tooLarge > 1 ? 's were' : ' was'} skipped because they were over the ${MAX_TEXT_FILE_SIZE / 1024}KB size limit.`);
+    hasSkipsOrErrors = true;
   }
-  if (tooLong > 0) {
+  if (tooLong > 0) { 
     lines.push(`- ${tooLong} file${tooLong > 1 ? 's' : ''} had too much text (over ${MAX_CHAR_LEN / 1000}k characters) and were skipped.`);
+    hasSkipsOrErrors = true;
   }
   if (unsupportedType > 0) {
-    // Phrasing changed to be more informational
-    lines.push(`- ${unsupportedType} file${unsupportedType > 1 ? 's were' : ' was'} skipped because they are images or video, so not relevant.`);
+    lines.push(`- ${unsupportedType} file${unsupportedType > 1 ? 's were' : ' was'} skipped because they didn't appear to be text or code files (e.g., images, videos, applications).`);
+    hasSkipsOrErrors = true;
+  }
+  if (limitReached > 0) { 
+    lines.push(`- ${limitReached} file${limitReached > 1 ? 's were' : ' was'} skipped because an internal processing limit of ${FILE_LIMIT} text files was reached.`);
+    hasSkipsOrErrors = true;
   }
   
   if (permissionDenied > 0) {
-    isErrorPresent = true; // This is a user-actionable error
-    const itemStr = permissionDenied > 1 ? 'items (files or folders)' : 'item (a file or folder)';
+    hasSkipsOrErrors = true;
+    const itemStr = permissionDenied > 1 ? 'items (files/folders)' : 'item (file/folder)';
     const message = 
-      `- ${permissionDenied} ${itemStr}: Your computer's operating system (like Windows, macOS, or Linux) prevented this application from reading it.\n` +
-      `  This usually means the user account your web browser is running as does not have 'Read' permission for that specific file or folder on your computer.\n` +
-      `  To fix this: You'll need to adjust the permissions for that ${itemStr} directly on your computer. \n` +
-      `  For example:\n` +
-      `    - On Windows: Right-click the file/folder > Properties > Security tab.\n` +
-      `    - On macOS: Select the file/folder > File menu > Get Info > Sharing & Permissions section.`;
+      `- ${permissionDenied} ${itemStr} SKIPPED DUE TO ERROR:\n` + 
+      `  Your computer's OS (Windows, macOS, Linux) denied read access.\n` +
+      `  This means your browser lacks 'Read' permission for it.\n` +
+      `  To fix: Adjust permissions on your computer.\n` + 
+      `  (e.g., Win: Properties > Security; Mac: Get Info > Permissions).`;
     lines.push(message);
   }
 
   if (readError > 0) {
-    isErrorPresent = true; // This is also an error
-    lines.push(`- ${readError} file${readError > 1 ? 's' : ''} could not be read due to a general system error on your computer (not a permission issue).`);
-  }
-  if (limitReached > 0) {
-    lines.push(`- ${limitReached} file${limitReached > 1 ? 's were' : ' was'} skipped because the maximum import limit of ${FILE_LIMIT} files was reached.`);
+    hasSkipsOrErrors = true;
+    lines.push(`- ${readError} file${readError > 1 ? 's' : ''} SKIPPED DUE TO ERROR: Could not be read (general system error).`);
   }
   
-  // If the only line is the header and count > 0, it means specific reasons weren't categorized
-  // or all rejections were of a type not explicitly listed above (which shouldn't happen with current logic).
-  if (lines.length === 1 && count > 0) {
-    // Fallback if no specific reasons were added but files were skipped.
-    lines.push(`- ${count} other file${count > 1 ? 's were' : ' was'} skipped for various reasons.`);
-  } else if (lines.length === 1 && count === 0) { // Only header, no rejections
+  if (!hasSkipsOrErrors) {
     return null; 
   }
 
-  // If there were no "real" errors (permissionDenied or readError), and other skips occurred,
-  // the initial informational header is sufficient.
-  // If there *were* errors, the header still applies, but the error details are also present.
-  
-  return lines.join('\n\n'); // Join with double newline for better separation
+  const header = "This isn't an error; skipping some files is normal during import.";
+  return header + '\n\n' + lines.join('\n\n'); 
 }
 
 
@@ -223,38 +209,59 @@ export default function CodebaseImporter({
       setAdding(true);
       const handles = await window.showOpenFilePicker({ multiple: true });
       const batch = [];
-      const rejectionStats = { count: 0, tooLarge: 0, tooLong: 0, unsupportedType: 0, limitReached: 0, permissionDenied: 0, readError: 0 };
+      const rejectionStats = { 
+          count: 0, tooLarge: 0, tooLong: 0, unsupportedType: 0, 
+          limitReached: 0, permissionDenied: 0, readError: 0 
+      };
 
       for (const h of handles) {
         if (files.length + batch.length >= FILE_LIMIT) {
           rejectionStats.limitReached++;
-          rejectionStats.count++;
-          continue;
+          rejectionStats.count++; // Count files skipped due to limit
+          continue; 
         }
         
-        const f = await h.getFile();
-        let rejectedThisFile = false;
+        let currentFileRejected = false;
+        let fileData = null;
+        try {
+            fileData = await h.getFile();
+        } catch (fileAccessError) {
+            console.warn(`Could not access file ${h.name}:`, fileAccessError);
+            if (fileAccessError.name === 'NotAllowedError' || fileAccessError.name === 'SecurityError') {
+                rejectionStats.permissionDenied++;
+            } else {
+                rejectionStats.readError++;
+            }
+            currentFileRejected = true;
+        }
+
+        if (currentFileRejected || !fileData) {
+            if (!currentFileRejected) rejectionStats.count++; // Only count if not already counted by specific error
+            continue;
+        }
+        
+        const f = fileData;
 
         if (f.size > MAX_TEXT_FILE_SIZE) {
           rejectionStats.tooLarge++;
-          rejectedThisFile = true;
+          currentFileRejected = true;
         }
         
-        if (!isTextLike(f)) { // This checks for non-text types (images, binaries, etc.)
-          if (!rejectedThisFile) rejectionStats.unsupportedType++;
-          rejectedThisFile = true; 
+        if (!isTextLike(f)) { 
+          if (!currentFileRejected) rejectionStats.unsupportedType++;
+          currentFileRejected = true; 
         }
         
-        if (!rejectedThisFile) { 
+        if (!currentFileRejected) { 
             const text = await f.text();
             if (text.length > MAX_CHAR_LEN) {
               rejectionStats.tooLong++;
-              rejectedThisFile = true;
+              currentFileRejected = true;
             }
         }
 
-        if (rejectedThisFile) {
-          rejectionStats.count++;
+        if (currentFileRejected) {
+          rejectionStats.count++; 
           continue;
         }
 
@@ -263,6 +270,17 @@ export default function CodebaseImporter({
         const { fullPath, insideProject } = await getFullPath(h, projectRoot); 
         batch.push({ fullPath, text: textContent, checksum: ck, insideProject, name: f.name });
       }
+      
+      // Update rejectionStats.count to be the sum of all specific rejections if it wasn't incremented for each.
+      // This ensures the toast message accurately reflects the number of files that hit any rejection criteria.
+      // However, the new formatRejectionMessage doesn't use a total count in its header.
+      // The presence of any specific rejection count is enough.
+      // Let's ensure `count` is at least the sum of specific issues if it was missed.
+      let totalSpecificRejections = rejectionStats.tooLarge + rejectionStats.tooLong + rejectionStats.unsupportedType + rejectionStats.limitReached + rejectionStats.permissionDenied + rejectionStats.readError;
+      if (rejectionStats.count < totalSpecificRejections) {
+          rejectionStats.count = totalSpecificRejections;
+      }
+
 
       const rejectionMessage = formatRejectionMessage(rejectionStats);
       if (rejectionMessage) {
@@ -279,65 +297,56 @@ export default function CodebaseImporter({
     }
   }, [files, onFilesChange, projectRoot, toastFn]); 
 
-  async function scanDirAndUpdateStats(handle, out, stats, rootHandle, currentPath = '') {
-    const currentTotalFilesConsidered = files.filter(f => f.insideProject && f.fullPath.startsWith(rootHandle.name + '/')).length + out.length;
+  async function scanDirForCandidates(handle, candidateCollector, rejectionStats, rootHandle, currentPath = '') {
+    const DISCOVERY_CAP = FILE_LIMIT * 2; 
 
     for await (const [name, h] of handle.entries()) {
-      if (currentTotalFilesConsidered >= FILE_LIMIT) { // Check against overall limit
-        stats.limitReached++; 
-        stats.count++;
-        // Do not 'continue' here, as we want to count all files that *would* be skipped by limit
-        // The actual addition to 'out' will be prevented later if limit is truly met.
-        // This ensures limitReached count is accurate for the toast.
+      if (candidateCollector.length >= DISCOVERY_CAP && DISCOVERY_CAP > 0) {
+          break; 
       }
+
       const entryPath = currentPath ? `${currentPath}/${name}` : name;
-      let rejectedThisFile = false;
+      let rejectedThisFileForCause = false;
+      let fileProcessedForCounting = false; // Flag to ensure count is incremented once per problematic file
+
       try {
         if (h.kind === 'file') {
-          // Only attempt to add if we are not already over the limit for *actual additions*
-          if (files.filter(f => f.insideProject && f.fullPath.startsWith(rootHandle.name + '/')).length + out.length < FILE_LIMIT) {
-            const f = await h.getFile();
-            if (f.size > MAX_TEXT_FILE_SIZE) { stats.tooLarge++; rejectedThisFile = true; }
-            
-            if (!isTextLike(f)) { 
-              if(!rejectedThisFile) stats.unsupportedType++; 
-              rejectedThisFile = true; 
-            }
-            
-            if (!rejectedThisFile) {
-              const text = await f.text();
-              if (text.length > MAX_CHAR_LEN) { stats.tooLong++; rejectedThisFile = true; }
-              
-              if (!rejectedThisFile) {
-                  const ck = checksum32(text);
-                  out.push({ fullPath: entryPath, text, checksum: ck, insideProject: true, name: f.name });
-              }
-            }
-          } else { // If we are at/over the limit for additions, count this file towards limitReached
-            if (!stats.limitReachedAlreadyIncrementedForThisFile) { // Avoid double counting if already done above
-                stats.limitReached++;
-            }
-            rejectedThisFile = true; // Mark as rejected for counting purposes
+          const f = await h.getFile();
+          if (f.size > MAX_TEXT_FILE_SIZE) { rejectionStats.tooLarge++; rejectedThisFileForCause = true; }
+          
+          if (!isTextLike(f)) { 
+            if(!rejectedThisFileForCause) rejectionStats.unsupportedType++; 
+            rejectedThisFileForCause = true; 
           }
-          if (rejectedThisFile) stats.count++;
+          
+          if (!rejectedThisFileForCause) {
+            const text = await f.text();
+            if (text.length > MAX_CHAR_LEN) { rejectionStats.tooLong++; rejectedThisFileForCause = true; }
+            
+            if (!rejectedThisFileForCause) { 
+                const ck = checksum32(text);
+                candidateCollector.push({ fullPath: entryPath, text, checksum: ck, insideProject: true, name: f.name });
+            }
+          }
+          if (rejectedThisFileForCause && !fileProcessedForCounting) {
+            rejectionStats.count++; 
+            fileProcessedForCounting = true;
+          }
 
         } else if (h.kind === 'directory') {
-          await scanDirAndUpdateStats(h, out, stats, rootHandle, entryPath);
+          await scanDirForCandidates(h, candidateCollector, rejectionStats, rootHandle, entryPath);
         }
       } catch (err) {
-        stats.count++; 
+        if (!fileProcessedForCounting) { // Ensure count is incremented if an error occurs
+            rejectionStats.count++;
+            fileProcessedForCounting = true;
+        }
         if (err.name === 'NotAllowedError' || err.name === 'SecurityError') {
-          stats.permissionDenied++;
+          rejectionStats.permissionDenied++;
         } else {
-          stats.readError++;
+          rejectionStats.readError++;
           console.warn(`FS error scanning ${entryPath}:`, err);
         }
-      }
-      // Reset flag for next file in loop
-      stats.limitReachedAlreadyIncrementedForThisFile = false; 
-      if (currentTotalFilesConsidered >= FILE_LIMIT && !rejectedThisFile) {
-        // If the file *would* have been accepted but we are at limit, ensure it's counted for limitReached
-        // This case is mostly for directories that are entered when limit is already hit.
       }
     }
   }
@@ -365,21 +374,42 @@ export default function CodebaseImporter({
       }
       setTopEntries(tops);
 
-      const batchFromScan = []; 
+      const allScannedCandidates = []; 
       const folderRejectionStats = { 
         count: 0, tooLarge: 0, tooLong: 0, unsupportedType: 0, 
         permissionDenied: 0, readError: 0, limitReached: 0 
       };
-      await scanDirAndUpdateStats(dirHandle, batchFromScan, folderRejectionStats, dirHandle);
+      await scanDirForCandidates(dirHandle, allScannedCandidates, folderRejectionStats, dirHandle);
       
       const freshMap = {}; 
       tops.forEach(e => { freshMap[e.name] = true; });
       setEntryFilter(freshMap);
 
       const existingNonProjectFiles = files.filter(f => !f.insideProject);
-      const filesPassingFilter = batchFromScan.filter(f => isIncluded(f.fullPath, freshMap));
+      let filesPassingUserFilter = allScannedCandidates.filter(f => isIncluded(f.fullPath, freshMap));
       
-      const merged = mergeFiles(existingNonProjectFiles, filesPassingFilter);
+      let filesToProcess = filesPassingUserFilter;
+      const totalFilesAvailableAfterUserFilter = existingNonProjectFiles.length + filesPassingUserFilter.length;
+
+      if (totalFilesAvailableAfterUserFilter > FILE_LIMIT) {
+          const numToTakeFromScan = FILE_LIMIT - existingNonProjectFiles.length;
+          if (numToTakeFromScan >= 0) { // Check if numToTakeFromScan is non-negative
+              filesToProcess = filesPassingUserFilter.slice(0, numToTakeFromScan);
+              folderRejectionStats.limitReached = filesPassingUserFilter.length - numToTakeFromScan;
+          } else { 
+              filesToProcess = []; 
+              folderRejectionStats.limitReached = filesPassingUserFilter.length;
+          }
+          // folderRejectionStats.count is already incremented by scanDirForCandidates for specific reasons.
+          // We add limitReached to the specific counts for the toast.
+          // The overall 'count' in folderRejectionStats should reflect files that hit *any* criteria.
+          // Let's ensure count is at least the sum of specific issues.
+          let totalSpecificRejections = folderRejectionStats.tooLarge + folderRejectionStats.tooLong + folderRejectionStats.unsupportedType + folderRejectionStats.limitReached + folderRejectionStats.permissionDenied + folderRejectionStats.readError;
+          if(folderRejectionStats.count < totalSpecificRejections) folderRejectionStats.count = totalSpecificRejections;
+
+      }
+      
+      const merged = mergeFiles(existingNonProjectFiles, filesToProcess);
       onFilesChange(merged);
       
       const rejectionMessage = formatRejectionMessage(folderRejectionStats);
@@ -398,7 +428,7 @@ export default function CodebaseImporter({
   useEffect(() => {
     if (!projectRoot || topEntries.length === 0 || step !== 'FILES') return; 
     
-    let filesAfterNewFilter = files.filter(f => !f.insideProject); // Keep non-project files
+    let filesAfterNewFilter = files.filter(f => !f.insideProject); 
     let excludedByThisFilterChange = 0;
 
     const allProjectFilesBeforeThisFilter = files.filter(f => f.insideProject); 
@@ -671,7 +701,12 @@ export default function CodebaseImporter({
       )}
       {(step === 'FILES' || (step === 'FILTER' && (!projectRoot || topEntries.length === 0))) && ( 
         <>
-          <strong>{files.length} / {FILE_LIMIT} text files selected</strong>
+          {/* REMOVED: <strong>{files.length} / {FILE_LIMIT} text files selected</strong> */}
+          {!!files.length && (
+            <p style={{ marginBottom: '8px', fontSize: '0.9em' }}>
+              {files.length} text file{files.length !== 1 ? 's' : ''} ready for prompt.
+            </p>
+          )}
           {!!files.length && (
             <ul className="file-pane-filelist">
               {files.map((f, i) => (

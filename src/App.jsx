@@ -10,20 +10,22 @@ import {
 import ChatList from './ChatList.jsx';
 import PromptBuilder from './PromptBuilder.jsx';
 import ChatArea from './components/ChatArea.jsx';
-import Toast from './components/Toast.jsx'; // Ensure Toast is imported here
+import Toast from './components/Toast.jsx';
 
 import { GEMINI_MODEL_NAME } from './api.js';
+import { IMAGE_TOKEN_ESTIMATE } from './config.js'; 
 
 import { useSettings } from './hooks.js';
 import { useChatSessionManager } from './hooks/useChatSessionManager.js';
 import { useMessageManager } from './hooks/useMessageManager.js';
-import { usePromptBuilder } from './hooks/usePromptBuilder.js';
+import { usePromptBuilder } from './hooks/usePromptBuilder.js'; 
 import { useScrollNavigation } from './hooks/useScrollNavigation.js';
 
 import { useTokenizableContent } from './hooks/useTokenizableContent.js';
-import { IMAGE_TOKEN_ESTIMATE } from './config.js';
 import { countTokensWithGemini } from './lib/tokenWorkerClient.js';
 
+// Constants for token limits
+const USER_FACING_TOKEN_LIMIT = 350000;
 
 const debounce = (func, delay) => {
   let timeoutId;
@@ -77,7 +79,7 @@ export default function App() {
     removePendingImage,
     pendingPDFs,
     addPendingPDF,
-    pendingFiles,
+    pendingFiles, // This is the actual array of pending files from the hook
     setPendingFiles,
     currentProjectRootName, 
     handleProjectRootChange, 
@@ -100,51 +102,70 @@ export default function App() {
     originalSetCurrentChatId(newChatId);
   }, [currentChatId, originalSetCurrentChatId, isSwitchingChat]);
 
-
-  const [apiCalculatedTokenCount, setApiCalculatedTokenCount] = useState(0);
+  const [totalApiTokenCount, setTotalApiTokenCount] = useState(0);
   const [isCountingApiTokens, setIsCountingApiTokens] = useState(false);
   const tokenCountVersionRef = useRef(0);
   const debouncedApiCallRef = useRef(null);
 
-
   const itemsForApiCount = useTokenizableContent(
     messages,
-    userPromptText,
+    userPromptText, 
     pendingPDFs,
     isSendingMessage 
   );
 
-   const callWorkerForTokenCount = useCallback((currentItemsForApi, currentApiKey, currentModel) => {
+  const callWorkerForTotalTokenCount = useCallback((currentItemsForApi, apiKey, model) => {
     const currentVersion = ++tokenCountVersionRef.current;
-    if (!currentApiKey || String(currentApiKey).trim() === "") {
+    if (!apiKey || String(apiKey).trim() === "" || !currentItemsForApi || currentItemsForApi.length === 0) {
       if (tokenCountVersionRef.current === currentVersion) {
-        setIsCountingApiTokens(false); setApiCalculatedTokenCount(0);
-      } return;
-    }
-    if (currentItemsForApi.length === 0) {
-      if (tokenCountVersionRef.current === currentVersion) {
-        setApiCalculatedTokenCount(0); setIsCountingApiTokens(false);
-      } return;
+        setTotalApiTokenCount(0);
+        setIsCountingApiTokens(false);
+      }
+      return;
     }
     if (tokenCountVersionRef.current === currentVersion) setIsCountingApiTokens(true);
-    else return;
+    else return; 
 
-    countTokensWithGemini(currentApiKey, currentModel, currentItemsForApi)
-      .then(count => { if (tokenCountVersionRef.current === currentVersion) setApiCalculatedTokenCount(count); })
-      .catch(error => {
-        console.warn("Token counting error:", error);
-        if (tokenCountVersionRef.current === currentVersion) setApiCalculatedTokenCount(0);
+    countTokensWithGemini(apiKey, model, currentItemsForApi)
+      .then(count => { 
+        if (tokenCountVersionRef.current === currentVersion) setTotalApiTokenCount(count); 
       })
-      .finally(() => { if (tokenCountVersionRef.current === currentVersion) setIsCountingApiTokens(false); });
+      .catch(error => {
+        console.warn("Total token counting error:", error);
+        if (tokenCountVersionRef.current === currentVersion) setTotalApiTokenCount(0);
+      })
+      .finally(() => { 
+        if (tokenCountVersionRef.current === currentVersion) setIsCountingApiTokens(false); 
+      });
   }, []);
 
   useEffect(() => {
     if (!debouncedApiCallRef.current) {
-      debouncedApiCallRef.current = debounce(callWorkerForTokenCount, 2000);
+      debouncedApiCallRef.current = debounce(callWorkerForTotalTokenCount, 1500);
     }
     const modelToUse = settings.model || GEMINI_MODEL_NAME;
     debouncedApiCallRef.current(itemsForApiCount, settings.apiKey, modelToUse);
-  }, [itemsForApiCount, settings.apiKey, settings.model, callWorkerForTokenCount]);
+  }, [itemsForApiCount, settings.apiKey, settings.model, callWorkerForTotalTokenCount]);
+
+  const currentTotalPromptTokens = useMemo(() => {
+    let estimatedImageTokens = 0;
+    if (!isSendingMessage) { 
+      estimatedImageTokens += pendingImages.length * IMAGE_TOKEN_ESTIMATE;
+    }
+    (messages || []).forEach(msg => {
+      const contentBlocks = Array.isArray(msg.content)
+        ? msg.content
+        : [{ type: 'text', text: String(msg.content ?? '') }];
+      contentBlocks.forEach(block => {
+        if (block.type === 'image_url' && block.image_url && block.image_url.url) {
+          estimatedImageTokens += IMAGE_TOKEN_ESTIMATE;
+        }
+      });
+    });
+    return totalApiTokenCount + estimatedImageTokens;
+  }, [totalApiTokenCount, pendingImages, messages, isSendingMessage]);
+
+  const isMemoryAtLimit = currentTotalPromptTokens >= USER_FACING_TOKEN_LIMIT;
 
   const chatListDisabled = useMemo(() => 
     isCreatingChat || isSwitchingChat, 
@@ -166,20 +187,19 @@ export default function App() {
     [isSendingMessage, isSavingEdit, isResendingMessage]
   );
 
-
   useEffect(() => {
     if (messages.length > 0 && currentChatId && !isSwitchingChat) { 
         const lastMessage = messages[messages.length - 1];
         if (lastMessage.role === 'assistant' || (lastMessage.role === 'user' && !editingId)) {
             const box = scrollContainerRef.current;
             if (box && (box.scrollHeight - box.scrollTop - box.clientHeight > 100)) {
+                // User has scrolled up
             } else {
                 scrollToBottom('smooth');
             }
         }
     }
   }, [messages, editingId, scrollToBottom, scrollContainerRef, currentChatId, isSwitchingChat]);
-
 
   useEffect(() => {
     let cleanupRafId;
@@ -188,26 +208,16 @@ export default function App() {
 
     if (currentChatId !== previousChatIdRef.current) {
       sentPromptStateRef.current = null; 
-
       cleanupRafId = requestAnimationFrame(() => {
-        if (editingId) { 
-          cancelEdit();
-        }
+        if (editingId) cancelEdit(); 
         resetPrompt(); 
       });
-
       if (currentChatId) { 
-        scrollRafId = requestAnimationFrame(() => {
-            scrollToBottom('auto'); 
-        });
+        scrollRafId = requestAnimationFrame(() => scrollToBottom('auto'));
       }
-      
       if (isSwitchingChat) { 
-        transitionEndRafId = requestAnimationFrame(() => {
-            setIsSwitchingChat(false);
-        });
+        transitionEndRafId = requestAnimationFrame(() => setIsSwitchingChat(false));
       }
-      
       previousChatIdRef.current = currentChatId;
     }
     return () => {
@@ -215,13 +225,13 @@ export default function App() {
       if (scrollRafId) cancelAnimationFrame(scrollRafId);
       if (transitionEndRafId) cancelAnimationFrame(transitionEndRafId);
     };
-  }, [currentChatId, isSwitchingChat, editingId, resetPrompt, cancelEdit, scrollToBottom]);
+  }, [currentChatId, isSwitchingChat, editingId, resetPrompt, cancelEdit, scrollToBottom]); 
   
 
   function handleSend() {
     if (promptBuilderLoadingSend || globalBusy) { 
       if (!currentChatId) Toast("Please select or create a chat first.", 3000);
-      if (isSavingEdit) Toast("An edit is currently in progress. Please wait.", 3000);
+      else if (isSavingEdit) Toast("An edit is currently in progress. Please wait.", 3000);
       else if (isResendingMessage) Toast("A message is currently being resent. Please wait.", 3000);
       else if (isSendingMessage) Toast("A message is currently being sent. Please wait.", 3000);
       return;
@@ -260,17 +270,13 @@ export default function App() {
 
     const onSendSuccessCallback = () => {
       const sentState = sentPromptStateRef.current;
-      
       if (!sentState) {
         sentPromptStateRef.current = null; 
         return;
       }
-
       const currentImagesComparable = pendingImages.map(img => ({ url: img.url, name: img.name }));
       const currentPDFsComparable = pendingPDFs.map(pdf => ({ fileId: pdf.fileId, name: pdf.name }));
-
       const textualContentChanged = userPromptText !== sentState.userPromptText;
-      
       const imagesChanged = currentImagesComparable.length !== sentState.pendingImages.length ||
                            !currentImagesComparable.every((img, i) =>
                              sentState.pendingImages[i] &&
@@ -283,7 +289,6 @@ export default function App() {
                             pdf.fileId === sentState.pendingPDFs[i].fileId &&
                             pdf.name === sentState.pendingPDFs[i].name
                           );
-
       if (!textualContentChanged && !imagesChanged && !pdfsChanged) {
         resetPrompt();
       }
@@ -297,7 +302,6 @@ export default function App() {
     });
   }
 
-
   const handleCopyAll = () => {
     const txt = messages.map(m => {
       const contentArray = Array.isArray(m.content) ? m.content : [{ type: 'text', text: String(m.content ?? '') }];
@@ -308,26 +312,6 @@ export default function App() {
       .catch(() => Toast('Copy failed (clipboard API)', 4000));
   };
 
-  const totalPromptTokenCount = useMemo(() => {
-    let estimatedImageTokens = 0;
-    
-    if (!isSendingMessage) {
-      estimatedImageTokens += pendingImages.length * IMAGE_TOKEN_ESTIMATE;
-    }
-
-    (messages || []).forEach(msg => {
-      const contentBlocks = Array.isArray(msg.content)
-        ? msg.content
-        : [{ type: 'text', text: String(msg.content ?? '') }];
-      contentBlocks.forEach(block => {
-        if (block.type === 'image_url' && block.image_url && block.image_url.url) {
-          estimatedImageTokens += IMAGE_TOKEN_ESTIMATE;
-        }
-      });
-    });
-    return apiCalculatedTokenCount + estimatedImageTokens;
-  }, [apiCalculatedTokenCount, pendingImages, messages, isSendingMessage]); 
-
   const handleUpdateChatTitleTrigger = useCallback((id, title) => {
     if (!id) {
         console.error("handleUpdateChatTitleTrigger called with undefined id");
@@ -336,7 +320,6 @@ export default function App() {
     }
     updateChatTitle({ id, title });
   }, [updateChatTitle]);
-
 
   return (
     <div className="app-container">
@@ -359,8 +342,20 @@ export default function App() {
           </button>
           <span style={{ margin: '0 1em', fontWeight: 'bold' }}>Konzuko AI</span>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.5em', alignItems: 'center' }}>
+            {isMemoryAtLimit && (
+                <div style={{ 
+                    color: 'var(--error)', 
+                    fontWeight: 'bold', 
+                    padding: 'var(--space-xs) var(--space-sm)',
+                    border: '1px solid var(--error)',
+                    borderRadius: 'var(--radius)',
+                    marginRight: 'var(--space-sm)'
+                }}>
+                    MEMORY AT LIMIT
+                </div>
+            )}
             <div className="token-count-display">
-              Tokens: {totalPromptTokenCount.toLocaleString()}
+              Tokens: {currentTotalPromptTokens.toLocaleString()} / {USER_FACING_TOKEN_LIMIT.toLocaleString()}
               {isCountingApiTokens && <span style={{ marginLeft: '5px', fontStyle: 'italic' }}>(...)</span>}
             </div>
             <button className="button" onClick={handleCopyAll} disabled={!messages || messages.length === 0 || globalBusy || isLoadingMessageOps }>Copy All Text</button>
@@ -426,14 +421,14 @@ export default function App() {
               setForm={setForm}
               loadingSend={promptBuilderLoadingSend} 
               handleSend={handleSend}
-              showToast={Toast} // Pass the Toast function here
+              showToast={Toast}
               imagePreviews={pendingImages}
               pdfPreviews={pendingPDFs}
               onRemoveImage={removePendingImage}
               onAddImage={addPendingImage}
               onAddPDF={addPendingPDF}
               settings={settings}
-              pendingFiles={pendingFiles}
+              pendingFiles={pendingFiles} 
               onFilesChange={setPendingFiles}
               onProjectRootChange={handleProjectRootChange} 
               promptBuilderRootName={currentProjectRootName} 

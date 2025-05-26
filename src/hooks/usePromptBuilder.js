@@ -1,10 +1,17 @@
 // src/hooks/usePromptBuilder.js
 
-import { useState, useEffect, useCallback } from 'preact/hooks';
+import { useState, useEffect, useCallback, useMemo } from 'preact/hooks';
 import { useFormData, useMode, INITIAL_FORM_DATA } from '../hooks.js';
 import { asciiTree } from '../lib/textUtils.js';
 
 const safeTrim = (val) => (val ?? '').trim();
+
+// Helper to get raw text of pending files - NO LONGER NEEDED BY App.jsx
+// function getRawPendingFilesText(currentPendingFiles) {
+//   if (!currentPendingFiles || currentPendingFiles.length === 0) return "";
+//   return currentPendingFiles.map(f => f.text).join('\n\n');
+// }
+
 
 function buildNewUserPromptText(currentForm, currentMode, currentPendingFiles, projectRootName) {
   if (currentMode === 'DEVELOP') {
@@ -35,7 +42,7 @@ function buildNewUserPromptText(currentForm, currentMode, currentPendingFiles, p
       if (f.note) out.push(`# ${f.note}`);
       out.push('```');
       out.push('```');
-      out.push(f.text);
+      out.push(f.text); 
       out.push('```');
     });
 
@@ -92,14 +99,19 @@ export function usePromptBuilder() {
     return () => {
       imagesToRevokeOnUnmount.forEach(revokeOnce);
     };
-  }, []);
+  }, []); 
 
-  const userPromptText = buildNewUserPromptText(
+  const userPromptText = useMemo(() => buildNewUserPromptText(
     form,
     mode,
     pendingFiles,
     currentProjectRootName
-  );
+  ), [form, mode, pendingFiles, currentProjectRootName]);
+
+  // rawPendingFilesConcatenatedText is no longer needed by App.jsx for token proportion
+  // const rawPendingFilesConcatenatedText = useMemo(() => {
+  //   return getRawPendingFilesText(pendingFiles);
+  // }, [pendingFiles]);
 
   const addPendingImage = useCallback(img => {
     setPendingImages(prev => [...prev, img]);
@@ -130,8 +142,7 @@ export function usePromptBuilder() {
     setPendingPDFs([]);
     setPendingFiles([]); 
     setForm(INITIAL_FORM_DATA); 
-    handleProjectRootChange(null); 
-  }, [pendingImages, setForm, handleProjectRootChange]); 
+  }, [pendingImages, setForm]); 
 
   return {
     form,
@@ -150,7 +161,7 @@ export function usePromptBuilder() {
     currentProjectRootName,
     handleProjectRootChange,
     userPromptText,
+    // rawPendingFilesConcatenatedText, // No longer exporting this
     resetPrompt
   };
 }
-
