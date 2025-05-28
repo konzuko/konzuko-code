@@ -39,10 +39,9 @@ const debounce = (func, delay) => {
 export default function App() {
   const [settings, setSettings] = useSettings();
   const previousChatIdRef = useRef(null);
-  // This ref is no longer strictly needed for comparing states for reset,
-  // but clearing it on chat switch is still a good cleanup for any conceptual "in-flight" marker.
   const inFlightSendSnapshotMarkerRef = useRef(null); 
   const [isSwitchingChat, setIsSwitchingChat] = useState(false); 
+  const [isAppGloballySending, setIsAppGloballySending] = useState(false);
 
   const {
     currentChatId,
@@ -70,7 +69,7 @@ export default function App() {
     isSendingMessage, 
     isSavingEdit,
     isResendingMessage, 
-  } = useMessageManager(currentChatId, settings.apiKey);
+  } = useMessageManager(currentChatId, settings.apiKey, setIsAppGloballySending); 
 
   const {
     form, 
@@ -101,11 +100,14 @@ export default function App() {
     (newChatId) => {
       if (newChatId === currentChatId && !isSwitchingChat) return; 
       if (isSwitchingChat && newChatId === currentChatId) return; 
-
+      if (isAppGloballySending) {
+        Toast("An operation is in progress. Please wait.", 3000); 
+        return;
+      }
       setIsSwitchingChat(true);
       originalSetCurrentChatId(newChatId);
     },
-    [currentChatId, originalSetCurrentChatId, isSwitchingChat]
+    [currentChatId, originalSetCurrentChatId, isSwitchingChat, isAppGloballySending]
   );
 
   const [totalApiTokenCount, setTotalApiTokenCount] = useState(0);
@@ -117,7 +119,7 @@ export default function App() {
     messages,
     userPromptText, 
     pendingPDFs,
-    isSendingMessage 
+    isAppGloballySending 
   );
 
   const callWorkerForTotalTokenCount = useCallback(
@@ -158,7 +160,7 @@ export default function App() {
 
   const currentTotalPromptTokens = useMemo(() => {
     let estimatedImageTokens = 0;
-    if (!isSendingMessage) { 
+    if (!isAppGloballySending) { 
       estimatedImageTokens += pendingImages.length * IMAGE_TOKEN_ESTIMATE;
     }
     (messages || []).forEach(msg => {
@@ -172,44 +174,51 @@ export default function App() {
       });
     });
     return totalApiTokenCount + estimatedImageTokens;
-  }, [totalApiTokenCount, pendingImages, messages, isSendingMessage]);
+  }, [totalApiTokenCount, pendingImages, messages, isAppGloballySending]);
 
   const isSoftMemoryLimitReached = currentTotalPromptTokens >= USER_FACING_TOKEN_LIMIT;
   const isHardTokenLimitReached = currentTotalPromptTokens >= MAX_ABSOLUTE_TOKEN_LIMIT;
 
   const chatListDisabled = useMemo(
-    () => isCreatingChat || isSwitchingChat,
-    [isCreatingChat, isSwitchingChat]
+    () => isCreatingChat || isSwitchingChat || isAppGloballySending,
+    [isCreatingChat, isSwitchingChat, isAppGloballySending]
   );
 
   const globalBusy = useMemo(
-    () => isLoadingSession || isSwitchingChat,
-    [isLoadingSession, isSwitchingChat]
+    () => isLoadingSession || isSwitchingChat || isAppGloballySending,
+    [isLoadingSession, isSwitchingChat, isAppGloballySending]
   );
   
   const chatAreaActionsDisabled = useMemo(
-    () => isLoadingMessageOps || isLoadingSession || isSwitchingChat,
-    [isLoadingMessageOps, isLoadingSession, isSwitchingChat]
+    () => isLoadingMessageOps || isLoadingSession || isSwitchingChat || isAppGloballySending,
+    [isLoadingMessageOps, isLoadingSession, isSwitchingChat, isAppGloballySending]
   );
 
   const sendButtonDisplayInfo = useMemo(() => {
+    if (isAppGloballySending) {
+      if (isSendingMessage) return { text: 'Sending…', disabled: true };
+      if (isSavingEdit) return { text: 'Saving…', disabled: true };
+      if (isResendingMessage) return { text: 'Resending…', disabled: true };
+      return { text: 'Processing…', disabled: true }; 
+    }
+    
     if (!settings.apiKey) return { text: 'Set API Key', disabled: false };
     if (!currentChatId) return { text: 'Select Chat', disabled: false }; 
     if (isHardTokenLimitReached) return { text: 'Token Limit Exceeded', disabled: true };
-    if (isSendingMessage) return { text: 'Sending…', disabled: true };
-    if (isSavingEdit) return { text: 'Saving…', disabled: true };
-    if (isResendingMessage) return { text: 'Resending…', disabled: true };
+        
     return { text: 'Send', disabled: false };
   }, [
+    isAppGloballySending,
+    isSendingMessage, 
+    isSavingEdit,     
+    isResendingMessage, 
     settings.apiKey, 
     currentChatId, 
     isHardTokenLimitReached, 
-    isSendingMessage, 
-    isSavingEdit, 
-    isResendingMessage
   ]);
 
   const finalSendButtonDisabled = sendButtonDisplayInfo.disabled || globalBusy;
+
 
   useEffect(() => {
     if (messages.length > 0 && currentChatId && !isSwitchingChat) { 
@@ -217,7 +226,6 @@ export default function App() {
         if (lastMessage.role === 'assistant' || (lastMessage.role === 'user' && !editingId)) {
             const box = scrollContainerRef.current;
             if (box && (box.scrollHeight - box.scrollTop - box.clientHeight > 100)) {
-                // User has scrolled up, don't auto-scroll
             } else {
                 scrollToBottom('smooth');
             }
@@ -249,20 +257,31 @@ export default function App() {
   }, [currentChatId, isSwitchingChat, editingId, cancelEdit, scrollToBottom]); 
   
   function handleSend() {
+    if (isAppGloballySending) { 
+        Toast("An operation is already in progress. Please wait.", 3000);
+        return;
+    }
     if (isHardTokenLimitReached) {
         Toast(`Prompt too large (max ${MAX_ABSOLUTE_TOKEN_LIMIT.toLocaleString()} tokens). Please reduce content.`, 8000);
         return;
     }
-    if (globalBusy) { 
-        Toast("Application is busy. Please wait.", 3000);
-        return;
-    }
-    if (isSendingMessage || isSavingEdit || isResendingMessage) {
-        if (isSavingEdit) Toast('An edit is in progress.', 3000);
-        else if (isResendingMessage) Toast('A resend is in progress.', 3000);
-        else if (isSendingMessage) Toast('Already sending.', 3000);
-        return;
-    }
+    // This check is now covered by the isAppGloballySending check above,
+    // because if globalBusy is true due to isAppGloballySending, the first check handles it.
+    // If globalBusy is true for other reasons (isLoadingSession, isSwitchingChat),
+    // finalSendButtonDisabled would already be true, preventing the click.
+    // However, an explicit check for other global busy states isn't strictly necessary here
+    // if the button is correctly disabled.
+    // For utmost safety, one might keep:
+    // if (globalBusy && !isAppGloballySending) { /* ... */ }
+    // But for now, let's rely on the button's disabled state for non-send busy states.
+
+    // REMOVED Redundant Block:
+    // if (isSavingEdit || isResendingMessage) { 
+    //     if (isSavingEdit) Toast('An edit is in progress.', 3000);
+    //     else if (isResendingMessage) Toast('A resend is in progress.', 3000);
+    //     return;
+    // }
+
     if (!currentChatId) {
       Toast('Please select or create a chat first.', 3000);
       return;
@@ -272,9 +291,6 @@ export default function App() {
       setSettings((s) => ({ ...s, showSettings: true }));
       return;
     }
-
-    // No longer need to create a snapshot for comparison here, as we will reset immediately.
-    // inFlightSendSnapshotMarkerRef.current = { ... }; // This line can be removed.
 
     const userMessageContentBlocks = [];
     pendingPDFs.forEach((p) =>
@@ -303,33 +319,20 @@ export default function App() {
 
     if (userMessageContentBlocks.length === 0) {
       Toast('Cannot send an empty message.', 3000);
-      // inFlightSendSnapshotMarkerRef.current = null; // Not strictly needed if not set above
       return;
     }
 
-    // The onSendSuccess callback is now simpler. It doesn't need the snapshot
-    // for deciding whether to reset. It can be used for other post-send actions if any.
     const onSendSuccess = () => {
-      // The prompt is already reset by this point.
-      // Any other logic that needs to happen on successful send completion can go here.
-      // For example, clearing any conceptual "in-flight" markers if they were used elsewhere.
       inFlightSendSnapshotMarkerRef.current = null;
     };
 
     sendMessage({
       userMessageContentBlocks,
       existingMessages: messages,
-      // Pass the simplified onSendSuccess callback.
-      // The 'sentStateSnapshot' is no longer needed by useMessageManager for this purpose.
-      // If useMessageManager was adapted to accept 'onSendSuccessCallback' and 'sentStateSnapshot',
-      // you might rename 'onSendSuccessCallback' back to 'onSendSuccess' or adjust useMessageManager.
-      // For this change, we assume useMessageManager's sendMessage just needs an onSendSuccess.
       onSendSuccess: onSendSuccess, 
     });
 
-    // Immediately reset the prompt builder after initiating the send.
     resetPrompt();
-    inFlightSendSnapshotMarkerRef.current = null; // Also clear any marker here.
   }
 
   const handleCopyAll = () => {
@@ -352,6 +355,10 @@ export default function App() {
 
   const handleUpdateChatTitleTrigger = useCallback(
     (id, title) => {
+      if (isAppGloballySending) {
+          Toast("Cannot update title while an operation is in progress.", 3000);
+          return;
+      }
       if (!id) {
         console.error('handleUpdateChatTitleTrigger called with undefined id');
         Toast('Error: Could not update title.', 4000);
@@ -359,18 +366,35 @@ export default function App() {
       }
       updateChatTitle({ id, title });
     },
-    [updateChatTitle]
+    [updateChatTitle, isAppGloballySending] 
   );
+
+  const handleNewChatTrigger = useCallback(() => {
+    if (isAppGloballySending) {
+        Toast("Cannot create new chat while an operation is in progress.", 3000);
+        return;
+    }
+    createChat();
+  }, [createChat, isAppGloballySending]);
+
+  const handleDeleteChatTrigger = useCallback((chatId) => {
+    if (isAppGloballySending) {
+        Toast("Cannot delete chat while an operation is in progress.", 3000);
+        return;
+    }
+    deleteChat(chatId);
+  }, [deleteChat, isAppGloballySending]);
+
 
   return (
     <div className="app-container">
       <ChatList
         currentChatId={currentChatId}
         onSelectChat={handleSelectChat}
-        onNewChatTrigger={createChat}
-        onDeleteChatTrigger={deleteChat}
+        onNewChatTrigger={handleNewChatTrigger} 
+        onDeleteChatTrigger={handleDeleteChatTrigger} 
         onUpdateChatTitleTrigger={handleUpdateChatTitleTrigger}
-        appDisabled={chatListDisabled}
+        appDisabled={chatListDisabled} 
       />
 
       <div className="main-content">
@@ -380,13 +404,18 @@ export default function App() {
             onClick={() =>
               setSettings((s) => ({ ...s, showSettings: !s.showSettings }))
             }
-            disabled={globalBusy}
+            disabled={globalBusy} 
           >
             {settings.showSettings ? 'Close Settings' : 'Open Settings'}
           </button>
 
           <span style={{ margin: '0 1em', fontWeight: 'bold' }}>
-            Konzuko&nbsp;AI
+            Konzuko&nbsp;AI {isAppGloballySending && 
+              (isSendingMessage ? "(Sending...)" : 
+               isSavingEdit ? "(Saving...)" : 
+               isResendingMessage ? "(Resending...)" : 
+               "(Processing...)")
+            }
           </span>
 
           <div
@@ -453,8 +482,8 @@ export default function App() {
               disabled={
                 !messages ||
                 messages.length === 0 ||
-                globalBusy ||
-                isLoadingMessageOps
+                globalBusy || 
+                isLoadingMessageOps 
               }
             >
               Copy All Text
@@ -499,7 +528,7 @@ export default function App() {
                 className="button icon-button"
                 onClick={scrollToPrev}
                 title="Scroll Up"
-                disabled={globalBusy}
+                disabled={globalBusy} 
               >
                 ↑
               </button>
@@ -507,7 +536,7 @@ export default function App() {
                 className="button icon-button"
                 onClick={scrollToNext}
                 title="Scroll Down"
-                disabled={globalBusy}
+                disabled={globalBusy} 
               >
                 ↓
               </button>
@@ -521,15 +550,15 @@ export default function App() {
                 forceLoading={isSwitchingChat}
                 editingId={editingId}
                 editText={editText}
-                loadingSend={isSendingMessage}
-                savingEdit={isSavingEdit}
+                loadingSend={isAppGloballySending} 
+                savingEdit={isAppGloballySending && isSavingEdit} 
                 setEditText={setEditText}
                 handleSaveEdit={saveEdit}
                 handleCancelEdit={cancelEdit}
                 handleStartEdit={startEdit}
                 handleResendMessage={resendMessage}
                 handleDeleteMessage={deleteMessage}
-                actionsDisabled={chatAreaActionsDisabled}
+                actionsDisabled={chatAreaActionsDisabled} 
               />
             ) : (
               <div className="chat-empty-placeholder">
@@ -544,8 +573,8 @@ export default function App() {
               setMode={setMode}
               form={form}
               setForm={setForm}
-              sendDisabled={finalSendButtonDisabled}
-              sendButtonText={sendButtonDisplayInfo.text}
+              sendDisabled={finalSendButtonDisabled} 
+              sendButtonText={sendButtonDisplayInfo.text} 
               handleSend={handleSend}
               showToast={Toast}
               imagePreviews={pendingImages}

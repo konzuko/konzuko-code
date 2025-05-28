@@ -12,7 +12,7 @@ import {
 } from '../api.js';
 import Toast from '../components/Toast.jsx';
 
-export function useMessageManager(currentChatId, apiKey) {
+export function useMessageManager(currentChatId, apiKey, setIsAppGloballySending) { 
   const queryClient = useQueryClient();
   const [editingId, setEditingId] = useState(null);
   const [editText, setEditText] = useState('');
@@ -30,7 +30,6 @@ export function useMessageManager(currentChatId, apiKey) {
 
   const sendMessageMutation = useMutation({
     mutationFn: async (payload) => {
-      // payload includes: userMessageContentBlocks, existingMessages, onSendSuccess
       const userRow = await createMessage({ 
         chat_id: currentChatId,
         role: 'user',
@@ -49,21 +48,24 @@ export function useMessageManager(currentChatId, apiKey) {
         role: 'assistant',
         content: [{ type: 'text', text: assistantContent }],
       });
-      // Pass through the onSendSuccess callback
       return { 
         userRow, 
         assistantRow, 
         onSendSuccess: payload.onSendSuccess, 
       };
     },
-    onSuccess: (data) => { // data now includes { userRow, assistantRow, onSendSuccess }
+    onMutate: async () => { 
+      setIsAppGloballySending?.(true);
+    },
+    onSuccess: (data) => { 
       queryClient.invalidateQueries({ queryKey: ['messages', currentChatId] });
-      // Call the success callback
       data.onSendSuccess?.(); 
+      setIsAppGloballySending?.(false); 
     },
     onError: (error) => {
       Toast(`Error sending message: ${error.message}`, 8000);
       queryClient.invalidateQueries({ queryKey: ['messages', currentChatId] });
+      setIsAppGloballySending?.(false); 
     },
   });
 
@@ -88,6 +90,8 @@ export function useMessageManager(currentChatId, apiKey) {
       return { editedMessageId: messageId };
     },
     onMutate: async ({ messageId, newContentArray }) => {
+      setIsAppGloballySending?.(true); 
+
       const queryKey = ['messages', currentChatId];
       await queryClient.cancelQueries({ queryKey });
       const previousMessages = queryClient.getQueryData(queryKey);
@@ -112,6 +116,7 @@ export function useMessageManager(currentChatId, apiKey) {
       queryClient.invalidateQueries({ queryKey: ['messages', currentChatId] });
       setEditingId(null);
       setEditText('');
+      setIsAppGloballySending?.(false); 
     },
     onError: (error, variables, context) => {
       if (context?.previousMessages) {
@@ -119,6 +124,7 @@ export function useMessageManager(currentChatId, apiKey) {
       }
       Toast('Failed to edit message: ' + error.message, 5000);
       queryClient.invalidateQueries({ queryKey: ['messages', currentChatId] });
+      setIsAppGloballySending?.(false); 
     },
   });
 
@@ -140,13 +146,18 @@ export function useMessageManager(currentChatId, apiKey) {
       });
       return { resentMessageId: messageId };
     },
+    onMutate: async () => { 
+        setIsAppGloballySending?.(true); 
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['messages', currentChatId] });
       Toast('Message resent and conversation continued.', 3000);
+      setIsAppGloballySending?.(false); 
     },
     onError: (error) => {
       Toast('Failed to resend message: ' + error.message, 5000);
       queryClient.invalidateQueries({ queryKey: ['messages', currentChatId] });
+      setIsAppGloballySending?.(false); 
     },
   });
 
@@ -185,12 +196,15 @@ export function useMessageManager(currentChatId, apiKey) {
   });
 
   const handleStartEdit = useCallback((msg) => {
+    // The check for isAppGloballySending should be done in App.jsx before calling this,
+    // or by disabling the button that triggers this.
+    // Removing: if (isAppGloballySending) { ... }
     setEditingId(msg.id);
     const textContent = Array.isArray(msg.content)
       ? msg.content.find(b => b.type === 'text')?.text || ''
       : String(msg.content || '');
     setEditText(textContent);
-  }, []);
+  }, []); // Removed isAppGloballySending from dependencies
 
   const handleCancelEdit = useCallback(() => {
     setEditingId(null);
@@ -239,14 +253,17 @@ export function useMessageManager(currentChatId, apiKey) {
   }, [currentChatId, messages, resendMessageMutation, apiKey]);
 
   const handleDeleteMessage = useCallback((messageId) => {
+    // The check for isAppGloballySending should be done in App.jsx before calling this,
+    // or by disabling the button that triggers this.
+    // Removing: if (isAppGloballySending) { ... }
     if (deleteMessageMutation.isPending || !currentChatId) return;
     if (window.confirm('Are you sure you want to delete this message? You can undo this action from the toast.')) {
       deleteMessageMutation.mutate(messageId);
     }
-  }, [deleteMessageMutation, currentChatId]);
+  }, [deleteMessageMutation, currentChatId]); // Removed isAppGloballySending from dependencies
 
 
-  const isLoadingOps = sendMessageMutation.isPending ||
+  const isLoadingOps = sendMessageMutation.isPending || 
                        editMessageMutation.isPending ||
                        resendMessageMutation.isPending ||
                        deleteMessageMutation.isPending ||
@@ -264,10 +281,10 @@ export function useMessageManager(currentChatId, apiKey) {
     sendMessage: sendMessageMutation.mutate, 
     resendMessage: handleResendMessage,
     deleteMessage: handleDeleteMessage,
-    isLoadingOps,
-    isSendingMessage: sendMessageMutation.isPending,
+    isLoadingOps, 
+    isSendingMessage: sendMessageMutation.isPending, 
     isSavingEdit: editMessageMutation.isPending,
-    isResendingMessage: resendMessageMutation.isPending, // Ensure this is returned
+    isResendingMessage: resendMessageMutation.isPending,
   };
 }
 
