@@ -280,25 +280,20 @@ html, body {
   min-width: 30px;
 }
 
-/* Specific styles for New Chat and Send buttons to make them blue */
-.button.new-chat-button,
-.button.send-button,
-.button.button-accent { /* Added button-accent */
+.button.button-accent { 
   background-color: var(--accent);
-  color: #fff; /* White text on blue background */
+  color: #fff; 
 }
 
-.button.new-chat-button:hover:not(:disabled),
-.button.send-button:hover:not(:disabled),
-.button.button-accent:hover:not(:disabled) { /* Added button-accent */
-  background-color: var(--accent-hover); /* Use hover color from accent variables */
+.button.button-accent:hover:not(:disabled) { 
+  background-color: var(--accent-hover); 
 }
 
-.button.button-glow:not(:disabled) { /* Added button-glow */
+.button.button-glow:not(:disabled) { 
   box-shadow: 0 0 5px var(--accent), 0 0 8px var(--accent-hover);
   transition: background-color var(--transition), box-shadow var(--transition);
 }
-.button.button-glow:hover:not(:disabled) { /* Added button-glow */
+.button.button-glow:hover:not(:disabled) { 
   box-shadow: 0 0 8px var(--accent-hover), 0 0 12px var(--accent);
 }
 
@@ -577,6 +572,56 @@ html, body {
 
 .visual-switch:focus-visible {
   box-shadow: 0 0 0 2px var(--bg-primary), 0 0 0 4px var(--accent-hover);
+}
+
+/* Analysing Animation Styles */
+.analysing-animation-container {
+  display: flex;
+  align-items: center;
+  /* justify-content: center; */ /* Let it align with other text */
+  gap: 8px;
+  color: var(--text-secondary);
+  margin: 10px 0; /* Adjusted margin */
+  font-size: 0.9em;
+  /* font-style: italic; */ /* Removed italic to match button text style */
+}
+
+.analysing-text {
+  margin-right: 5px;
+}
+
+.analysing-dots span {
+  display: inline-block;
+  width: 7px; /* Slightly smaller dots */
+  height: 7px;
+  margin: 0 2px;
+  background-color: var(--accent);
+  border-radius: 50%;
+  opacity: 0.3;
+  animation: analysingPulse 1.4s infinite ease-in-out;
+}
+
+.analysing-dots span:nth-child(1) {
+  animation-delay: -0.32s;
+}
+
+.analysing-dots span:nth-child(2) {
+  animation-delay: -0.16s;
+}
+
+.analysing-dots span:nth-child(3) {
+  animation-delay: 0s;
+}
+
+@keyframes analysingPulse {
+  0%, 80%, 100% {
+    transform: scale(0.7); /* Adjusted scale */
+    opacity: 0.3;
+  }
+  40% {
+    transform: scale(1.1); /* Adjusted scale */
+    opacity: 1;
+  }
 }
 
 

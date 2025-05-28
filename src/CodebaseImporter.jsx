@@ -75,14 +75,10 @@ function isIncluded(fullPath, filterMap) {
   const parts = fullPath.split('/'); 
 
   if (parts.length === 1) {
-    // For a top-level file/folder, it's included if its entry in filterMap is true.
-    // Default unselected means it must be explicitly true.
     return filterMap[parts[0]] === true;
   }
 
   const topLevelDirInPath = parts[0];
-
-  // For a file inside a directory, it's included if its top-level parent directory is true.
   return filterMap[topLevelDirInPath] === true;
 }
 
@@ -153,7 +149,7 @@ export default function CodebaseImporter({
   onProjectRootChange, 
   currentProjectRootNameFromBuilder 
 }) {
-  const [adding, setAdding] = useState(false);
+  const [adding, setAdding] = useState(false); 
   const [projectRoot, setProjectRoot] = useState(null); 
   const [entryFilter, setEntryFilter] = useState({}); 
   const [step, setStep] = useState('FILTER'); 
@@ -223,7 +219,7 @@ export default function CodebaseImporter({
         return;
     }
     try {
-      setAdding(true);
+      setAdding(true); 
       const handles = await window.showOpenFilePicker({ multiple: true });
       const batch = []; 
       const rejectionStats = { 
@@ -304,7 +300,7 @@ export default function CodebaseImporter({
     } catch (err) {
       if (err.name !== 'AbortError') toastFn?.('File pick error: ' + err.message, 5000);
     } finally {
-      setAdding(false);
+      setAdding(false); 
     }
   }, [files, onFilesChange, projectRoot, toastFn]); 
 
@@ -367,8 +363,8 @@ export default function CodebaseImporter({
         toastFn?.('Directory picker is not supported in this browser.', 4000);
         return;
     }
+    setAdding(true); 
     try {
-      setAdding(true);
       setEntryFilter({}); 
       setTopEntries([]);  
       setInitialScanResults([]); 
@@ -385,7 +381,7 @@ export default function CodebaseImporter({
       for await (const [name, h] of dirHandle.entries()) {
         tops.push({ name, kind: h.kind });
       }
-      setTopEntries(tops);
+      setTopEntries(tops); // This will make the checkbox UI appear
 
       const allScannedCandidates = []; 
       const folderRejectionStats = { 
@@ -396,19 +392,15 @@ export default function CodebaseImporter({
       setInitialScanResults(allScannedCandidates); 
       
       const freshMap = {}; 
-      tops.forEach(e => { freshMap[e.name] = false; }); // Default all top-level items to UNCHECKED
+      tops.forEach(e => { freshMap[e.name] = false; }); 
       setEntryFilter(freshMap); 
 
       const existingNonProjectFiles = files.filter(f => !f.insideProject);
-      
-      // Since all are initially false in freshMap, filesPassingInitialFilter will be empty for project files
-      const filesPassingInitialFilter = allScannedCandidates.filter(f => isIncluded(f.fullPath, freshMap)); // Will be empty
-      
-      // So, filesToProcessForDisplay will also be empty for project files initially
+      const filesPassingInitialFilter = allScannedCandidates.filter(f => isIncluded(f.fullPath, freshMap));
       const filesToProcessForDisplay = filesPassingInitialFilter; 
       
       const mergedInitialFiles = mergeFiles(existingNonProjectFiles, filesToProcessForDisplay);
-      onFilesChange(mergedInitialFiles); // Initially, only non-project files are shown
+      onFilesChange(mergedInitialFiles); 
       
       const rejectionMessage = formatRejectionMessage(folderRejectionStats);
       if (rejectionMessage) {
@@ -419,7 +411,7 @@ export default function CodebaseImporter({
     } catch (err) {
       if (err.name !== 'AbortError') toastFn?.('Folder pick error: ' + err.message, 5000);
     } finally {
-      setAdding(false);
+      setAdding(false); 
     }
   }, [files, onFilesChange, onProjectRootChange, toastFn]); 
 
@@ -431,7 +423,7 @@ export default function CodebaseImporter({
         const start = Math.min(lastCheckedIndexRef.current, index);
         const end = Math.max(lastCheckedIndexRef.current, index);
         for (let i = start; i <= end; i++) {
-            if (topEntries[i]) { // Ensure entry exists at this index
+            if (topEntries[i]) { 
                 newFilterState[topEntries[i].name] = checked;
             }
         }
@@ -488,10 +480,8 @@ export default function CodebaseImporter({
             }
             toastFn?.(message, 4000);
         } else if (Object.values(entryFilter).some(v => v === true) && numSelectedProjectFiles === 0 && initialScanResults.length > 0) {
-            // User has checked items, but they resulted in 0 files (e.g. checked an empty folder)
             toastFn?.('Selection resulted in 0 project files. Try selecting other items.', 4000);
         } else if (files.length > newCompleteFileList.length && countExcludedByFileLimit === 0 && initialScanResults.length === (userFilteredProjectFiles.length)) {
-             // This case handles duplicate removals if any, and no other exclusion happened
             const actualRemoved = files.length - newCompleteFileList.length;
             if (actualRemoved > 0) {
                  toastFn?.(`Removed ${actualRemoved} duplicate item${actualRemoved > 1 ? 's' : ''}.`, 3000);
@@ -508,6 +498,7 @@ export default function CodebaseImporter({
     }
     let handles;
     try {
+        setAdding(true);
         handles = await window.showOpenFilePicker({
             multiple: true,
             types: [{
@@ -524,10 +515,10 @@ export default function CodebaseImporter({
         if (pickerErr.name !== 'AbortError') {
             toastFn?.('Image picker error: ' + pickerErr.message, 4000);
         }
+        setAdding(false);
         return; 
     }
 
-    setAdding(true);
     const failedUploads = [];
     let successfulUploads = 0;
 
@@ -630,6 +621,7 @@ export default function CodebaseImporter({
 
     let handles;
     try {
+        setAdding(true);
         handles = await window.showOpenFilePicker({
             multiple: true,
             types: [{ description: 'PDF', accept: { 'application/pdf': ['.pdf'] } }]
@@ -638,10 +630,10 @@ export default function CodebaseImporter({
         if (pickerErr.name !== 'AbortError') {
             toastFn?.('PDF picker error: ' + pickerErr.message, 4000);
         }
+        setAdding(false);
         return; 
     }
     
-    setAdding(true);
     const failedUploads = [];
     let successfulUploads = 0;
     let genAI;
@@ -726,6 +718,17 @@ export default function CodebaseImporter({
       {step === 'FILTER' && topEntries.length > 0 && projectRoot && (
         <div>
           <h3>Select entries to include from '{projectRoot.name}'</h3>
+          {/* Show analysing animation only when 'adding' is true (folder scan in progress) */}
+          {adding && (
+            <div className="analysing-animation-container">
+              <span className="analysing-text">Analysing project files</span>
+              <div className="analysing-dots">
+                <span></span>
+                <span></span>
+                <span></span>
+              </div>
+            </div>
+          )}
           <div style={{
             maxHeight: '200px',
             overflowY: 'auto',
@@ -741,6 +744,7 @@ export default function CodebaseImporter({
                   checked={entryFilter[name] === true} 
                   onChange={e => handleCheckboxChange(e, name, index)} 
                   style={{ marginRight: '8px' }}
+                  disabled={adding} 
                 />
                 {kind === 'directory' ? '📁' : '📄'} <strong>{name}</strong>
               </label>
@@ -750,8 +754,9 @@ export default function CodebaseImporter({
             className="button button-accent button-glow" 
             style={{ marginTop: 8 }} 
             onClick={() => setStep('FILES')}
+            disabled={adding} 
           >
-            Pick these Files
+            { adding ? 'Analysing…' : 'Pick these Files' }
           </button>
         </div>
       )}
