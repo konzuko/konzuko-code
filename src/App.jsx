@@ -39,7 +39,9 @@ const debounce = (func, delay) => {
 export default function App() {
   const [settings, setSettings] = useSettings();
   const previousChatIdRef = useRef(null);
-  const sentPromptStateRef = useRef(null); 
+  // This ref is now primarily for clearing any conceptual "in-flight send snapshot" if a chat switch occurs.
+  // The actual snapshot for comparison in onSendSuccess will be passed through the mutation.
+  const inFlightSendSnapshotMarkerRef = useRef(null); 
   const [isSwitchingChat, setIsSwitchingChat] = useState(false); 
 
   const {
@@ -61,7 +63,7 @@ export default function App() {
     startEdit,
     cancelEdit,
     saveEdit,
-    sendMessage,
+    sendMessage, // Expect sendMessage to be part of a mutation that can accept and return the snapshot
     resendMessage,
     deleteMessage,
     isLoadingOps: isLoadingMessageOps, 
@@ -190,16 +192,13 @@ export default function App() {
     [isLoadingMessageOps, isLoadingSession, isSwitchingChat]
   );
 
-  // Centralized logic for Send button text and disabled state
   const sendButtonDisplayInfo = useMemo(() => {
-    if (!settings.apiKey) return { text: 'Set API Key', disabled: false }; // Button clickable to trigger API key toast in handleSend
-    if (!currentChatId) return { text: 'Select Chat', disabled: false }; // Button clickable to trigger select chat toast in handleSend
-    
+    if (!settings.apiKey) return { text: 'Set API Key', disabled: false };
+    if (!currentChatId) return { text: 'Select Chat', disabled: false }; 
     if (isHardTokenLimitReached) return { text: 'Token Limit Exceeded', disabled: true };
     if (isSendingMessage) return { text: 'Sending…', disabled: true };
     if (isSavingEdit) return { text: 'Saving…', disabled: true };
     if (isResendingMessage) return { text: 'Resending…', disabled: true };
-    
     return { text: 'Send', disabled: false };
   }, [
     settings.apiKey, 
@@ -210,9 +209,7 @@ export default function App() {
     isResendingMessage
   ]);
 
-  // Final disabled state for the button, considering global busy states too
   const finalSendButtonDisabled = sendButtonDisplayInfo.disabled || globalBusy;
-
 
   useEffect(() => {
     if (messages.length > 0 && currentChatId && !isSwitchingChat) { 
@@ -220,6 +217,7 @@ export default function App() {
         if (lastMessage.role === 'assistant' || (lastMessage.role === 'user' && !editingId)) {
             const box = scrollContainerRef.current;
             if (box && (box.scrollHeight - box.scrollTop - box.clientHeight > 100)) {
+                // User has scrolled up, don't auto-scroll
             } else {
                 scrollToBottom('smooth');
             }
@@ -231,10 +229,9 @@ export default function App() {
     let cleanupRaf, scrollRaf, transitionEndRaf;
 
     if (currentChatId !== previousChatIdRef.current) {
-      sentPromptStateRef.current = null; 
+      inFlightSendSnapshotMarkerRef.current = null; // Clear any marker on chat switch
       cleanupRaf = requestAnimationFrame(() => {
         if (editingId) cancelEdit(); 
-        resetPrompt(); 
       });
       if (currentChatId) { 
         scrollRaf = requestAnimationFrame(() => scrollToBottom('auto'));
@@ -249,9 +246,8 @@ export default function App() {
       if (scrollRaf) cancelAnimationFrame(scrollRaf);
       if (transitionEndRaf) cancelAnimationFrame(transitionEndRaf);
     };
-  }, [currentChatId, isSwitchingChat, editingId, resetPrompt, cancelEdit, scrollToBottom]); 
+  }, [currentChatId, isSwitchingChat, editingId, cancelEdit, scrollToBottom]); 
   
-
   function handleSend() {
     if (isHardTokenLimitReached) {
         Toast(`Prompt too large (max ${MAX_ABSOLUTE_TOKEN_LIMIT.toLocaleString()} tokens). Please reduce content.`, 8000);
@@ -277,13 +273,22 @@ export default function App() {
       return;
     }
 
-    sentPromptStateRef.current = {
-      userPromptText,
+    // Create a snapshot of the prompt state for THIS specific send operation.
+    const currentSendSnapshot = {
+      userPromptText, // The text from usePromptBuilder
       pendingImages: pendingImages.map(({ url, name }) => ({ url, name })),
-      pendingPDFs: pendingPDFs.map(({ fileId, name }) => ({ fileId, name })),
+      pendingPDFs: pendingPDFs.map(({ fileId, name, mimeType, resourceName }) => ({ fileId, name, mimeType, resourceName })),
     };
+    // Mark that a send is in progress with this snapshot.
+    // This marker is mostly for conceptual clarity or if other parts of the system needed to know.
+    // The actual snapshot for comparison is passed to the mutation.
+    inFlightSendSnapshotMarkerRef.current = currentSendSnapshot;
+
 
     const userMessageContentBlocks = [];
+    // Use currentSendSnapshot for consistency if pendingImages/PDFs could change rapidly,
+    // though typically they wouldn't between snapshot creation and this point.
+    // For simplicity, using live pendingImages/PDFs from usePromptBuilder is fine here.
     pendingPDFs.forEach((p) =>
       userMessageContentBlocks.push({
         type: 'file',
@@ -304,50 +309,68 @@ export default function App() {
         },
       })
     );
-    if (userPromptText?.trim()) {
+    if (userPromptText?.trim()) { // Use live userPromptText
       userMessageContentBlocks.push({ type: 'text', text: userPromptText });
     }
 
     if (userMessageContentBlocks.length === 0) {
       Toast('Cannot send an empty message.', 3000);
+      inFlightSendSnapshotMarkerRef.current = null; // Clear marker if not sending
       return;
     }
 
-    const onSendSuccess = () => {
-      const sentState = sentPromptStateRef.current;
-      if (!sentState) return;
+    // This callback will receive the specific snapshot associated with this send.
+    const onSendSuccess = (sentStateSnapshotForThisSend) => {
+      if (!sentStateSnapshotForThisSend) {
+        // This case should ideally not happen if useMessageManager correctly passes the snapshot.
+        // If it does, it might be safer not to reset, or log an error.
+        console.warn("onSendSuccess called without a sentStateSnapshot. Prompt not reset as a precaution.");
+        inFlightSendSnapshotMarkerRef.current = null; // Clear marker
+        return;
+      }
 
-      const imgsEqual =
-        pendingImages.length === sentState.pendingImages.length &&
-        pendingImages.every(
+      // Compare the *current* PromptBuilder state with the snapshot *for this specific send*.
+      const currentLiveUserPromptText = userPromptText; // from usePromptBuilder
+      const currentLivePendingImages = pendingImages; // from usePromptBuilder
+      const currentLivePendingPDFs = pendingPDFs;   // from usePromptBuilder
+      
+      const imagesUnchanged =
+        currentLivePendingImages.length === sentStateSnapshotForThisSend.pendingImages.length &&
+        currentLivePendingImages.every(
           (img, i) =>
-            sentState.pendingImages[i] &&
-            img.url === sentState.pendingImages[i].url &&
-            img.name === sentState.pendingImages[i].name
-        );
-      const pdfsEqual =
-        pendingPDFs.length === sentState.pendingPDFs.length &&
-        pendingPDFs.every(
-          (pdf, i) =>
-            sentState.pendingPDFs[i] &&
-            pdf.fileId === sentState.pendingPDFs[i].fileId &&
-            pdf.name === sentState.pendingPDFs[i].name
+            sentStateSnapshotForThisSend.pendingImages[i] &&
+            img.url === sentStateSnapshotForThisSend.pendingImages[i].url &&
+            img.name === sentStateSnapshotForThisSend.pendingImages[i].name
         );
 
+      const pdfsUnchanged =
+        currentLivePendingPDFs.length === sentStateSnapshotForThisSend.pendingPDFs.length &&
+        currentLivePendingPDFs.every(
+          (pdf, i) =>
+            sentStateSnapshotForThisSend.pendingPDFs[i] &&
+            pdf.fileId === sentStateSnapshotForThisSend.pendingPDFs[i].fileId &&
+            pdf.name === sentStateSnapshotForThisSend.pendingPDFs[i].name
+        );
+      
       if (
-        userPromptText === sentState.userPromptText &&
-        imgsEqual &&
-        pdfsEqual
+        currentLiveUserPromptText === sentStateSnapshotForThisSend.userPromptText &&
+        imagesUnchanged &&
+        pdfsUnchanged
       ) {
         resetPrompt();
       }
-      sentPromptStateRef.current = null;
+      inFlightSendSnapshotMarkerRef.current = null; // Clear marker after handling
     };
 
     sendMessage({
       userMessageContentBlocks,
       existingMessages: messages,
-      onSendSuccess,
+      // Pass the callback and the specific snapshot for this send operation
+      // to useMessageManager. It's assumed useMessageManager is adapted
+      // to accept 'sentStateSnapshot' and pass it to its own onSuccess data,
+      // which then provides it to 'onSendSuccessCallback'.
+      onSendSuccessCallback: onSendSuccess, 
+      sentStateSnapshot: currentSendSnapshot 
     });
   }
 
@@ -563,8 +586,8 @@ export default function App() {
               setMode={setMode}
               form={form}
               setForm={setForm}
-              sendDisabled={finalSendButtonDisabled} // Use the centrally computed disabled state
-              sendButtonText={sendButtonDisplayInfo.text} // Pass the centrally computed text
+              sendDisabled={finalSendButtonDisabled}
+              sendButtonText={sendButtonDisplayInfo.text}
               handleSend={handleSend}
               showToast={Toast}
               imagePreviews={pendingImages}
@@ -585,3 +608,4 @@ export default function App() {
     </div>
   );
 }
+
