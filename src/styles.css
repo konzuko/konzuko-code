@@ -282,14 +282,24 @@ html, body {
 
 /* Specific styles for New Chat and Send buttons to make them blue */
 .button.new-chat-button,
-.button.send-button {
+.button.send-button,
+.button.button-accent { /* Added button-accent */
   background-color: var(--accent);
   color: #fff; /* White text on blue background */
 }
 
 .button.new-chat-button:hover:not(:disabled),
-.button.send-button:hover:not(:disabled) {
+.button.send-button:hover:not(:disabled),
+.button.button-accent:hover:not(:disabled) { /* Added button-accent */
   background-color: var(--accent-hover); /* Use hover color from accent variables */
+}
+
+.button.button-glow:not(:disabled) { /* Added button-glow */
+  box-shadow: 0 0 5px var(--accent), 0 0 8px var(--accent-hover);
+  transition: background-color var(--transition), box-shadow var(--transition);
+}
+.button.button-glow:hover:not(:disabled) { /* Added button-glow */
+  box-shadow: 0 0 8px var(--accent-hover), 0 0 12px var(--accent);
 }
 
 
@@ -318,12 +328,10 @@ html, body {
   background-color: #2a2a2e; 
 }
 .form-textarea {
-  resize: vertical; /* Allow manual vertical resize by user if desired */
+  resize: vertical; 
   min-height: 60px; 
-  /* max-height will be controlled by JS, but CSS can provide a fallback if needed */
 }
 
-/* Textarea specific for message editing in ChatArea */
 .editing-textarea {
   width: 100%; 
   font-size: 0.95rem; 
@@ -426,21 +434,20 @@ html, body {
   overflow-x: auto;
   border: 1px solid var(--border);
   margin: var(--space-sm) 0;
-  font-size: 0.85rem; /* As per request for code blocks */
+  font-size: 0.85rem; 
   line-height: 1.4; 
 }
 .message-content pre code {
-  font-family: monospace; /* Explicitly monospace */
-  font-size: inherit; /* Inherit 1rem from pre tag */
-  line-height: inherit; /* Inherit line-height from pre */
-  /* CSS for syntax highlighting (colors, bolding) comes from highlight.js theme */
+  font-family: monospace; 
+  font-size: inherit; 
+  line-height: inherit; 
 }
 .message-content code:not(pre code) { 
   font-family: monospace;
   background: rgba(255,255,255,0.1);
   padding: 2px 5px;
   border-radius: 1px;
-  font-size: 0.9em; /* Relative to parent's (0.95rem) font-size */
+  font-size: 0.9em; 
 }
 
 .code-wrapper {
@@ -495,11 +502,11 @@ html, body {
 .visual-switch {
   display: inline-block;
   position: relative;
-  width: 60px; /* Width of the switch */
-  height: 28px; /* Height of the switch */
+  width: 60px; 
+  height: 28px; 
   cursor: pointer;
   user-select: none;
-  outline: none; /* Remove default focus outline, manage with :focus-visible if needed */
+  outline: none; 
 }
 
 .visual-switch-track {
@@ -508,34 +515,34 @@ html, body {
   left: 0;
   right: 0;
   bottom: 0;
-  background-color: var(--error); /* OFF state background (Red) */
-  border-radius: 14px; /* Fully rounded ends */
+  background-color: var(--error); 
+  border-radius: 14px; 
   transition: background-color var(--transition);
   display: flex;
   align-items: center;
-  justify-content: space-between; /* To position ON/OFF text */
-  padding: 0 6px; /* Padding for text inside track */
-  overflow: hidden; /* Hide text that slides out */
+  justify-content: space-between; 
+  padding: 0 6px; 
+  overflow: hidden; 
 }
 
 .visual-switch.is-on .visual-switch-track {
-  background-color: var(--accent); /* ON state background (Blue) */
+  background-color: var(--accent); 
 }
 
 .visual-switch-thumb {
   position: absolute;
-  top: 3px; /* Centering the thumb */
-  left: 3px; /* Initial position for OFF state */
-  width: 22px; /* Diameter of the thumb */
+  top: 3px; 
+  left: 3px; 
+  width: 22px; 
   height: 22px;
   background-color: white;
-  border-radius: 50%; /* Circular thumb */
+  border-radius: 50%; 
   transition: transform var(--transition);
   box-shadow: 0 1px 3px rgba(0,0,0,0.2);
 }
 
 .visual-switch.is-on .visual-switch-thumb {
-  transform: translateX(32px); /* (Switch Width - Thumb Width - 2*LeftOffset) = 60 - 22 - 2*3 = 32px */
+  transform: translateX(32px); 
 }
 
 .visual-switch-text-on,
@@ -543,13 +550,13 @@ html, body {
   font-size: 0.7rem;
   font-weight: bold;
   color: white;
-  position: absolute; /* Position text within the track */
-  line-height: 28px; /* Vertically center text */
+  position: absolute; 
+  line-height: 28px; 
   transition: opacity var(--transition), transform var(--transition);
 }
 
 .visual-switch-text-on {
-  left: 8px; /* Position ON text */
+  left: 8px; 
   opacity: 0;
   transform: translateX(-10px);
 }
@@ -559,7 +566,7 @@ html, body {
 }
 
 .visual-switch-text-off {
-  right: 7px; /* Position OFF text */
+  right: 7px; 
   opacity: 1;
   transform: translateX(0);
 }
@@ -568,7 +575,6 @@ html, body {
   transform: translateX(10px);
 }
 
-/* Focus style for accessibility */
 .visual-switch:focus-visible {
   box-shadow: 0 0 0 2px var(--bg-primary), 0 0 0 4px var(--accent-hover);
 }
@@ -642,7 +648,6 @@ html, body {
     margin-right: 0;
   }
 
-  /* Adjust visual switch for smaller screens if needed */
   .visual-switch {
     width: 54px;
     height: 26px;
@@ -654,7 +659,7 @@ html, body {
     left: 3px;
   }
   .visual-switch.is-on .visual-switch-thumb {
-    transform: translateX(28px); /* 54 - 20 - 2*3 = 28 */
+    transform: translateX(28px); 
   }
   .visual-switch-text-on, .visual-switch-text-off {
     line-height: 26px;
@@ -663,4 +668,3 @@ html, body {
    .visual-switch-text-on { left: 7px; }
    .visual-switch-text-off { right: 6px; }
 }
-
