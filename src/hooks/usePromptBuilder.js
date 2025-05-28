@@ -15,19 +15,19 @@ const safeTrim = (val) => (val ?? '').trim();
 
 function buildNewUserPromptText(currentForm, currentMode, currentPendingFiles, projectRootName) {
   if (currentMode === 'DEVELOP') {
-    const out = ['MODE: DEVELOP'];
+    const out = ['## MODE # DEVELOP']; // Changed to match other modes
 
     if (safeTrim(currentForm.developGoal)) {
-      out.push(`GOAL ${safeTrim(currentForm.developGoal)}`);
+      out.push(`GOAL: ${safeTrim(currentForm.developGoal)}`); // Added colon
     }
     if (safeTrim(currentForm.developFeatures)) {
-      out.push(`FEATURES ${safeTrim(currentForm.developFeatures)}`);
+      out.push(`FEATURES: ${safeTrim(currentForm.developFeatures)}`); // Added colon
     }
     if (safeTrim(currentForm.developReturnFormat)) {
-      out.push(`RETURN FORMAT ${safeTrim(currentForm.developReturnFormat)}`);
+      out.push(`RETURN FORMAT: ${safeTrim(currentForm.developReturnFormat)}`); // Added colon
     }
     if (safeTrim(currentForm.developWarnings)) {
-      out.push(`THINGS TO REMEMBER/WARNINGS ${safeTrim(currentForm.developWarnings)}`);
+      out.push(`THINGS TO REMEMBER/WARNINGS: ${safeTrim(currentForm.developWarnings)}`); // Added colon
     }
 
     const treePaths = currentPendingFiles.filter(f => f.insideProject).map(f => f.fullPath);

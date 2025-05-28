@@ -113,7 +113,7 @@ export default function PromptBuilder({
       {mode === 'DEVELOP' &&
         fields.map(([label, key, rows]) => (
           <div key={key} className="form-group">
-            <label>{label}:</label>
+            <label>{label}</label> {/* Removed colon here */}
             <textarea
               ref={(el) => (textareaRefs.current[key] = el)}
               rows={rows}
@@ -225,3 +225,4 @@ export default function PromptBuilder({
     </div>
   );
 }
+
