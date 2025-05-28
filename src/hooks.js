@@ -29,7 +29,9 @@ const TARGET_GEMINI_MODEL = "gemini-2.5-pro-preview-05-06";
 export const INITIAL_FORM_DATA = {
   developGoal: '',
   developFeatures: '',
-  developReturnFormat: 'return the complete refactored code for the respective changed files in FULL with NO OMISSIONS so that i can paste it directly into my ide',
+  // developReturnFormat: 'return the complete refactored code for the respective changed files in FULL with NO OMISSIONS so that i can paste it directly into my ide', // Old field
+  developReturnFormat_custom: '', // User's custom part of the return format
+  developReturnFormat_autoIncludeDefault: true, // The toggle state, default ON
   developWarnings: '',
   // developContext: '', // Removed as per request
   fixCode: '',
@@ -42,17 +44,18 @@ function useDebouncedLocalStorage(key, initial, delay = LOCALSTORAGE_DEBOUNCE) {
     try {
       const storedValue = localStorage.getItem(key);
       if (storedValue !== null) {
-        const parsed = JSON.parse(storedValue);
+        let parsed = JSON.parse(storedValue);
         // Ensure the model is always the target model if it exists in settings
         if (key === 'konzuko-settings' && parsed.hasOwnProperty('model')) {
             parsed.model = TARGET_GEMINI_MODEL;
         }
-        // For form data, if it's loaded from localStorage, it's user's draft.
-        // The 'initial' (INITIAL_FORM_DATA) is primarily for the very first load
-        // or when explicitly resetting.
+        // For form data, merge with initial to ensure new fields get defaults
+        if (key === 'konzuko-form-data') {
+            parsed = { ...initial, ...parsed };
+        }
         return parsed;
       }
-      return initial; // Use the passed 'initial' (which will be INITIAL_FORM_DATA for form)
+      return initial; // Use the passed 'initial'
     } catch {
       return initial;
     }
@@ -88,6 +91,7 @@ export function useSettings() {
 
 export function useFormData() {
   // Use the exported constant here for the initial state if nothing in localStorage
+  // The useDebouncedLocalStorage will merge stored data with INITIAL_FORM_DATA
   return useDebouncedLocalStorage('konzuko-form-data', INITIAL_FORM_DATA);
 }
 

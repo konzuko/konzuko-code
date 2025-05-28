@@ -3,14 +3,16 @@
   --bg-primary : #121212;
   --bg-secondary: #1e1e1e;
   --bg-tertiary: #2d2d2d;
-  --accent     : #4f8eff;
+  --accent     : #4f8eff; /* Blue for ON state */
   --accent-hover: #6ba1ff;
   --text-primary: #ffffff;
   --text-secondary: #b0b0b0;
   --border      : #3a3a3a;
   --success     : #4caf50;
   --warning     : #ff9800;
-  --error       : #f44336;
+  --error       : #f44336; /* Red for OFF state */
+  --error-hover : #d32f2f; 
+  --switch-off-bg: #757575; /* Grey for OFF state track if red is too much, using red as requested */
 
   --space-xs: 4px;
   --space-sm: 8px;
@@ -489,6 +491,89 @@ html, body {
   font-size: 0.8rem;
 }
 
+/* Visual Switch Toggle Styles */
+.visual-switch {
+  display: inline-block;
+  position: relative;
+  width: 60px; /* Width of the switch */
+  height: 28px; /* Height of the switch */
+  cursor: pointer;
+  user-select: none;
+  outline: none; /* Remove default focus outline, manage with :focus-visible if needed */
+}
+
+.visual-switch-track {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: var(--error); /* OFF state background (Red) */
+  border-radius: 14px; /* Fully rounded ends */
+  transition: background-color var(--transition);
+  display: flex;
+  align-items: center;
+  justify-content: space-between; /* To position ON/OFF text */
+  padding: 0 6px; /* Padding for text inside track */
+  overflow: hidden; /* Hide text that slides out */
+}
+
+.visual-switch.is-on .visual-switch-track {
+  background-color: var(--accent); /* ON state background (Blue) */
+}
+
+.visual-switch-thumb {
+  position: absolute;
+  top: 3px; /* Centering the thumb */
+  left: 3px; /* Initial position for OFF state */
+  width: 22px; /* Diameter of the thumb */
+  height: 22px;
+  background-color: white;
+  border-radius: 50%; /* Circular thumb */
+  transition: transform var(--transition);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+}
+
+.visual-switch.is-on .visual-switch-thumb {
+  transform: translateX(32px); /* (Switch Width - Thumb Width - 2*LeftOffset) = 60 - 22 - 2*3 = 32px */
+}
+
+.visual-switch-text-on,
+.visual-switch-text-off {
+  font-size: 0.7rem;
+  font-weight: bold;
+  color: white;
+  position: absolute; /* Position text within the track */
+  line-height: 28px; /* Vertically center text */
+  transition: opacity var(--transition), transform var(--transition);
+}
+
+.visual-switch-text-on {
+  left: 8px; /* Position ON text */
+  opacity: 0;
+  transform: translateX(-10px);
+}
+.visual-switch.is-on .visual-switch-text-on {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.visual-switch-text-off {
+  right: 7px; /* Position OFF text */
+  opacity: 1;
+  transform: translateX(0);
+}
+.visual-switch.is-on .visual-switch-text-off {
+  opacity: 0;
+  transform: translateX(10px);
+}
+
+/* Focus style for accessibility */
+.visual-switch:focus-visible {
+  box-shadow: 0 0 0 2px var(--bg-primary), 0 0 0 4px var(--accent-hover);
+}
+
+
 @media (max-width: 768px) {
   .sidebar {
     width: 100%;
@@ -556,4 +641,26 @@ html, body {
     float: none; 
     margin-right: 0;
   }
+
+  /* Adjust visual switch for smaller screens if needed */
+  .visual-switch {
+    width: 54px;
+    height: 26px;
+  }
+  .visual-switch-thumb {
+    width: 20px;
+    height: 20px;
+    top: 3px;
+    left: 3px;
+  }
+  .visual-switch.is-on .visual-switch-thumb {
+    transform: translateX(28px); /* 54 - 20 - 2*3 = 28 */
+  }
+  .visual-switch-text-on, .visual-switch-text-off {
+    line-height: 26px;
+    font-size: 0.65rem;
+  }
+   .visual-switch-text-on { left: 7px; }
+   .visual-switch-text-off { right: 6px; }
 }
+

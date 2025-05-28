@@ -3,7 +3,7 @@
    - Uses sendDisabled for button disable state.
    - Uses sendButtonText for the button's dynamic text.
 */
-import { useEffect, useRef, useMemo } from 'preact/hooks'; // Removed useState as local buttonText logic is gone
+import { useEffect, useRef, useMemo } from 'preact/hooks'; 
 import { del } from 'idb-keyval';
 import CodebaseImporter from './CodebaseImporter.jsx';
 import { autoResizeTextarea } from './lib/domUtils.js';
@@ -17,8 +17,8 @@ export default function PromptBuilder({
   form,
   setForm,
 
-  sendDisabled,     // Receives the computed disabled state from App.jsx
-  sendButtonText,   // Receives the computed button text from App.jsx
+  sendDisabled,     
+  sendButtonText,   
   handleSend,
   showToast,
 
@@ -29,14 +29,14 @@ export default function PromptBuilder({
   onAddImage,
   onAddPDF,
 
-  settings, // Still needed for CodebaseImporter
+  settings, 
 
   pendingFiles,
   onFilesChange,
   onProjectRootChange,
   promptBuilderRootName,
 
-  currentChatId, // Still needed for CodebaseImporter (potentially) or other internal logic if any
+  currentChatId, 
 }) {
   const formRef = useRef(form);
   const textareaRefs = useRef({});
@@ -71,7 +71,7 @@ export default function PromptBuilder({
     () => [
       ['GOAL', 'developGoal', 2],
       ['FEATURES', 'developFeatures', 2],
-      ['RETURN FORMAT', 'developReturnFormat', 2],
+      ['RETURN FORMAT', 'developReturnFormat_custom', 2], 
       ['THINGS TO REMEMBER/WARNINGS', 'developWarnings', 2],
     ],
     []
@@ -94,8 +94,6 @@ export default function PromptBuilder({
     handleSend();
   }
 
-  // Removed local buttonText useMemo, as it's now passed as a prop 'sendButtonText'
-
   return (
     <div className="template-container">
       <div className="mode-selector form-group">
@@ -111,22 +109,71 @@ export default function PromptBuilder({
       </div>
 
       {mode === 'DEVELOP' &&
-        fields.map(([label, key, rows]) => (
-          <div key={key} className="form-group">
-            <label>{label}</label> {/* Removed colon here */}
-            <textarea
-              ref={(el) => (textareaRefs.current[key] = el)}
-              rows={rows}
-              className="form-textarea"
-              style={{ maxHeight: `${MAX_PROMPT_TEXTAREA_HEIGHT}px` }}
-              value={form[key]}
-              onInput={(e) => {
-                setForm((f) => ({ ...f, [key]: e.target.value }));
-                autoResizeTextarea(e.target, MAX_PROMPT_TEXTAREA_HEIGHT);
-              }}
-            />
-          </div>
-        ))}
+        fields.map(([label, key, rows]) => {
+          if (key === 'developReturnFormat_custom') {
+            // Special handling for RETURN FORMAT field
+            return (
+              <div key={key} className="form-group">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                  <label htmlFor={key} style={{ fontWeight: 'normal' }}>{label}</label> {/* Label: RETURN FORMAT */}
+                  
+                  {/* Switch and its label */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <span style={{ fontSize: '0.9em', color: 'var(--text-primary)', userSelect: 'none' }}>Complete Codeblocks</span>
+                    <div 
+                      className={`visual-switch ${form.developReturnFormat_autoIncludeDefault ? 'is-on' : 'is-off'}`}
+                      onClick={() => setForm(f => ({ ...f, developReturnFormat_autoIncludeDefault: !f.developReturnFormat_autoIncludeDefault }))}
+                      role="switch"
+                      aria-checked={form.developReturnFormat_autoIncludeDefault}
+                      tabIndex={0} // Make it focusable
+                      onKeyPress={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setForm(f => ({ ...f, developReturnFormat_autoIncludeDefault: !f.developReturnFormat_autoIncludeDefault }));}}}
+                      title={form.developReturnFormat_autoIncludeDefault 
+                              ? "ON: Auto-include instruction for full code blocks. Click or press Space/Enter to turn OFF." 
+                              : "OFF: Do not auto-include instruction for full code blocks. Click or press Space/Enter to turn ON."}
+                    >
+                      <div className="visual-switch-track">
+                        <span className="visual-switch-text-on">ON</span>
+                        <span className="visual-switch-text-off">OFF</span>
+                      </div>
+                      <div className="visual-switch-thumb"></div>
+                    </div>
+                  </div>
+                </div>
+                <textarea
+                  id={key} // Matches htmlFor
+                  ref={(el) => (textareaRefs.current[key] = el)}
+                  rows={rows}
+                  className="form-textarea"
+                  style={{ maxHeight: `${MAX_PROMPT_TEXTAREA_HEIGHT}px` }}
+                  value={form[key]} // Binds to developReturnFormat_custom
+                  onInput={(e) => {
+                    setForm((f) => ({ ...f, [key]: e.target.value }));
+                    autoResizeTextarea(e.target, MAX_PROMPT_TEXTAREA_HEIGHT);
+                  }}
+                  placeholder="Add custom return format instructions here (optional)"
+                />
+              </div>
+            );
+          }
+          // Default handling for other fields
+          return (
+            <div key={key} className="form-group">
+              <label htmlFor={key}>{label}</label>
+              <textarea
+                id={key} // Matches htmlFor
+                ref={(el) => (textareaRefs.current[key] = el)}
+                rows={rows}
+                className="form-textarea"
+                style={{ maxHeight: `${MAX_PROMPT_TEXTAREA_HEIGHT}px` }}
+                value={form[key]}
+                onInput={(e) => {
+                  setForm((f) => ({ ...f, [key]: e.target.value }));
+                  autoResizeTextarea(e.target, MAX_PROMPT_TEXTAREA_HEIGHT);
+                }}
+              />
+            </div>
+          );
+        })}
 
       {mode === 'DEVELOP' && (
         <CodebaseImporter
@@ -216,10 +263,10 @@ export default function PromptBuilder({
       >
         <button
           className="button send-button"
-          disabled={sendDisabled} // Use the prop passed from App.jsx
+          disabled={sendDisabled} 
           onClick={guardedSend}
         >
-          {sendButtonText} {/* Use the prop passed from App.jsx */}
+          {sendButtonText} 
         </button>
       </div>
     </div>

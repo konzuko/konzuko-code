@@ -1,33 +1,41 @@
 // src/hooks/usePromptBuilder.js
 
 import { useState, useEffect, useCallback, useMemo } from 'preact/hooks';
-import { useFormData, useMode, INITIAL_FORM_DATA } from '../hooks.js';
+import { useFormData, useMode, INITIAL_FORM_DATA } from '../hooks.js'; 
 import { asciiTree } from '../lib/textUtils.js';
 
 const safeTrim = (val) => (val ?? '').trim();
 
-// Helper to get raw text of pending files - NO LONGER NEEDED BY App.jsx
-// function getRawPendingFilesText(currentPendingFiles) {
-//   if (!currentPendingFiles || currentPendingFiles.length === 0) return "";
-//   return currentPendingFiles.map(f => f.text).join('\n\n');
-// }
-
+const AUTO_INPUT_STRING_FOR_RETURN_FORMAT = "return the complete refactored code for the respective changed files in FULL with NO OMISSIONS so that i can paste it directly into my ide";
 
 function buildNewUserPromptText(currentForm, currentMode, currentPendingFiles, projectRootName) {
   if (currentMode === 'DEVELOP') {
-    const out = ['## MODE # DEVELOP']; // Changed to match other modes
+    const out = ['## MODE # DEVELOP'];
 
     if (safeTrim(currentForm.developGoal)) {
-      out.push(`GOAL: ${safeTrim(currentForm.developGoal)}`); // Added colon
+      out.push(`GOAL: ${safeTrim(currentForm.developGoal)}`);
     }
     if (safeTrim(currentForm.developFeatures)) {
-      out.push(`FEATURES: ${safeTrim(currentForm.developFeatures)}`); // Added colon
+      out.push(`FEATURES: ${safeTrim(currentForm.developFeatures)}`);
     }
-    if (safeTrim(currentForm.developReturnFormat)) {
-      out.push(`RETURN FORMAT: ${safeTrim(currentForm.developReturnFormat)}`); // Added colon
+
+    // Construct the effective developReturnFormat
+    let effectiveDevelopReturnFormat = safeTrim(currentForm.developReturnFormat_custom);
+    if (currentForm.developReturnFormat_autoIncludeDefault) {
+      if (effectiveDevelopReturnFormat === '') {
+        effectiveDevelopReturnFormat = AUTO_INPUT_STRING_FOR_RETURN_FORMAT;
+      } else {
+        // Append with a newline if custom text exists
+        effectiveDevelopReturnFormat = effectiveDevelopReturnFormat + '\n' + AUTO_INPUT_STRING_FOR_RETURN_FORMAT;
+      }
     }
+
+    if (effectiveDevelopReturnFormat) { // Only add if non-empty
+      out.push(`RETURN FORMAT: ${effectiveDevelopReturnFormat}`);
+    }
+
     if (safeTrim(currentForm.developWarnings)) {
-      out.push(`THINGS TO REMEMBER/WARNINGS: ${safeTrim(currentForm.developWarnings)}`); // Added colon
+      out.push(`THINGS TO REMEMBER/WARNINGS: ${safeTrim(currentForm.developWarnings)}`);
     }
 
     const treePaths = currentPendingFiles.filter(f => f.insideProject).map(f => f.fullPath);
@@ -108,10 +116,6 @@ export function usePromptBuilder() {
     currentProjectRootName
   ), [form, mode, pendingFiles, currentProjectRootName]);
 
-  // rawPendingFilesConcatenatedText is no longer needed by App.jsx for token proportion
-  // const rawPendingFilesConcatenatedText = useMemo(() => {
-  //   return getRawPendingFilesText(pendingFiles);
-  // }, [pendingFiles]);
 
   const addPendingImage = useCallback(img => {
     setPendingImages(prev => [...prev, img]);
@@ -141,8 +145,16 @@ export function usePromptBuilder() {
     setPendingImages([]);
     setPendingPDFs([]);
     setPendingFiles([]); 
-    setForm(INITIAL_FORM_DATA); 
-  }, [pendingImages, setForm]); 
+    
+    // Selectively reset form fields, preserving the toggle state
+    setForm(prevForm => ({
+      ...INITIAL_FORM_DATA, // Reset most fields to their initial state
+      developReturnFormat_autoIncludeDefault: prevForm.developReturnFormat_autoIncludeDefault, // Preserve the toggle
+      // If other form fields also need to be preserved, list them here.
+      // For 'fixCode' and 'fixErrors' which are not part of DEVELOP mode, 
+      // INITIAL_FORM_DATA will correctly reset them to empty strings.
+    })); 
+  }, [pendingImages, setForm]); // Removed INITIAL_FORM_DATA from deps, setForm is stable
 
   return {
     form,
@@ -161,7 +173,7 @@ export function usePromptBuilder() {
     currentProjectRootName,
     handleProjectRootChange,
     userPromptText,
-    // rawPendingFilesConcatenatedText, // No longer exporting this
     resetPrompt
   };
 }
+
