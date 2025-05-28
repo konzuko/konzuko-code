@@ -188,6 +188,12 @@ export default function App() {
     () => isLoadingSession || isSwitchingChat || isAppGloballySending,
     [isLoadingSession, isSwitchingChat, isAppGloballySending]
   );
+
+  // New memoized state specifically for disabling the nav rail
+  const navRailDisabled = useMemo(
+    () => isLoadingSession || isSwitchingChat,
+    [isLoadingSession, isSwitchingChat]
+  );
   
   const chatAreaActionsDisabled = useMemo(
     () => isLoadingMessageOps || isLoadingSession || isSwitchingChat || isAppGloballySending,
@@ -265,22 +271,6 @@ export default function App() {
         Toast(`Prompt too large (max ${MAX_ABSOLUTE_TOKEN_LIMIT.toLocaleString()} tokens). Please reduce content.`, 8000);
         return;
     }
-    // This check is now covered by the isAppGloballySending check above,
-    // because if globalBusy is true due to isAppGloballySending, the first check handles it.
-    // If globalBusy is true for other reasons (isLoadingSession, isSwitchingChat),
-    // finalSendButtonDisabled would already be true, preventing the click.
-    // However, an explicit check for other global busy states isn't strictly necessary here
-    // if the button is correctly disabled.
-    // For utmost safety, one might keep:
-    // if (globalBusy && !isAppGloballySending) { /* ... */ }
-    // But for now, let's rely on the button's disabled state for non-send busy states.
-
-    // REMOVED Redundant Block:
-    // if (isSavingEdit || isResendingMessage) { 
-    //     if (isSavingEdit) Toast('An edit is in progress.', 3000);
-    //     else if (isResendingMessage) Toast('A resend is in progress.', 3000);
-    //     return;
-    // }
 
     if (!currentChatId) {
       Toast('Please select or create a chat first.', 3000);
@@ -528,7 +518,7 @@ export default function App() {
                 className="button icon-button"
                 onClick={scrollToPrev}
                 title="Scroll Up"
-                disabled={globalBusy} 
+                disabled={navRailDisabled} 
               >
                 ↑
               </button>
@@ -536,7 +526,7 @@ export default function App() {
                 className="button icon-button"
                 onClick={scrollToNext}
                 title="Scroll Down"
-                disabled={globalBusy} 
+                disabled={navRailDisabled} 
               >
                 ↓
               </button>
