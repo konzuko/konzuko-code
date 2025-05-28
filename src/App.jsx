@@ -39,8 +39,8 @@ const debounce = (func, delay) => {
 export default function App() {
   const [settings, setSettings] = useSettings();
   const previousChatIdRef = useRef(null);
-  // This ref is now primarily for clearing any conceptual "in-flight send snapshot" if a chat switch occurs.
-  // The actual snapshot for comparison in onSendSuccess will be passed through the mutation.
+  // This ref is no longer strictly needed for comparing states for reset,
+  // but clearing it on chat switch is still a good cleanup for any conceptual "in-flight" marker.
   const inFlightSendSnapshotMarkerRef = useRef(null); 
   const [isSwitchingChat, setIsSwitchingChat] = useState(false); 
 
@@ -63,7 +63,7 @@ export default function App() {
     startEdit,
     cancelEdit,
     saveEdit,
-    sendMessage, // Expect sendMessage to be part of a mutation that can accept and return the snapshot
+    sendMessage,
     resendMessage,
     deleteMessage,
     isLoadingOps: isLoadingMessageOps, 
@@ -229,7 +229,7 @@ export default function App() {
     let cleanupRaf, scrollRaf, transitionEndRaf;
 
     if (currentChatId !== previousChatIdRef.current) {
-      inFlightSendSnapshotMarkerRef.current = null; // Clear any marker on chat switch
+      inFlightSendSnapshotMarkerRef.current = null; 
       cleanupRaf = requestAnimationFrame(() => {
         if (editingId) cancelEdit(); 
       });
@@ -273,22 +273,10 @@ export default function App() {
       return;
     }
 
-    // Create a snapshot of the prompt state for THIS specific send operation.
-    const currentSendSnapshot = {
-      userPromptText, // The text from usePromptBuilder
-      pendingImages: pendingImages.map(({ url, name }) => ({ url, name })),
-      pendingPDFs: pendingPDFs.map(({ fileId, name, mimeType, resourceName }) => ({ fileId, name, mimeType, resourceName })),
-    };
-    // Mark that a send is in progress with this snapshot.
-    // This marker is mostly for conceptual clarity or if other parts of the system needed to know.
-    // The actual snapshot for comparison is passed to the mutation.
-    inFlightSendSnapshotMarkerRef.current = currentSendSnapshot;
-
+    // No longer need to create a snapshot for comparison here, as we will reset immediately.
+    // inFlightSendSnapshotMarkerRef.current = { ... }; // This line can be removed.
 
     const userMessageContentBlocks = [];
-    // Use currentSendSnapshot for consistency if pendingImages/PDFs could change rapidly,
-    // though typically they wouldn't between snapshot creation and this point.
-    // For simplicity, using live pendingImages/PDFs from usePromptBuilder is fine here.
     pendingPDFs.forEach((p) =>
       userMessageContentBlocks.push({
         type: 'file',
@@ -309,69 +297,39 @@ export default function App() {
         },
       })
     );
-    if (userPromptText?.trim()) { // Use live userPromptText
+    if (userPromptText?.trim()) {
       userMessageContentBlocks.push({ type: 'text', text: userPromptText });
     }
 
     if (userMessageContentBlocks.length === 0) {
       Toast('Cannot send an empty message.', 3000);
-      inFlightSendSnapshotMarkerRef.current = null; // Clear marker if not sending
+      // inFlightSendSnapshotMarkerRef.current = null; // Not strictly needed if not set above
       return;
     }
 
-    // This callback will receive the specific snapshot associated with this send.
-    const onSendSuccess = (sentStateSnapshotForThisSend) => {
-      if (!sentStateSnapshotForThisSend) {
-        // This case should ideally not happen if useMessageManager correctly passes the snapshot.
-        // If it does, it might be safer not to reset, or log an error.
-        console.warn("onSendSuccess called without a sentStateSnapshot. Prompt not reset as a precaution.");
-        inFlightSendSnapshotMarkerRef.current = null; // Clear marker
-        return;
-      }
-
-      // Compare the *current* PromptBuilder state with the snapshot *for this specific send*.
-      const currentLiveUserPromptText = userPromptText; // from usePromptBuilder
-      const currentLivePendingImages = pendingImages; // from usePromptBuilder
-      const currentLivePendingPDFs = pendingPDFs;   // from usePromptBuilder
-      
-      const imagesUnchanged =
-        currentLivePendingImages.length === sentStateSnapshotForThisSend.pendingImages.length &&
-        currentLivePendingImages.every(
-          (img, i) =>
-            sentStateSnapshotForThisSend.pendingImages[i] &&
-            img.url === sentStateSnapshotForThisSend.pendingImages[i].url &&
-            img.name === sentStateSnapshotForThisSend.pendingImages[i].name
-        );
-
-      const pdfsUnchanged =
-        currentLivePendingPDFs.length === sentStateSnapshotForThisSend.pendingPDFs.length &&
-        currentLivePendingPDFs.every(
-          (pdf, i) =>
-            sentStateSnapshotForThisSend.pendingPDFs[i] &&
-            pdf.fileId === sentStateSnapshotForThisSend.pendingPDFs[i].fileId &&
-            pdf.name === sentStateSnapshotForThisSend.pendingPDFs[i].name
-        );
-      
-      if (
-        currentLiveUserPromptText === sentStateSnapshotForThisSend.userPromptText &&
-        imagesUnchanged &&
-        pdfsUnchanged
-      ) {
-        resetPrompt();
-      }
-      inFlightSendSnapshotMarkerRef.current = null; // Clear marker after handling
+    // The onSendSuccess callback is now simpler. It doesn't need the snapshot
+    // for deciding whether to reset. It can be used for other post-send actions if any.
+    const onSendSuccess = () => {
+      // The prompt is already reset by this point.
+      // Any other logic that needs to happen on successful send completion can go here.
+      // For example, clearing any conceptual "in-flight" markers if they were used elsewhere.
+      inFlightSendSnapshotMarkerRef.current = null;
     };
 
     sendMessage({
       userMessageContentBlocks,
       existingMessages: messages,
-      // Pass the callback and the specific snapshot for this send operation
-      // to useMessageManager. It's assumed useMessageManager is adapted
-      // to accept 'sentStateSnapshot' and pass it to its own onSuccess data,
-      // which then provides it to 'onSendSuccessCallback'.
-      onSendSuccessCallback: onSendSuccess, 
-      sentStateSnapshot: currentSendSnapshot 
+      // Pass the simplified onSendSuccess callback.
+      // The 'sentStateSnapshot' is no longer needed by useMessageManager for this purpose.
+      // If useMessageManager was adapted to accept 'onSendSuccessCallback' and 'sentStateSnapshot',
+      // you might rename 'onSendSuccessCallback' back to 'onSendSuccess' or adjust useMessageManager.
+      // For this change, we assume useMessageManager's sendMessage just needs an onSendSuccess.
+      onSendSuccess: onSendSuccess, 
     });
+
+    // Immediately reset the prompt builder after initiating the send.
+    resetPrompt();
+    inFlightSendSnapshotMarkerRef.current = null; // Also clear any marker here.
   }
 
   const handleCopyAll = () => {
