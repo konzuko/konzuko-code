@@ -3,7 +3,7 @@
    - Uses sendDisabled for button disable state.
    - Uses sendButtonText for the button's dynamic text.
 */
-import { useEffect, useRef, useMemo } from 'preact/hooks'; 
+import { useEffect, useRef, useMemo } from 'preact/hooks';
 import { del } from 'idb-keyval';
 import CodebaseImporter from './CodebaseImporter.jsx';
 import { autoResizeTextarea } from './lib/domUtils.js';
@@ -17,8 +17,8 @@ export default function PromptBuilder({
   form,
   setForm,
 
-  sendDisabled,     
-  sendButtonText,   
+  sendDisabled,
+  sendButtonText,
   handleSend,
   showToast,
 
@@ -29,14 +29,15 @@ export default function PromptBuilder({
   onAddImage,
   onAddPDF,
 
-  settings, 
+  settings,
+  hasLastSendFailed,
 
   pendingFiles,
   onFilesChange,
   onProjectRootChange,
   promptBuilderRootName,
 
-  currentChatId, 
+  currentChatId,
 }) {
   const formRef = useRef(form);
   const textareaRefs = useRef({});
@@ -71,7 +72,7 @@ export default function PromptBuilder({
     () => [
       ['GOAL', 'developGoal', 2],
       ['FEATURES', 'developFeatures', 2],
-      ['RETURN FORMAT', 'developReturnFormat_custom', 2], 
+      ['RETURN FORMAT', 'developReturnFormat_custom', 2],
       ['THINGS TO REMEMBER/WARNINGS', 'developWarnings', 2],
     ],
     []
@@ -116,19 +117,19 @@ export default function PromptBuilder({
               <div key={key} className="form-group">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
                   <label htmlFor={key} style={{ fontWeight: 'normal' }}>{label}</label> {/* Label: RETURN FORMAT */}
-                  
+
                   {/* Switch and its label */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                     <span style={{ fontSize: '0.9em', color: 'var(--text-primary)', userSelect: 'none' }}>Complete Codeblocks</span>
-                    <div 
+                    <div
                       className={`visual-switch ${form.developReturnFormat_autoIncludeDefault ? 'is-on' : 'is-off'}`}
                       onClick={() => setForm(f => ({ ...f, developReturnFormat_autoIncludeDefault: !f.developReturnFormat_autoIncludeDefault }))}
                       role="switch"
                       aria-checked={form.developReturnFormat_autoIncludeDefault}
                       tabIndex={0} // Make it focusable
                       onKeyPress={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setForm(f => ({ ...f, developReturnFormat_autoIncludeDefault: !f.developReturnFormat_autoIncludeDefault }));}}}
-                      title={form.developReturnFormat_autoIncludeDefault 
-                              ? "ON: Auto-include instruction for full code blocks. Click or press Space/Enter to turn OFF." 
+                      title={form.developReturnFormat_autoIncludeDefault
+                              ? "ON: Auto-include instruction for full code blocks. Click or press Space/Enter to turn OFF."
                               : "OFF: Do not auto-include instruction for full code blocks. Click or press Space/Enter to turn ON."}
                     >
                       <div className="visual-switch-track">
@@ -262,14 +263,13 @@ export default function PromptBuilder({
         }}
       >
         <button
-          className="button send-button"
-          disabled={sendDisabled} 
+          className={`button send-button ${hasLastSendFailed && !sendDisabled ? 'send-button--error' : ''}`}
+          disabled={sendDisabled}
           onClick={guardedSend}
         >
-          {sendButtonText} 
+          {sendButtonText}
         </button>
       </div>
     </div>
   );
 }
-

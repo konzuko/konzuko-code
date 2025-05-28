@@ -3,16 +3,16 @@ import { useState, useCallback } from 'preact/hooks';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   fetchMessages,
-  createMessage, 
-  updateMessage, 
-  deleteMessage, 
-  undoDeleteMessage, 
-  archiveMessagesAfter, 
+  createMessage,
+  updateMessage,
+  deleteMessage,
+  undoDeleteMessage,
+  archiveMessagesAfter,
   callApiForText,
 } from '../api.js';
 import Toast from '../components/Toast.jsx';
 
-export function useMessageManager(currentChatId, apiKey, setIsAppGloballySending) { 
+export function useMessageManager(currentChatId, apiKey, setIsAppGloballySending, setHasLastSendFailed) {
   const queryClient = useQueryClient();
   const [editingId, setEditingId] = useState(null);
   const [editText, setEditText] = useState('');
@@ -30,7 +30,7 @@ export function useMessageManager(currentChatId, apiKey, setIsAppGloballySending
 
   const sendMessageMutation = useMutation({
     mutationFn: async (payload) => {
-      const userRow = await createMessage({ 
+      const userRow = await createMessage({
         chat_id: currentChatId,
         role: 'user',
         content: payload.userMessageContentBlocks,
@@ -43,36 +43,39 @@ export function useMessageManager(currentChatId, apiKey, setIsAppGloballySending
         messages: messagesForApi,
       });
 
-      const assistantRow = await createMessage({ 
+      const assistantRow = await createMessage({
         chat_id: currentChatId,
         role: 'assistant',
         content: [{ type: 'text', text: assistantContent }],
       });
-      return { 
-        userRow, 
-        assistantRow, 
-        onSendSuccess: payload.onSendSuccess, 
+      return {
+        userRow,
+        assistantRow,
+        onSendSuccess: payload.onSendSuccess,
       };
     },
-    onMutate: async () => { 
+    onMutate: async () => {
       setIsAppGloballySending?.(true);
+      setHasLastSendFailed?.(false); // Reset error state on new attempt
     },
-    onSuccess: (data) => { 
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['messages', currentChatId] });
-      data.onSendSuccess?.(); 
-      setIsAppGloballySending?.(false); 
+      data.onSendSuccess?.();
+      setIsAppGloballySending?.(false);
+      // setHasLastSendFailed?.(false); // Already reset in onMutate or if successful, it's fine
     },
     onError: (error) => {
       Toast(`Error sending message: ${error.message}`, 8000);
       queryClient.invalidateQueries({ queryKey: ['messages', currentChatId] });
-      setIsAppGloballySending?.(false); 
+      setIsAppGloballySending?.(false);
+      setHasLastSendFailed?.(true); // Set error state on failure
     },
   });
 
   const editMessageMutation = useMutation({
     mutationFn: async ({ messageId, newContentArray, originalMessages }) => {
-      const editedMessage = await updateMessage(messageId, newContentArray); 
-      await archiveMessagesAfter(currentChatId, editedMessage.created_at); 
+      const editedMessage = await updateMessage(messageId, newContentArray);
+      await archiveMessagesAfter(currentChatId, editedMessage.created_at);
 
       const editedMsgIndex = originalMessages.findIndex(m => m.id === messageId);
       if (editedMsgIndex === -1) throw new Error("Edited message not found for API call.");
@@ -82,7 +85,7 @@ export function useMessageManager(currentChatId, apiKey, setIsAppGloballySending
         apiKey: apiKey,
         messages: messagesForApi,
       });
-      await createMessage({ 
+      await createMessage({
         chat_id: currentChatId,
         role: 'assistant',
         content: [{ type: 'text', text: assistantContent }],
@@ -90,8 +93,8 @@ export function useMessageManager(currentChatId, apiKey, setIsAppGloballySending
       return { editedMessageId: messageId };
     },
     onMutate: async ({ messageId, newContentArray }) => {
-      setIsAppGloballySending?.(true); 
-
+      setIsAppGloballySending?.(true);
+      setHasLastSendFailed?.(false); // Reset
       const queryKey = ['messages', currentChatId];
       await queryClient.cancelQueries({ queryKey });
       const previousMessages = queryClient.getQueryData(queryKey);
@@ -116,7 +119,8 @@ export function useMessageManager(currentChatId, apiKey, setIsAppGloballySending
       queryClient.invalidateQueries({ queryKey: ['messages', currentChatId] });
       setEditingId(null);
       setEditText('');
-      setIsAppGloballySending?.(false); 
+      setIsAppGloballySending?.(false);
+      // setHasLastSendFailed?.(false); // Reset on success
     },
     onError: (error, variables, context) => {
       if (context?.previousMessages) {
@@ -124,7 +128,8 @@ export function useMessageManager(currentChatId, apiKey, setIsAppGloballySending
       }
       Toast('Failed to edit message: ' + error.message, 5000);
       queryClient.invalidateQueries({ queryKey: ['messages', currentChatId] });
-      setIsAppGloballySending?.(false); 
+      setIsAppGloballySending?.(false);
+      setHasLastSendFailed?.(true); // Set on failure
     },
   });
 
@@ -133,36 +138,39 @@ export function useMessageManager(currentChatId, apiKey, setIsAppGloballySending
       const anchorMessage = originalMessages.find(m => m.id === messageId);
       if (!anchorMessage) throw new Error("Anchor message for resend not found.");
       const anchorMsgIndex = originalMessages.findIndex(m => m.id === messageId);
-      await archiveMessagesAfter(currentChatId, anchorMessage.created_at); 
+      await archiveMessagesAfter(currentChatId, anchorMessage.created_at);
       const messagesForApi = originalMessages.slice(0, anchorMsgIndex + 1);
       const { content: assistantContent } = await callApiForText({
         apiKey: apiKey,
         messages: messagesForApi,
       });
-      await createMessage({ 
+      await createMessage({
         chat_id: currentChatId,
         role: 'assistant',
         content: [{ type: 'text', text: assistantContent }],
       });
       return { resentMessageId: messageId };
     },
-    onMutate: async () => { 
-        setIsAppGloballySending?.(true); 
+    onMutate: async () => {
+        setIsAppGloballySending?.(true);
+        setHasLastSendFailed?.(false); // Reset
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['messages', currentChatId] });
       Toast('Message resent and conversation continued.', 3000);
-      setIsAppGloballySending?.(false); 
+      setIsAppGloballySending?.(false);
+      // setHasLastSendFailed?.(false); // Reset on success
     },
     onError: (error) => {
       Toast('Failed to resend message: ' + error.message, 5000);
       queryClient.invalidateQueries({ queryKey: ['messages', currentChatId] });
-      setIsAppGloballySending?.(false); 
+      setIsAppGloballySending?.(false);
+      setHasLastSendFailed?.(true); // Set on failure
     },
   });
 
   const undoDeleteMessageMutation = useMutation({
-    mutationFn: (messageId) => undoDeleteMessage(messageId), 
+    mutationFn: (messageId) => undoDeleteMessage(messageId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['messages', currentChatId] });
       Toast('Message restored.', 2000);
@@ -173,7 +181,7 @@ export function useMessageManager(currentChatId, apiKey, setIsAppGloballySending
   });
 
   const deleteMessageMutation = useMutation({
-    mutationFn: (messageId) => deleteMessage(messageId), 
+    mutationFn: (messageId) => deleteMessage(messageId),
     onMutate: async (messageId) => {
       await queryClient.cancelQueries({ queryKey: ['messages', currentChatId] });
       const previousMessages = queryClient.getQueryData(['messages', currentChatId]);
@@ -263,7 +271,7 @@ export function useMessageManager(currentChatId, apiKey, setIsAppGloballySending
   }, [deleteMessageMutation, currentChatId]); // Removed isAppGloballySending from dependencies
 
 
-  const isLoadingOps = sendMessageMutation.isPending || 
+  const isLoadingOps = sendMessageMutation.isPending ||
                        editMessageMutation.isPending ||
                        resendMessageMutation.isPending ||
                        deleteMessageMutation.isPending ||
@@ -278,13 +286,12 @@ export function useMessageManager(currentChatId, apiKey, setIsAppGloballySending
     startEdit: handleStartEdit,
     cancelEdit: handleCancelEdit,
     saveEdit: handleSaveEdit,
-    sendMessage: sendMessageMutation.mutate, 
+    sendMessage: sendMessageMutation.mutate,
     resendMessage: handleResendMessage,
     deleteMessage: handleDeleteMessage,
-    isLoadingOps, 
-    isSendingMessage: sendMessageMutation.isPending, 
+    isLoadingOps,
+    isSendingMessage: sendMessageMutation.isPending,
     isSavingEdit: editMessageMutation.isPending,
     isResendingMessage: resendMessageMutation.isPending,
   };
 }
-

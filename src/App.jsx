@@ -13,16 +13,16 @@ import ChatArea from './components/ChatArea.jsx';
 import Toast from './components/Toast.jsx';
 
 import { GEMINI_MODEL_NAME } from './api.js';
-import { 
-    IMAGE_TOKEN_ESTIMATE, 
-    USER_FACING_TOKEN_LIMIT, 
-    MAX_ABSOLUTE_TOKEN_LIMIT 
-} from './config.js'; 
+import {
+    IMAGE_TOKEN_ESTIMATE,
+    USER_FACING_TOKEN_LIMIT,
+    MAX_ABSOLUTE_TOKEN_LIMIT
+} from './config.js';
 
 import { useSettings } from './hooks.js';
 import { useChatSessionManager } from './hooks/useChatSessionManager.js';
 import { useMessageManager } from './hooks/useMessageManager.js';
-import { usePromptBuilder } from './hooks/usePromptBuilder.js'; 
+import { usePromptBuilder } from './hooks/usePromptBuilder.js';
 import { useScrollNavigation } from './hooks/useScrollNavigation.js';
 
 import { useTokenizableContent } from './hooks/useTokenizableContent.js';
@@ -39,18 +39,19 @@ const debounce = (func, delay) => {
 export default function App() {
   const [settings, setSettings] = useSettings();
   const previousChatIdRef = useRef(null);
-  const inFlightSendSnapshotMarkerRef = useRef(null); 
-  const [isSwitchingChat, setIsSwitchingChat] = useState(false); 
+  const inFlightSendSnapshotMarkerRef = useRef(null);
+  const [isSwitchingChat, setIsSwitchingChat] = useState(false);
+  const [hasLastSendFailed, setHasLastSendFailed] = useState(false);
   const [isAppGloballySending, setIsAppGloballySending] = useState(false);
 
   const {
     currentChatId,
-    setCurrentChatId: originalSetCurrentChatId, 
+    setCurrentChatId: originalSetCurrentChatId,
     createChat,
     deleteChat,
     updateChatTitle,
-    isLoadingSession, 
-    isCreatingChat,   
+    isLoadingSession,
+    isCreatingChat,
   } = useChatSessionManager();
 
   const {
@@ -65,14 +66,14 @@ export default function App() {
     sendMessage,
     resendMessage,
     deleteMessage,
-    isLoadingOps: isLoadingMessageOps, 
-    isSendingMessage, 
+    isLoadingOps: isLoadingMessageOps,
+    isSendingMessage,
     isSavingEdit,
-    isResendingMessage, 
-  } = useMessageManager(currentChatId, settings.apiKey, setIsAppGloballySending); 
+    isResendingMessage,
+  } = useMessageManager(currentChatId, settings.apiKey, setIsAppGloballySending, setHasLastSendFailed);
 
   const {
-    form, 
+    form,
     setForm,
     mode,
     setMode,
@@ -80,12 +81,12 @@ export default function App() {
     addPendingImage,
     removePendingImage,
     pendingPDFs,
-    addPendingPDF, 
-    pendingFiles, 
+    addPendingPDF,
+    pendingFiles,
     setPendingFiles,
-    currentProjectRootName, 
-    handleProjectRootChange, 
-    userPromptText, 
+    currentProjectRootName,
+    handleProjectRootChange,
+    userPromptText,
     resetPrompt,
   } = usePromptBuilder();
 
@@ -98,10 +99,10 @@ export default function App() {
 
   const handleSelectChat = useCallback(
     (newChatId) => {
-      if (newChatId === currentChatId && !isSwitchingChat) return; 
-      if (isSwitchingChat && newChatId === currentChatId) return; 
+      if (newChatId === currentChatId && !isSwitchingChat) return;
+      if (isSwitchingChat && newChatId === currentChatId) return;
       if (isAppGloballySending) {
-        Toast("An operation is in progress. Please wait.", 3000); 
+        Toast("An operation is in progress. Please wait.", 3000);
         return;
       }
       setIsSwitchingChat(true);
@@ -117,9 +118,9 @@ export default function App() {
 
   const itemsForApiCount = useTokenizableContent(
     messages,
-    userPromptText, 
+    userPromptText,
     pendingPDFs,
-    isAppGloballySending 
+    isAppGloballySending
   );
 
   const callWorkerForTotalTokenCount = useCallback(
@@ -133,18 +134,18 @@ export default function App() {
         return;
       }
       if (tokenCountVersionRef.current === currentVersion) setIsCountingApiTokens(true);
-      else return; 
+      else return;
 
       countTokensWithGemini(apiKey, model, currentItemsForApi)
-        .then(count => { 
-          if (tokenCountVersionRef.current === currentVersion) setTotalApiTokenCount(count); 
+        .then(count => {
+          if (tokenCountVersionRef.current === currentVersion) setTotalApiTokenCount(count);
         })
         .catch(error => {
           console.warn("Total token counting error:", error);
           if (tokenCountVersionRef.current === currentVersion) setTotalApiTokenCount(0);
         })
-        .finally(() => { 
-          if (tokenCountVersionRef.current === currentVersion) setIsCountingApiTokens(false); 
+        .finally(() => {
+          if (tokenCountVersionRef.current === currentVersion) setIsCountingApiTokens(false);
         });
     },
     []
@@ -160,7 +161,7 @@ export default function App() {
 
   const currentTotalPromptTokens = useMemo(() => {
     let estimatedImageTokens = 0;
-    if (!isAppGloballySending) { 
+    if (!isAppGloballySending) {
       estimatedImageTokens += pendingImages.length * IMAGE_TOKEN_ESTIMATE;
     }
     (messages || []).forEach(msg => {
@@ -194,7 +195,7 @@ export default function App() {
     () => isLoadingSession || isSwitchingChat,
     [isLoadingSession, isSwitchingChat]
   );
-  
+
   const chatAreaActionsDisabled = useMemo(
     () => isLoadingMessageOps || isLoadingSession || isSwitchingChat || isAppGloballySending,
     [isLoadingMessageOps, isLoadingSession, isSwitchingChat, isAppGloballySending]
@@ -205,29 +206,29 @@ export default function App() {
       if (isSendingMessage) return { text: 'Sending…', disabled: true };
       if (isSavingEdit) return { text: 'Saving…', disabled: true };
       if (isResendingMessage) return { text: 'Resending…', disabled: true };
-      return { text: 'Processing…', disabled: true }; 
+      return { text: 'Processing…', disabled: true };
     }
-    
+
     if (!settings.apiKey) return { text: 'Set API Key', disabled: false };
-    if (!currentChatId) return { text: 'Select Chat', disabled: false }; 
+    if (!currentChatId) return { text: 'Select Chat', disabled: false };
     if (isHardTokenLimitReached) return { text: 'Token Limit Exceeded', disabled: true };
-        
+
     return { text: 'Send', disabled: false };
   }, [
     isAppGloballySending,
-    isSendingMessage, 
-    isSavingEdit,     
-    isResendingMessage, 
-    settings.apiKey, 
-    currentChatId, 
-    isHardTokenLimitReached, 
+    isSendingMessage,
+    isSavingEdit,
+    isResendingMessage,
+    settings.apiKey,
+    currentChatId,
+    isHardTokenLimitReached,
   ]);
 
   const finalSendButtonDisabled = sendButtonDisplayInfo.disabled || globalBusy;
 
 
   useEffect(() => {
-    if (messages.length > 0 && currentChatId && !isSwitchingChat) { 
+    if (messages.length > 0 && currentChatId && !isSwitchingChat) {
         const lastMessage = messages[messages.length - 1];
         if (lastMessage.role === 'assistant' || (lastMessage.role === 'user' && !editingId)) {
             const box = scrollContainerRef.current;
@@ -243,27 +244,28 @@ export default function App() {
     let cleanupRaf, scrollRaf, transitionEndRaf;
 
     if (currentChatId !== previousChatIdRef.current) {
-      inFlightSendSnapshotMarkerRef.current = null; 
+      setHasLastSendFailed(false); // Reset error state on chat switch
+      inFlightSendSnapshotMarkerRef.current = null;
       cleanupRaf = requestAnimationFrame(() => {
-        if (editingId) cancelEdit(); 
+        if (editingId) cancelEdit();
       });
-      if (currentChatId) { 
+      if (currentChatId) {
         scrollRaf = requestAnimationFrame(() => scrollToBottom('auto'));
       }
-      if (isSwitchingChat) { 
+      if (isSwitchingChat) {
         transitionEndRaf = requestAnimationFrame(() => setIsSwitchingChat(false));
       }
       previousChatIdRef.current = currentChatId;
     }
     return () => {
-      if (cleanupRaf) cancelAnimationFrame(cleanupRaf); 
+      if (cleanupRaf) cancelAnimationFrame(cleanupRaf);
       if (scrollRaf) cancelAnimationFrame(scrollRaf);
       if (transitionEndRaf) cancelAnimationFrame(transitionEndRaf);
     };
-  }, [currentChatId, isSwitchingChat, editingId, cancelEdit, scrollToBottom]); 
-  
+  }, [currentChatId, isSwitchingChat, editingId, cancelEdit, scrollToBottom, setHasLastSendFailed]);
+
   function handleSend() {
-    if (isAppGloballySending) { 
+    if (isAppGloballySending) {
         Toast("An operation is already in progress. Please wait.", 3000);
         return;
     }
@@ -319,7 +321,7 @@ export default function App() {
     sendMessage({
       userMessageContentBlocks,
       existingMessages: messages,
-      onSendSuccess: onSendSuccess, 
+      onSendSuccess: onSendSuccess,
     });
 
     resetPrompt();
@@ -356,7 +358,7 @@ export default function App() {
       }
       updateChatTitle({ id, title });
     },
-    [updateChatTitle, isAppGloballySending] 
+    [updateChatTitle, isAppGloballySending]
   );
 
   const handleNewChatTrigger = useCallback(() => {
@@ -381,10 +383,10 @@ export default function App() {
       <ChatList
         currentChatId={currentChatId}
         onSelectChat={handleSelectChat}
-        onNewChatTrigger={handleNewChatTrigger} 
-        onDeleteChatTrigger={handleDeleteChatTrigger} 
+        onNewChatTrigger={handleNewChatTrigger}
+        onDeleteChatTrigger={handleDeleteChatTrigger}
         onUpdateChatTitleTrigger={handleUpdateChatTitleTrigger}
-        appDisabled={chatListDisabled} 
+        appDisabled={chatListDisabled}
       />
 
       <div className="main-content">
@@ -394,16 +396,16 @@ export default function App() {
             onClick={() =>
               setSettings((s) => ({ ...s, showSettings: !s.showSettings }))
             }
-            disabled={globalBusy} 
+            disabled={globalBusy}
           >
             {settings.showSettings ? 'Close Settings' : 'Open Settings'}
           </button>
 
           <span style={{ margin: '0 1em', fontWeight: 'bold' }}>
-            Konzuko&nbsp;AI {isAppGloballySending && 
-              (isSendingMessage ? "(Sending...)" : 
-               isSavingEdit ? "(Saving...)" : 
-               isResendingMessage ? "(Resending...)" : 
+            Konzuko&nbsp;AI {isAppGloballySending &&
+              (isSendingMessage ? "(Sending...)" :
+               isSavingEdit ? "(Saving...)" :
+               isResendingMessage ? "(Resending...)" :
                "(Processing...)")
             }
           </span>
@@ -432,7 +434,7 @@ export default function App() {
                 }}
               >
                 {isHardTokenLimitReached
-                  ? 'MAX\u00A0TOKENS\u00A0REACHED' 
+                  ? 'MAX\u00A0TOKENS\u00A0REACHED'
                   : 'MEMORY\u00A0AT\u00A0LIMIT'}
               </div>
             )}
@@ -449,13 +451,13 @@ export default function App() {
                   : {}
               }
             >
-              Tokens:&nbsp; 
+              Tokens:&nbsp;
               {currentTotalPromptTokens.toLocaleString()} /{' '}
               {USER_FACING_TOKEN_LIMIT.toLocaleString()}
               {isHardTokenLimitReached && (
                 <span style={{ marginLeft: 4 }}>
                   {' '}
-                  (Max&nbsp; 
+                  (Max&nbsp;
                   {MAX_ABSOLUTE_TOKEN_LIMIT.toLocaleString()})
                 </span>
               )}
@@ -472,8 +474,8 @@ export default function App() {
               disabled={
                 !messages ||
                 messages.length === 0 ||
-                globalBusy || 
-                isLoadingMessageOps 
+                globalBusy ||
+                isLoadingMessageOps
               }
             >
               Copy All Text
@@ -518,7 +520,7 @@ export default function App() {
                 className="button icon-button"
                 onClick={scrollToPrev}
                 title="Scroll Up"
-                disabled={navRailDisabled} 
+                disabled={navRailDisabled}
               >
                 ↑
               </button>
@@ -526,7 +528,7 @@ export default function App() {
                 className="button icon-button"
                 onClick={scrollToNext}
                 title="Scroll Down"
-                disabled={navRailDisabled} 
+                disabled={navRailDisabled}
               >
                 ↓
               </button>
@@ -540,15 +542,15 @@ export default function App() {
                 forceLoading={isSwitchingChat}
                 editingId={editingId}
                 editText={editText}
-                loadingSend={isAppGloballySending} 
-                savingEdit={isAppGloballySending && isSavingEdit} 
+                loadingSend={isAppGloballySending}
+                savingEdit={isAppGloballySending && isSavingEdit}
                 setEditText={setEditText}
                 handleSaveEdit={saveEdit}
                 handleCancelEdit={cancelEdit}
                 handleStartEdit={startEdit}
                 handleResendMessage={resendMessage}
                 handleDeleteMessage={deleteMessage}
-                actionsDisabled={chatAreaActionsDisabled} 
+                actionsDisabled={chatAreaActionsDisabled}
               />
             ) : (
               <div className="chat-empty-placeholder">
@@ -563,8 +565,8 @@ export default function App() {
               setMode={setMode}
               form={form}
               setForm={setForm}
-              sendDisabled={finalSendButtonDisabled} 
-              sendButtonText={sendButtonDisplayInfo.text} 
+              sendDisabled={finalSendButtonDisabled}
+              sendButtonText={sendButtonDisplayInfo.text}
               handleSend={handleSend}
               showToast={Toast}
               imagePreviews={pendingImages}
@@ -573,6 +575,7 @@ export default function App() {
               onAddImage={addPendingImage}
               onAddPDF={addPendingPDF}
               settings={settings}
+              hasLastSendFailed={hasLastSendFailed}
               pendingFiles={pendingFiles}
               onFilesChange={setPendingFiles}
               onProjectRootChange={handleProjectRootChange}
@@ -585,4 +588,3 @@ export default function App() {
     </div>
   );
 }
-

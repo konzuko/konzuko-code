@@ -13,7 +13,7 @@ const flatten = c =>
 
 function ChatArea({
   messages = [],
-  isLoading, 
+  isLoading,
   forceLoading, // New prop: If true, always show loading state initially
   editingId,
   editText,
@@ -32,6 +32,8 @@ function ChatArea({
   let assistantMessageCounter = 0;
 
   const MAX_EDIT_TEXTAREA_HEIGHT = 200; // px
+  // Determine if the "thinking" spinner should be shown
+  const showThinkingSpinner = loadingSend && messages.length > 0 && messages[messages.length - 1].role === 'user' && !editingId;
 
   useEffect(() => {
     if (editingId && editingTextareaRef.current) {
@@ -171,13 +173,24 @@ function ChatArea({
           </div>
         );
       })}
+      {showThinkingSpinner && (
+        <div className="message message-assistant message-thinking">
+          <div className="message-content-inner">
+            <div className="thinking-spinner">
+              <span></span>
+              <span></span>
+              <span></span>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
 
 function areEqual(prev, next) {
-  if (prev.forceLoading !== next.forceLoading) return false; 
-  if (prev.isLoading !== next.isLoading) return false; 
+  if (prev.forceLoading !== next.forceLoading) return false;
+  if (prev.isLoading !== next.isLoading) return false;
   if (prev.editingId   !== next.editingId)   return false;
   if (prev.editText    !== next.editText)    return false;
   if (prev.loadingSend !== next.loadingSend) return false;
@@ -195,8 +208,8 @@ function areEqual(prev, next) {
   }
 
   if (prev.messages === next.messages) return true;
-  if (!prev.messages && !next.messages) return true; 
-  if (!prev.messages || !next.messages) return false; 
+  if (!prev.messages && !next.messages) return true;
+  if (!prev.messages || !next.messages) return false;
   if (prev.messages.length !== next.messages.length) return false;
   if (prev.messages.length === 0 && next.messages.length === 0) return true;
 
@@ -208,4 +221,3 @@ function areEqual(prev, next) {
 }
 
 export default memo(ChatArea, areEqual);
-
