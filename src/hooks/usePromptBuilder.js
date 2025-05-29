@@ -1,7 +1,7 @@
 // src/hooks/usePromptBuilder.js
 
 import { useState, useEffect, useCallback, useMemo } from 'preact/hooks';
-import { useFormData, useMode, INITIAL_FORM_DATA } from '../hooks.js'; 
+import { useFormData, useMode, INITIAL_FORM_DATA } from '../hooks.js';
 import { asciiTree } from '../lib/textUtils.js';
 
 const safeTrim = (val) => (val ?? '').trim();
@@ -50,7 +50,7 @@ function buildNewUserPromptText(currentForm, currentMode, currentPendingFiles, p
       if (f.note) out.push(`# ${f.note}`);
       out.push('```');
       out.push('```');
-      out.push(f.text); 
+      out.push(f.text);
       out.push('```');
     });
 
@@ -107,7 +107,7 @@ export function usePromptBuilder() {
     return () => {
       imagesToRevokeOnUnmount.forEach(revokeOnce);
     };
-  }, []); 
+  }, []);
 
   const userPromptText = useMemo(() => buildNewUserPromptText(
     form,
@@ -136,25 +136,59 @@ export function usePromptBuilder() {
   const handleProjectRootChange = useCallback(newRootName => {
     setCurrentProjectRootName(newRootName);
     if (newRootName === null) {
+      // When the project root is cleared (e.g., by resetPrompt or user action in CodebaseImporter),
+      // ensure any files that were associated with a project (insideProject: true)
+      // are removed from the pendingFiles list. This maintains consistency.
+      // If setPendingFiles([]) is called immediately before/after this, this specific
+      // filter might operate on an already empty array, which is harmless.
       setPendingFiles(files => files.filter(f => !f.insideProject));
     }
-  }, []);
+  }, [setPendingFiles]); // setPendingFiles from useState is stable
 
   const resetPrompt = useCallback(() => {
-    pendingImages.forEach(revokeOnce); 
+    // Revoke URLs for any pending images to free up resources
+    pendingImages.forEach(revokeOnce);
     setPendingImages([]);
+
+    // Clear pending PDFs
     setPendingPDFs([]);
-    setPendingFiles([]); 
-    
-    // Selectively reset form fields, preserving the toggle state
+
+    // Clear the list of files intended for the next message.
+    // This is crucial as it prevents sending the same files repeatedly
+    // and ensures the token counter for the *next* message preparation starts fresh.
+    setPendingFiles([]);
+
+    // --- Implemented Change (April 2024) ---
+    // Clear the project root context from CodebaseImporter.
+    // Why this change?
+    // 1. UI Consistency: After sending a message, the CodebaseImporter UI (project name,
+    //    file/folder filter checkboxes) will also reset. This provides a cleaner visual slate,
+    //    aligning with the fact that `pendingFiles` (the actual files to be sent) has been cleared.
+    // 2. Reduced Confusion: While `setPendingFiles([])` already ensures the *next* message
+    //    doesn't re-send old files (and thus the token count for the next message is accurate),
+    //    leaving the old project root UI visible in CodebaseImporter could be confusing.
+    //    Users might think those files are still implicitly selected or contributing to token counts.
+    //    Clearing it makes the state unambiguous.
+    // 3. Previous Behavior: Previously, only `pendingFiles` was cleared. The project root
+    //    context in CodebaseImporter remained, allowing users to easily select *different* files
+    //    from the same project for a subsequent message. While convenient for some iterative
+    //    workflows, the consensus is that a full UI flush is preferable for clarity.
+    // How it works:
+    // - Calling `handleProjectRootChange(null)` sets `currentProjectRootName` to `null`.
+    // - `CodebaseImporter.jsx` has a `useEffect` that listens to `currentProjectRootNameFromBuilder` (which is this `currentProjectRootName`).
+    // - When `currentProjectRootNameFromBuilder` becomes `null`, that `useEffect` in `CodebaseImporter`
+    //   resets its internal state (project root handle, filter UI, etc.) and clears the root from IDB.
+    handleProjectRootChange(null);
+    // --- End of Implemented Change ---
+
+    // Reset form fields to their initial state, but preserve the
+    // 'developReturnFormat_autoIncludeDefault' toggle state as it's a user preference
+    // that should persist across prompt resets.
     setForm(prevForm => ({
-      ...INITIAL_FORM_DATA, // Reset most fields to their initial state
-      developReturnFormat_autoIncludeDefault: prevForm.developReturnFormat_autoIncludeDefault, // Preserve the toggle
-      // If other form fields also need to be preserved, list them here.
-      // For 'fixCode' and 'fixErrors' which are not part of DEVELOP mode, 
-      // INITIAL_FORM_DATA will correctly reset them to empty strings.
-    })); 
-  }, [pendingImages, setForm]); // Removed INITIAL_FORM_DATA from deps, setForm is stable
+      ...INITIAL_FORM_DATA,
+      developReturnFormat_autoIncludeDefault: prevForm.developReturnFormat_autoIncludeDefault,
+    }));
+  }, [pendingImages, setForm, handleProjectRootChange]); // Added handleProjectRootChange to dependencies
 
   return {
     form,
@@ -164,10 +198,10 @@ export function usePromptBuilder() {
     pendingImages,
     addPendingImage,
     removePendingImage,
-    setPendingImages, 
+    setPendingImages,
     pendingPDFs,
     addPendingPDF,
-    setPendingPDFs, 
+    setPendingPDFs,
     pendingFiles,
     setPendingFiles,
     currentProjectRootName,
