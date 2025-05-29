@@ -102,12 +102,16 @@ export function usePromptBuilder() {
   const [pendingFiles, setPendingFiles] = useState([]);
   const [currentProjectRootName, setCurrentProjectRootName] = useState(null);
 
+  // Effect to clean up (revoke) object URLs for pendingImages.
+  // This is crucial to prevent memory leaks.
+  // The effect runs when `pendingImages` changes, and its cleanup function
+  // revokes URLs for the images that were present *before* the change or on unmount.
   useEffect(() => {
-    const imagesToRevokeOnUnmount = [...pendingImages];
+    const imagesToRevoke = [...pendingImages]; // Capture the current list of images
     return () => {
-      imagesToRevokeOnUnmount.forEach(revokeOnce);
+      imagesToRevoke.forEach(revokeOnce); // Revoke URLs for the captured list
     };
-  }, []);
+  }, [pendingImages]); // Re-run if pendingImages changes
 
   const userPromptText = useMemo(() => buildNewUserPromptText(
     form,
@@ -124,7 +128,7 @@ export function usePromptBuilder() {
   const removePendingImage = useCallback(index => {
     setPendingImages(prev => {
       const img = prev[index];
-      if (img) revokeOnce(img);
+      if (img) revokeOnce(img); // Revoke immediately on removal
       return prev.filter((_, i) => i !== index);
     });
   }, []);
@@ -133,62 +137,38 @@ export function usePromptBuilder() {
     setPendingPDFs(prev => [...prev, pdf]);
   }, []);
 
+  // Handles changes to the project root.
+  // If the new root name is null (i.e., project root is cleared),
+  // it also clears any files from `pendingFiles` that were marked as `insideProject`.
   const handleProjectRootChange = useCallback(newRootName => {
     setCurrentProjectRootName(newRootName);
     if (newRootName === null) {
-      // When the project root is cleared (e.g., by resetPrompt or user action in CodebaseImporter),
-      // ensure any files that were associated with a project (insideProject: true)
-      // are removed from the pendingFiles list. This maintains consistency.
-      // If setPendingFiles([]) is called immediately before/after this, this specific
-      // filter might operate on an already empty array, which is harmless.
       setPendingFiles(files => files.filter(f => !f.insideProject));
     }
-  }, [setPendingFiles]); // setPendingFiles from useState is stable
+  }, []); // State setters (setCurrentProjectRootName, setPendingFiles) are stable
 
   const resetPrompt = useCallback(() => {
-    // Revoke URLs for any pending images to free up resources
-    pendingImages.forEach(revokeOnce);
+    // Note: `pendingImages.forEach(revokeOnce)` is not strictly needed here anymore
+    // because the `useEffect` for `pendingImages` handles revocation on change/unmount,
+    // and `removePendingImage` handles immediate revocation.
+    // However, keeping it can be a safeguard if `setPendingImages([])` doesn't trigger
+    // the effect's cleanup immediately in all edge cases or Preact versions,
+    // or if images were added without going through `addPendingImage`.
+    // For maximum safety, we can leave it, or rely on the useEffect.
+    // Let's rely on the useEffect and individual removal for cleaner logic.
+    // pendingImages.forEach(revokeOnce); // This line can be removed if confident in useEffect
+
     setPendingImages([]);
-
-    // Clear pending PDFs
     setPendingPDFs([]);
-
-    // Clear the list of files intended for the next message.
-    // This is crucial as it prevents sending the same files repeatedly
-    // and ensures the token counter for the *next* message preparation starts fresh.
     setPendingFiles([]);
 
-    // --- Implemented Change (April 2024) ---
-    // Clear the project root context from CodebaseImporter.
-    // Why this change?
-    // 1. UI Consistency: After sending a message, the CodebaseImporter UI (project name,
-    //    file/folder filter checkboxes) will also reset. This provides a cleaner visual slate,
-    //    aligning with the fact that `pendingFiles` (the actual files to be sent) has been cleared.
-    // 2. Reduced Confusion: While `setPendingFiles([])` already ensures the *next* message
-    //    doesn't re-send old files (and thus the token count for the next message is accurate),
-    //    leaving the old project root UI visible in CodebaseImporter could be confusing.
-    //    Users might think those files are still implicitly selected or contributing to token counts.
-    //    Clearing it makes the state unambiguous.
-    // 3. Previous Behavior: Previously, only `pendingFiles` was cleared. The project root
-    //    context in CodebaseImporter remained, allowing users to easily select *different* files
-    //    from the same project for a subsequent message. While convenient for some iterative
-    //    workflows, the consensus is that a full UI flush is preferable for clarity.
-    // How it works:
-    // - Calling `handleProjectRootChange(null)` sets `currentProjectRootName` to `null`.
-    // - `CodebaseImporter.jsx` has a `useEffect` that listens to `currentProjectRootNameFromBuilder` (which is this `currentProjectRootName`).
-    // - When `currentProjectRootNameFromBuilder` becomes `null`, that `useEffect` in `CodebaseImporter`
-    //   resets its internal state (project root handle, filter UI, etc.) and clears the root from IDB.
     handleProjectRootChange(null);
-    // --- End of Implemented Change ---
 
-    // Reset form fields to their initial state, but preserve the
-    // 'developReturnFormat_autoIncludeDefault' toggle state as it's a user preference
-    // that should persist across prompt resets.
     setForm(prevForm => ({
       ...INITIAL_FORM_DATA,
       developReturnFormat_autoIncludeDefault: prevForm.developReturnFormat_autoIncludeDefault,
     }));
-  }, [pendingImages, setForm, handleProjectRootChange]); // Added handleProjectRootChange to dependencies
+  }, [setForm, handleProjectRootChange]); // Removed pendingImages from deps as direct iteration is removed
 
   return {
     form,
