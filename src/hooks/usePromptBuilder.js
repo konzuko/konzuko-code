@@ -102,16 +102,12 @@ export function usePromptBuilder() {
   const [pendingFiles, setPendingFiles] = useState([]);
   const [currentProjectRootName, setCurrentProjectRootName] = useState(null);
 
-  // Effect to clean up (revoke) object URLs for pendingImages.
-  // This is crucial to prevent memory leaks.
-  // The effect runs when `pendingImages` changes, and its cleanup function
-  // revokes URLs for the images that were present *before* the change or on unmount.
   useEffect(() => {
-    const imagesToRevoke = [...pendingImages]; // Capture the current list of images
+    const imagesToRevoke = [...pendingImages];
     return () => {
-      imagesToRevoke.forEach(revokeOnce); // Revoke URLs for the captured list
+      imagesToRevoke.forEach(revokeOnce);
     };
-  }, [pendingImages]); // Re-run if pendingImages changes
+  }, [pendingImages]);
 
   const userPromptText = useMemo(() => buildNewUserPromptText(
     form,
@@ -128,7 +124,7 @@ export function usePromptBuilder() {
   const removePendingImage = useCallback(index => {
     setPendingImages(prev => {
       const img = prev[index];
-      if (img) revokeOnce(img); // Revoke immediately on removal
+      if (img) revokeOnce(img);
       return prev.filter((_, i) => i !== index);
     });
   }, []);
@@ -137,38 +133,40 @@ export function usePromptBuilder() {
     setPendingPDFs(prev => [...prev, pdf]);
   }, []);
 
-  // Handles changes to the project root.
-  // If the new root name is null (i.e., project root is cleared),
-  // it also clears any files from `pendingFiles` that were marked as `insideProject`.
   const handleProjectRootChange = useCallback(newRootName => {
     setCurrentProjectRootName(newRootName);
     if (newRootName === null) {
       setPendingFiles(files => files.filter(f => !f.insideProject));
     }
-  }, []); // State setters (setCurrentProjectRootName, setPendingFiles) are stable
+  }, []);
 
   const resetPrompt = useCallback(() => {
-    // Note: `pendingImages.forEach(revokeOnce)` is not strictly needed here anymore
-    // because the `useEffect` for `pendingImages` handles revocation on change/unmount,
-    // and `removePendingImage` handles immediate revocation.
-    // However, keeping it can be a safeguard if `setPendingImages([])` doesn't trigger
-    // the effect's cleanup immediately in all edge cases or Preact versions,
-    // or if images were added without going through `addPendingImage`.
-    // For maximum safety, we can leave it, or rely on the useEffect.
-    // Let's rely on the useEffect and individual removal for cleaner logic.
-    // pendingImages.forEach(revokeOnce); // This line can be removed if confident in useEffect
-
     setPendingImages([]);
     setPendingPDFs([]);
-    setPendingFiles([]);
 
+    // --- Order of operations changed here (April 2024) ---
+    // 1. Clear project-root context *first*.
+    //    This ensures that when CodebaseImporter re-renders, its internal state
+    //    (projectRoot, step, entryFilter, initialScanResults) is reset *before*
+    //    its useEffect that depends on the `files` prop runs. If the `files` prop
+    //    was cleared first, that effect might run with stale internal project context
+    //    and incorrectly re-add files to `pendingFiles` via `onFilesChange`.
+    //    By clearing the project context first, the CodebaseImporter's file merging
+    //    useEffect should bail out due to `projectRoot` being null or `step` being 'FILTER'.
     handleProjectRootChange(null);
+
+    // 2. Now clear the actual list of staged files.
+    //    Since the CodebaseImporter's context that might re-add files has been reset,
+    //    this `setPendingFiles([])` should now reliably clear the list displayed to the user
+    //    and ensure the next message doesn't include these files.
+    setPendingFiles([]);
+    // --- End of order change ---
 
     setForm(prevForm => ({
       ...INITIAL_FORM_DATA,
       developReturnFormat_autoIncludeDefault: prevForm.developReturnFormat_autoIncludeDefault,
     }));
-  }, [setForm, handleProjectRootChange]); // Removed pendingImages from deps as direct iteration is removed
+  }, [setForm, handleProjectRootChange]);
 
   return {
     form,

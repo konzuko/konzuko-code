@@ -49,7 +49,7 @@ function mergeFiles(existing = [], incoming = []) {
   });
 
   for (const f of incoming) {
-    if (out.length >= FILE_LIMIT) break; 
+    if (out.length >= FILE_LIMIT) break;
 
     const s = taken.get(f.fullPath);
     if (!s) {
@@ -72,7 +72,7 @@ function mergeFiles(existing = [], incoming = []) {
 }
 
 function isIncluded(fullPath, filterMap) {
-  const parts = fullPath.split('/'); 
+  const parts = fullPath.split('/');
 
   if (parts.length === 1) {
     return filterMap[parts[0]] === true;
@@ -86,9 +86,9 @@ function isIncluded(fullPath, filterMap) {
 function formatRejectionMessage(rejectionStats) {
   const {
     tooLarge = 0,
-    tooLong = 0, 
+    tooLong = 0,
     unsupportedType = 0,
-    limitReached = 0, 
+    limitReached = 0,
     permissionDenied = 0,
     readError = 0,
   } = rejectionStats;
@@ -100,7 +100,7 @@ function formatRejectionMessage(rejectionStats) {
     lines.push(`- ${tooLarge} file${tooLarge > 1 ? 's were' : ' was'} skipped because they were over the ${MAX_TEXT_FILE_SIZE / 1024}KB size limit.`);
     hasSkipsOrErrors = true;
   }
-  if (tooLong > 0) { 
+  if (tooLong > 0) {
     lines.push(`- ${tooLong} file${tooLong > 1 ? 's' : ''} had too much text (over ${MAX_CHAR_LEN / 1000}k characters) and were skipped.`);
     hasSkipsOrErrors = true;
   }
@@ -108,19 +108,19 @@ function formatRejectionMessage(rejectionStats) {
     lines.push(`- ${unsupportedType} file${unsupportedType > 1 ? 's were' : ' was'} skipped because they didn't appear to be text or code files (e.g., images, videos, applications).`);
     hasSkipsOrErrors = true;
   }
-  if (limitReached > 0) { 
+  if (limitReached > 0) {
     lines.push(`- ${limitReached} file${limitReached > 1 ? 's were' : ' was'} skipped because an internal processing limit of ${FILE_LIMIT} text files was reached.`);
     hasSkipsOrErrors = true;
   }
-  
+
   if (permissionDenied > 0) {
     hasSkipsOrErrors = true;
     const itemStr = permissionDenied > 1 ? 'items (files/folders)' : 'item (file/folder)';
-    const message = 
-      `- ${permissionDenied} ${itemStr} SKIPPED DUE TO ERROR:\n` + 
+    const message =
+      `- ${permissionDenied} ${itemStr} SKIPPED DUE TO ERROR:\n` +
       `  Your computer's OS (Windows, macOS, Linux) denied read access.\n` +
       `  This means your browser lacks 'Read' permission for it.\n` +
-      `  To fix: Adjust permissions on your computer.\n` + 
+      `  To fix: Adjust permissions on your computer.\n` +
       `  (e.g., Win: Properties > Security; Mac: Get Info > Permissions).`;
     lines.push(message);
   }
@@ -129,86 +129,229 @@ function formatRejectionMessage(rejectionStats) {
     hasSkipsOrErrors = true;
     lines.push(`- ${readError} file${readError > 1 ? 's' : ''} SKIPPED DUE TO ERROR: Could not be read (general system error).`);
   }
-  
+
   if (!hasSkipsOrErrors) {
-    return null; 
+    return null;
   }
 
   const header = "This isn't an error; skipping some files is normal during import.";
-  return header + '\n\n' + lines.join('\n\n'); 
+  return header + '\n\n' + lines.join('\n\n');
 }
 
 
 export default function CodebaseImporter({
-  files = [], 
-  onFilesChange, 
-  toastFn, 
+  files = [],
+  onFilesChange,
+  toastFn,
   onAddImage,
   onAddPDF,
   settings,
-  onProjectRootChange, 
-  currentProjectRootNameFromBuilder 
+  onProjectRootChange,
+  currentProjectRootNameFromBuilder
 }) {
-  const [adding, setAdding] = useState(false); 
-  const [projectRoot, setProjectRoot] = useState(null); 
-  const [entryFilter, setEntryFilter] = useState({}); 
-  const [step, setStep] = useState('FILTER'); 
-  const [topEntries, setTopEntries] = useState([]); 
-  const [initialScanResults, setInitialScanResults] = useState([]); 
-  const lastCheckedIndexRef = useRef(null); 
+  const [adding, setAdding] = useState(false);
+  const [projectRoot, setProjectRoot] = useState(null);
+  const [entryFilter, setEntryFilter] = useState({});
+  const [step, setStep] = useState('FILTER');
+  const [topEntries, setTopEntries] = useState([]);
+  const [initialScanResults, setInitialScanResults] = useState([]);
+  const lastCheckedIndexRef = useRef(null);
 
+  // Effect A: Handles changes to currentProjectRootNameFromBuilder (parent-driven root changes)
+  // and syncs internal project state.
   useEffect(() => {
     let live = true;
-    loadRoot().then(h => {
-        if (live) {
-            setProjectRoot(h); 
-            if (h) { 
-                onProjectRootChange?.(h.name); 
-            } else {
-                onProjectRootChange?.(null); 
-                setInitialScanResults([]); 
-            }
-        }
-    }).catch(() => {
-        if (live) {
-            onProjectRootChange?.(null);
-            setInitialScanResults([]);
-        }
-    });
-    return () => { live = false; };
-  }, [onProjectRootChange]);
-
-
-  useEffect(() => {
     if (currentProjectRootNameFromBuilder === null && projectRoot !== null) {
+      // Parent wants to clear the project root.
+      console.log('[CodebaseImporter Effect A] Parent signaled project root clear. Current internal projectRoot:', projectRoot?.name);
+
+      // Before clearing internal root state, remove any files from the parent's list
+      // that were part of this project. This should only happen once when the
+      // transition to a null root is detected from the parent.
+      const projectFilesExist = files.some(f => f.insideProject);
+      if (projectFilesExist) {
+        console.log('[CodebaseImporter Effect A] Removing project-specific files from parent list. Current files prop length:', files.length);
+        onFilesChange(files.filter(f => !f.insideProject));
+      } else {
+        console.log('[CodebaseImporter Effect A] No project-specific files found in current files prop to remove.');
+      }
+
       clearRoot()
         .catch(err => console.warn("CodebaseImporter: Failed to clear root from IDB during reset via prop", err))
         .finally(() => {
-            setProjectRoot(null); 
-            setTopEntries([]);    
+          if (live) {
+            console.log('[CodebaseImporter Effect A] Setting internal project states to null/initial.');
+            setProjectRoot(null);
+            setTopEntries([]);
             setEntryFilter({});
-            setInitialScanResults([]); 
-            setStep('FILTER');    
+            setInitialScanResults([]);
+            setStep('FILTER');
             lastCheckedIndexRef.current = null;
+          }
+        });
+    } else if (currentProjectRootNameFromBuilder && (!projectRoot || projectRoot.name !== currentProjectRootNameFromBuilder)) {
+      // Parent has specified a project root, and we either don't have one internally, or it's different.
+      // Attempt to load it. This primarily handles cases where the parent re-establishes a root
+      // or on initial load if parent has a root name but this component doesn't have the handle yet.
+      console.log('[CodebaseImporter Effect A] Parent specified root, attempting to load/sync:', currentProjectRootNameFromBuilder, 'Current internal projectRoot:', projectRoot?.name);
+      loadRoot().then(h => {
+        if (live) {
+          if (h && h.name === currentProjectRootNameFromBuilder) {
+            console.log('[CodebaseImporter Effect A] Loaded matching root from IDB:', h.name);
+            setProjectRoot(h);
+            // Note: This doesn't re-scan. Scanning is typically part of `addFolder`.
+            // If `topEntries` etc. need to be repopulated, that's a more complex sync,
+            // usually triggered by user action (`addFolder`) or if `initialScanResults` are empty.
+          } else if (h && h.name !== currentProjectRootNameFromBuilder) {
+            // IDB has a root, but it's not what the parent wants. Clear IDB.
+            console.log('[CodebaseImporter Effect A] Mismatch between parent root and IDB root. Clearing IDB. IDB root:', h.name);
+            clearRoot().finally(() => {
+              if (live) setProjectRoot(null); // No valid root to set internally
+            });
+          } else if (!h) {
+            // No root in IDB, and parent wants one. Parent should trigger `addFolder` if scan is needed.
+            console.log('[CodebaseImporter Effect A] No root in IDB, parent wants one. Setting internal projectRoot to null.');
+            setProjectRoot(null);
+          }
+        }
+      }).catch((err) => {
+        console.warn('[CodebaseImporter Effect A] Error loading root from IDB:', err);
+        if (live) setProjectRoot(null);
+      });
+    }
+    return () => { live = false; };
+  }, [currentProjectRootNameFromBuilder, projectRoot, files, onFilesChange]); // `files` and `onFilesChange` are needed for the conditional call.
+
+  // Effect for initial load of projectRoot from IDB if not driven by prop from parent
+  // This ensures that if the app reloads, CodebaseImporter tries to pick up an existing root.
+  useEffect(() => {
+    let live = true;
+    if (!currentProjectRootNameFromBuilder && !projectRoot) { // Only if parent hasn't specified and we don't have one
+        console.log('[CodebaseImporter InitialMountEffect] Attempting to load root from IDB.');
+        loadRoot().then(h => {
+            if (live) {
+                if (h) {
+                    console.log('[CodebaseImporter InitialMountEffect] Loaded root from IDB:', h.name);
+                    setProjectRoot(h);
+                    onProjectRootChange?.(h.name); // Inform parent
+                    // If a root is loaded, we might want to re-populate topEntries and initialScanResults
+                    // This is complex because `addFolder` normally handles scanning.
+                    // For now, this effect primarily syncs `projectRoot` and informs parent.
+                    // A full re-scan might be too heavy for an initial load effect without user action.
+                    // Consider if `addFolder` logic needs to be callable to re-process an existing handle.
+                } else {
+                    console.log('[CodebaseImporter InitialMountEffect] No root found in IDB.');
+                    onProjectRootChange?.(null); // Ensure parent knows there's no root
+                }
+            }
+        }).catch((err) => {
+            console.warn('[CodebaseImporter InitialMountEffect] Error loading root from IDB:', err);
+            if (live) {
+                onProjectRootChange?.(null);
+            }
         });
     }
-  }, [currentProjectRootNameFromBuilder, projectRoot]);
+    return () => { live = false; };
+  }, [onProjectRootChange, currentProjectRootNameFromBuilder, projectRoot]);
+
+
+  // Effect B: Merges files based on internal filters and updates parent (onFilesChange)
+  // This effect is primarily for when the user interacts with the filter checkboxes for a loaded project.
+  useEffect(() => {
+    console.log('[CodebaseImporter Effect B] Checking conditions. Props/States:', {
+        filesPropLength: files.length, // from parent
+        currentProjectRootNameFromBuilder, // from parent
+        internalStep: step,
+        internalProjectRootName: projectRoot ? projectRoot.name : null,
+        internalInitialScanResultsLength: initialScanResults.length,
+        internalTopEntriesLength: topEntries.length,
+        internalEntryFilterKeys: Object.keys(entryFilter).length,
+    });
+
+    // Guard:
+    // 1. If parent is signaling a full reset (currentProjectRootNameFromBuilder is null), bail out.
+    //    Effect A is responsible for handling the reset, including clearing project-specific files from parent.
+    // 2. If there's no internal projectRoot (folder handle), bail out.
+    // 3. If not in the 'FILES' step (i.e., still in 'FILTER' step of selecting top-level entries), bail out.
+    // 4. If there are no initial scan results AND no top-level entries (empty or uninitialized project), bail out.
+    if (currentProjectRootNameFromBuilder === null ||
+        !projectRoot ||
+        step !== 'FILES' ||
+        (initialScanResults.length === 0 && topEntries.length === 0)) {
+        console.log('[CodebaseImporter Effect B] Bailing out due to guard conditions.');
+        if (!projectRoot && initialScanResults.length > 0) {
+            // This ensures that if projectRoot is cleared (e.g., by "Clear List" button or Effect A),
+            // we don't use stale initialScanResults from a previous project.
+            console.log('[CodebaseImporter Effect B] Clearing stale initialScanResults as projectRoot is null.');
+            setInitialScanResults([]);
+        }
+        return;
+    }
+
+    console.log('[CodebaseImporter Effect B] Proceeding to merge files.');
+    const userFilteredProjectFiles = initialScanResults.filter(f => isIncluded(f.fullPath, entryFilter));
+    const nonProjectFiles = files.filter(f => !f.insideProject); // Files from parent not part of current project
+    const combinedListBeforeFinalLimit = mergeFiles([], nonProjectFiles);
+    const remainingSlotsForProjectFiles = FILE_LIMIT - combinedListBeforeFinalLimit.length;
+    let finalProjectFilesToMerge = userFilteredProjectFiles;
+    let countExcludedByFileLimit = 0;
+
+    if (remainingSlotsForProjectFiles < userFilteredProjectFiles.length) {
+        if (remainingSlotsForProjectFiles > 0) {
+            finalProjectFilesToMerge = userFilteredProjectFiles.slice(0, remainingSlotsForProjectFiles);
+            countExcludedByFileLimit = userFilteredProjectFiles.length - finalProjectFilesToMerge.length;
+        } else {
+            finalProjectFilesToMerge = [];
+            countExcludedByFileLimit = userFilteredProjectFiles.length;
+        }
+    }
+
+    const newCompleteFileList = mergeFiles(combinedListBeforeFinalLimit, finalProjectFilesToMerge);
+    const currentFilesString = files.map(f => `${f.fullPath}|${f.checksum}`).join(',');
+    const newFilesString = newCompleteFileList.map(f => `${f.fullPath}|${f.checksum}`).join(',');
+
+    if (newFilesString !== currentFilesString) {
+        console.log('[CodebaseImporter Effect B] Files list changed. Calling onFilesChange with:', newCompleteFileList.map(f=>f.fullPath));
+        onFilesChange(newCompleteFileList);
+
+        const numSelectedProjectFiles = finalProjectFilesToMerge.length;
+        if (numSelectedProjectFiles > 0) {
+            let message = `${numSelectedProjectFiles} project file${numSelectedProjectFiles > 1 ? 's' : ''} picked.`;
+            if (countExcludedByFileLimit > 0) {
+                message += ` ${countExcludedByFileLimit} more were available from selection but excluded by file limit.`;
+            }
+            toastFn?.(message, 4000);
+        } else if (Object.values(entryFilter).some(v => v === true) && numSelectedProjectFiles === 0 && initialScanResults.length > 0) {
+            toastFn?.('Selection resulted in 0 project files. Try selecting other items.', 4000);
+        } else if (files.length > newCompleteFileList.length && countExcludedByFileLimit === 0 && initialScanResults.length === (userFilteredProjectFiles.length)) {
+            const actualRemoved = files.length - newCompleteFileList.length;
+            if (actualRemoved > 0) {
+                 toastFn?.(`Removed ${actualRemoved} duplicate item${actualRemoved > 1 ? 's' : ''}.`, 3000);
+            }
+        }
+    } else {
+        console.log('[CodebaseImporter Effect B] Files list did not change. Not calling onFilesChange.');
+    }
+  }, [
+    entryFilter, step, projectRoot, topEntries, files, onFilesChange, toastFn, initialScanResults,
+    currentProjectRootNameFromBuilder // Added to ensure this effect respects parent's reset signal
+  ]);
 
 
   const clearAll = useCallback(() => {
     if (!files.length && !projectRoot && topEntries.length === 0 && Object.keys(entryFilter).length === 0 && initialScanResults.length === 0) return;
     if (!confirm('Remove all selected files and clear project root?')) return;
-    
+
     clearRoot().then(() => {
-      setProjectRoot(null); 
-      onProjectRootChange?.(null); 
+      setProjectRoot(null);
+      onProjectRootChange?.(null); // Signal parent that root is gone
     }).catch(err => console.error("Error clearing root from IDB:", err));
-    
+
     setEntryFilter({});
     setTopEntries([]);
-    setInitialScanResults([]); 
-    setStep('FILTER'); 
-    onFilesChange([]); 
+    setInitialScanResults([]);
+    setStep('FILTER');
+    onFilesChange([]); // Directly tell parent the list is empty
     lastCheckedIndexRef.current = null;
   }, [files.length, projectRoot, topEntries.length, Object.keys(entryFilter).length, initialScanResults.length, onFilesChange, onProjectRootChange]);
 
@@ -219,21 +362,21 @@ export default function CodebaseImporter({
         return;
     }
     try {
-      setAdding(true); 
+      setAdding(true);
       const handles = await window.showOpenFilePicker({ multiple: true });
-      const batch = []; 
-      const rejectionStats = { 
-          count: 0, tooLarge: 0, tooLong: 0, unsupportedType: 0, 
-          limitReached: 0, permissionDenied: 0, readError: 0 
+      const batch = [];
+      const rejectionStats = {
+          count: 0, tooLarge: 0, tooLong: 0, unsupportedType: 0,
+          limitReached: 0, permissionDenied: 0, readError: 0
       };
 
       for (const h of handles) {
         if (files.length + batch.length >= FILE_LIMIT) {
           rejectionStats.limitReached++;
-          rejectionStats.count++; 
-          continue; 
+          rejectionStats.count++;
+          continue;
         }
-        
+
         let currentFileRejected = false;
         let fileData = null;
         try {
@@ -249,23 +392,23 @@ export default function CodebaseImporter({
         }
 
         if (currentFileRejected || !fileData) {
-            if (!currentFileRejected) rejectionStats.count++; 
+            if (!currentFileRejected) rejectionStats.count++;
             continue;
         }
-        
+
         const f = fileData;
 
         if (f.size > MAX_TEXT_FILE_SIZE) {
           rejectionStats.tooLarge++;
           currentFileRejected = true;
         }
-        
-        if (!isTextLike(f)) { 
+
+        if (!isTextLike(f)) {
           if (!currentFileRejected) rejectionStats.unsupportedType++;
-          currentFileRejected = true; 
+          currentFileRejected = true;
         }
-        
-        if (!currentFileRejected) { 
+
+        if (!currentFileRejected) {
             const text = await f.text();
             if (text.length > MAX_CHAR_LEN) {
               rejectionStats.tooLong++;
@@ -274,16 +417,16 @@ export default function CodebaseImporter({
         }
 
         if (currentFileRejected) {
-          rejectionStats.count++; 
+          rejectionStats.count++;
           continue;
         }
 
-        const textContent = await f.text(); 
+        const textContent = await f.text();
         const ck = checksum32(textContent);
-        const { fullPath, insideProject } = await getFullPath(h, projectRoot); 
+        const { fullPath, insideProject } = await getFullPath(h, projectRoot);
         batch.push({ fullPath, text: textContent, checksum: ck, insideProject, name: f.name });
       }
-      
+
       let totalSpecificRejections = rejectionStats.tooLarge + rejectionStats.tooLong + rejectionStats.unsupportedType + rejectionStats.limitReached + rejectionStats.permissionDenied + rejectionStats.readError;
       if (rejectionStats.count < totalSpecificRejections) {
           rejectionStats.count = totalSpecificRejections;
@@ -294,49 +437,49 @@ export default function CodebaseImporter({
         const duration = (rejectionStats.permissionDenied > 0 || rejectionStats.readError > 0) ? 20000 : 15000;
         toastFn?.(rejectionMessage, duration);
       }
-      
+
       const merged = mergeFiles(files, batch);
       onFilesChange(merged);
     } catch (err) {
       if (err.name !== 'AbortError') toastFn?.('File pick error: ' + err.message, 5000);
     } finally {
-      setAdding(false); 
+      setAdding(false);
     }
-  }, [files, onFilesChange, projectRoot, toastFn]); 
+  }, [files, onFilesChange, projectRoot, toastFn]);
 
   async function scanDirForCandidates(handle, candidateCollector, rejectionStats, rootHandle, currentPath = '') {
-    const DISCOVERY_CAP = FILE_LIMIT * 2; 
+    const DISCOVERY_CAP = FILE_LIMIT * 2;
 
     for await (const [name, h] of handle.entries()) {
       if (candidateCollector.length >= DISCOVERY_CAP && DISCOVERY_CAP > 0) {
-          break; 
+          break;
       }
 
       const entryPath = currentPath ? `${currentPath}/${name}` : name;
       let rejectedThisFileForCause = false;
-      let fileProcessedForCounting = false; 
+      let fileProcessedForCounting = false;
 
       try {
         if (h.kind === 'file') {
           const f = await h.getFile();
           if (f.size > MAX_TEXT_FILE_SIZE) { rejectionStats.tooLarge++; rejectedThisFileForCause = true; }
-          
-          if (!isTextLike(f)) { 
-            if(!rejectedThisFileForCause) rejectionStats.unsupportedType++; 
-            rejectedThisFileForCause = true; 
+
+          if (!isTextLike(f)) {
+            if(!rejectedThisFileForCause) rejectionStats.unsupportedType++;
+            rejectedThisFileForCause = true;
           }
-          
+
           if (!rejectedThisFileForCause) {
             const text = await f.text();
             if (text.length > MAX_CHAR_LEN) { rejectionStats.tooLong++; rejectedThisFileForCause = true; }
-            
-            if (!rejectedThisFileForCause) { 
+
+            if (!rejectedThisFileForCause) {
                 const ck = checksum32(text);
                 candidateCollector.push({ fullPath: entryPath, text, checksum: ck, insideProject: true, name: f.name });
             }
           }
           if (rejectedThisFileForCause && !fileProcessedForCounting) {
-            rejectionStats.count++; 
+            rejectionStats.count++;
             fileProcessedForCounting = true;
           }
 
@@ -344,7 +487,7 @@ export default function CodebaseImporter({
           await scanDirForCandidates(h, candidateCollector, rejectionStats, rootHandle, entryPath);
         }
       } catch (err) {
-        if (!fileProcessedForCounting) { 
+        if (!fileProcessedForCounting) {
             rejectionStats.count++;
             fileProcessedForCounting = true;
         }
@@ -363,45 +506,48 @@ export default function CodebaseImporter({
         toastFn?.('Directory picker is not supported in this browser.', 4000);
         return;
     }
-    setAdding(true); 
+    setAdding(true);
     try {
-      setEntryFilter({}); 
-      setTopEntries([]);  
-      setInitialScanResults([]); 
-      setStep('FILTER');  
+      setEntryFilter({});
+      setTopEntries([]);
+      setInitialScanResults([]);
+      setStep('FILTER');
       lastCheckedIndexRef.current = null;
 
       const dirHandle = await window.showDirectoryPicker();
-      
-      setProjectRoot(dirHandle); 
-      onProjectRootChange?.(dirHandle.name); 
-      await saveRoot(dirHandle); 
+
+      setProjectRoot(dirHandle);
+      onProjectRootChange?.(dirHandle.name); // Inform parent about the new root
+      await saveRoot(dirHandle);
 
       const tops = [];
       for await (const [name, h] of dirHandle.entries()) {
         tops.push({ name, kind: h.kind });
       }
-      setTopEntries(tops); // This will make the checkbox UI appear
+      setTopEntries(tops);
 
-      const allScannedCandidates = []; 
-      const folderRejectionStats = { 
-        count: 0, tooLarge: 0, tooLong: 0, unsupportedType: 0, 
-        permissionDenied: 0, readError: 0, limitReached: 0 
+      const allScannedCandidates = [];
+      const folderRejectionStats = {
+        count: 0, tooLarge: 0, tooLong: 0, unsupportedType: 0,
+        permissionDenied: 0, readError: 0, limitReached: 0
       };
       await scanDirForCandidates(dirHandle, allScannedCandidates, folderRejectionStats, dirHandle);
-      setInitialScanResults(allScannedCandidates); 
-      
-      const freshMap = {}; 
-      tops.forEach(e => { freshMap[e.name] = false; }); 
-      setEntryFilter(freshMap); 
+      setInitialScanResults(allScannedCandidates);
 
-      const existingNonProjectFiles = files.filter(f => !f.insideProject);
-      const filesPassingInitialFilter = allScannedCandidates.filter(f => isIncluded(f.fullPath, freshMap));
-      const filesToProcessForDisplay = filesPassingInitialFilter; 
-      
-      const mergedInitialFiles = mergeFiles(existingNonProjectFiles, filesToProcessForDisplay);
-      onFilesChange(mergedInitialFiles); 
-      
+      const freshMap = {};
+      tops.forEach(e => { freshMap[e.name] = false; });
+      setEntryFilter(freshMap);
+
+      // After adding a folder, we don't immediately push files to parent.
+      // The user needs to select entries and click "Pick these Files" (which sets step='FILES').
+      // Effect B will then handle merging and calling onFilesChange.
+      // However, we should clear any existing non-project files from the parent
+      // if the user is now focusing on a new project folder.
+      // Or, preserve them? Current merge logic in Effect B preserves nonProjectFiles.
+      // For now, let's ensure `files` prop (which contains nonProjectFiles) is considered by Effect B.
+      // No direct onFilesChange([]) here, let user interaction via filter drive it.
+      // If there were previous non-project files, they will be shown alongside the new filter UI.
+
       const rejectionMessage = formatRejectionMessage(folderRejectionStats);
       if (rejectionMessage) {
         const duration = (folderRejectionStats.permissionDenied > 0 || folderRejectionStats.readError > 0) ? 20000 : 15000;
@@ -411,9 +557,9 @@ export default function CodebaseImporter({
     } catch (err) {
       if (err.name !== 'AbortError') toastFn?.('Folder pick error: ' + err.message, 5000);
     } finally {
-      setAdding(false); 
+      setAdding(false);
     }
-  }, [files, onFilesChange, onProjectRootChange, toastFn]); 
+  }, [files, onFilesChange, onProjectRootChange, toastFn]); // `files` is needed if we decide to clear non-project files here.
 
   const handleCheckboxChange = useCallback((event, name, index) => {
     const { checked } = event.target;
@@ -423,7 +569,7 @@ export default function CodebaseImporter({
         const start = Math.min(lastCheckedIndexRef.current, index);
         const end = Math.max(lastCheckedIndexRef.current, index);
         for (let i = start; i <= end; i++) {
-            if (topEntries[i]) { 
+            if (topEntries[i]) {
                 newFilterState[topEntries[i].name] = checked;
             }
         }
@@ -433,62 +579,6 @@ export default function CodebaseImporter({
     setEntryFilter(newFilterState);
     lastCheckedIndexRef.current = index;
   }, [entryFilter, topEntries]);
-
-
-  useEffect(() => {
-    if (step !== 'FILES' || !projectRoot || (initialScanResults.length === 0 && topEntries.length === 0)) {
-        if (!projectRoot && initialScanResults.length > 0) {
-            setInitialScanResults([]);
-        }
-        return;
-    }
-    
-    const userFilteredProjectFiles = initialScanResults.filter(f => isIncluded(f.fullPath, entryFilter));
-    
-    const nonProjectFiles = files.filter(f => !f.insideProject);
-    
-    const combinedListBeforeFinalLimit = mergeFiles([], nonProjectFiles); 
-    
-    const remainingSlotsForProjectFiles = FILE_LIMIT - combinedListBeforeFinalLimit.length;
-    
-    let finalProjectFilesToMerge = userFilteredProjectFiles;
-    let countExcludedByFileLimit = 0;
-
-    if (remainingSlotsForProjectFiles < userFilteredProjectFiles.length) {
-        if (remainingSlotsForProjectFiles > 0) {
-            finalProjectFilesToMerge = userFilteredProjectFiles.slice(0, remainingSlotsForProjectFiles);
-            countExcludedByFileLimit = userFilteredProjectFiles.length - finalProjectFilesToMerge.length;
-        } else { 
-            finalProjectFilesToMerge = [];
-            countExcludedByFileLimit = userFilteredProjectFiles.length;
-        }
-    }
-    
-    const newCompleteFileList = mergeFiles(combinedListBeforeFinalLimit, finalProjectFilesToMerge);
-
-    const currentFilesString = files.map(f => `${f.fullPath}|${f.checksum}`).join(',');
-    const newFilesString = newCompleteFileList.map(f => `${f.fullPath}|${f.checksum}`).join(',');
-
-    if (newFilesString !== currentFilesString) {
-        onFilesChange(newCompleteFileList);
-        const numSelectedProjectFiles = finalProjectFilesToMerge.length;
-
-        if (numSelectedProjectFiles > 0) {
-            let message = `${numSelectedProjectFiles} project file${numSelectedProjectFiles > 1 ? 's' : ''} picked.`;
-            if (countExcludedByFileLimit > 0) {
-                message += ` ${countExcludedByFileLimit} more were available from selection but excluded by file limit.`;
-            }
-            toastFn?.(message, 4000);
-        } else if (Object.values(entryFilter).some(v => v === true) && numSelectedProjectFiles === 0 && initialScanResults.length > 0) {
-            toastFn?.('Selection resulted in 0 project files. Try selecting other items.', 4000);
-        } else if (files.length > newCompleteFileList.length && countExcludedByFileLimit === 0 && initialScanResults.length === (userFilteredProjectFiles.length)) {
-            const actualRemoved = files.length - newCompleteFileList.length;
-            if (actualRemoved > 0) {
-                 toastFn?.(`Removed ${actualRemoved} duplicate item${actualRemoved > 1 ? 's' : ''}.`, 3000);
-            }
-        }
-    }
-  }, [entryFilter, step, projectRoot, topEntries, files, onFilesChange, toastFn, initialScanResults]);
 
 
   const handleAddImages = useCallback(async () => {
@@ -516,7 +606,7 @@ export default function CodebaseImporter({
             toastFn?.('Image picker error: ' + pickerErr.message, 4000);
         }
         setAdding(false);
-        return; 
+        return;
     }
 
     const failedUploads = [];
@@ -526,7 +616,7 @@ export default function CodebaseImporter({
       let currentFileName = "Unnamed file";
       try {
         const file = await h.getFile();
-        currentFileName = file.name; 
+        currentFileName = file.name;
         const blob = await compressImageToWebP(file, 1024, 0.85);
 
         const path = `public/images/${crypto.randomUUID()}.webp`;
@@ -548,7 +638,7 @@ export default function CodebaseImporter({
     }
 
     if (failedUploads.length > 0) {
-        const errorLimit = 2; 
+        const errorLimit = 2;
         let summary = `${failedUploads.length} image${failedUploads.length > 1 ? 's' : ''} failed to upload: `;
         summary += failedUploads.slice(0, errorLimit).map(f => f.name).join(', ');
         if (failedUploads.length > errorLimit) {
@@ -592,7 +682,7 @@ export default function CodebaseImporter({
         onAddImage?.({ name, url: pub.publicUrl, revoke: null });
         toastFn?.('Image pasted & added.', 2000);
         imagePasted = true;
-        break; 
+        break;
       }
       if (!imagePasted) {
           toastFn?.('No image found in clipboard.', 3000);
@@ -631,9 +721,9 @@ export default function CodebaseImporter({
             toastFn?.('PDF picker error: ' + pickerErr.message, 4000);
         }
         setAdding(false);
-        return; 
+        return;
     }
-    
+
     const failedUploads = [];
     let successfulUploads = 0;
     let genAI;
@@ -658,13 +748,13 @@ export default function CodebaseImporter({
             displayName: file.name,
           }
         });
-        
+
         if (uploadedFile && uploadedFile.uri && uploadedFile.name) {
           onAddPDF?.({
-            name: file.name, 
-            fileId: uploadedFile.uri, 
+            name: file.name,
+            fileId: uploadedFile.uri,
             mimeType: uploadedFile.mimeType || 'application/pdf',
-            resourceName: uploadedFile.name 
+            resourceName: uploadedFile.name
           });
           successfulUploads++;
         } else {
@@ -695,7 +785,7 @@ export default function CodebaseImporter({
   return (
     <div className="file-pane-container">
       <h2>Codebase Importer</h2>
-      {projectRoot && ( 
+      {projectRoot && (
         <div style={{ marginBottom: 8, fontSize: '0.85rem', opacity: 0.8 }}>
           Root: <code>{projectRoot.name}</code>
         </div>
@@ -718,7 +808,6 @@ export default function CodebaseImporter({
       {step === 'FILTER' && topEntries.length > 0 && projectRoot && (
         <div>
           <h3>Select entries to include from '{projectRoot.name}'</h3>
-          {/* Show analysing animation only when 'adding' is true (folder scan in progress) */}
           {adding && (
             <div className="analysing-animation-container">
               <span className="analysing-text">Analysing project files</span>
@@ -737,30 +826,30 @@ export default function CodebaseImporter({
             borderRadius: '4px',
             marginBottom: '8px'
           }}>
-            {topEntries.map(({ name, kind }, index) => ( 
+            {topEntries.map(({ name, kind }, index) => (
               <label key={name} style={{ display: 'block', margin: '4px 8px', cursor: 'pointer' }}>
                 <input
                   type="checkbox"
-                  checked={entryFilter[name] === true} 
-                  onChange={e => handleCheckboxChange(e, name, index)} 
+                  checked={entryFilter[name] === true}
+                  onChange={e => handleCheckboxChange(e, name, index)}
                   style={{ marginRight: '8px' }}
-                  disabled={adding} 
+                  disabled={adding}
                 />
                 {kind === 'directory' ? '📁' : '📄'} <strong>{name}</strong>
               </label>
             ))}
           </div>
-          <button 
-            className="button button-accent button-glow" 
-            style={{ marginTop: 8 }} 
+          <button
+            className="button button-accent button-glow"
+            style={{ marginTop: 8 }}
             onClick={() => setStep('FILES')}
-            disabled={adding} 
+            disabled={adding}
           >
             { adding ? 'Analysing…' : 'Pick these Files' }
           </button>
         </div>
       )}
-      {(step === 'FILES' || (step === 'FILTER' && (!projectRoot || topEntries.length === 0))) && ( 
+      {(step === 'FILES' || (step === 'FILTER' && (!projectRoot || topEntries.length === 0))) && (
         <>
           {!!files.length && (
             <p style={{ marginBottom: '8px', fontSize: '0.9em' }}>
@@ -774,7 +863,7 @@ export default function CodebaseImporter({
                   {f.note
                     ? <span title={f.note}>{f.fullPath}</span>
                     : f.insideProject
-                      ? f.fullPath 
+                      ? f.fullPath
                       : <span title="This file is not part of the selected project root. Its path is its name.">📄 {f.fullPath}</span>
                   }
                   <button
@@ -796,7 +885,7 @@ export default function CodebaseImporter({
           {files.length === 0 && (step === 'FILES' || (step === 'FILTER' && (!projectRoot || topEntries.length === 0))) && (
             <p style={{ color: 'var(--text-secondary)' }}>No text files added yet. Use the buttons above or select items from a chosen folder.</p>
           )}
-           {files.length === 0 && step === 'FILES' && projectRoot && topEntries.length > 0 && ( 
+           {files.length === 0 && step === 'FILES' && projectRoot && topEntries.length > 0 && (
             <p style={{ color: 'var(--text-secondary)' }}>No top-level items selected from '{projectRoot.name}'. Check some boxes and click "Pick these Files".</p>
           )}
         </>
