@@ -1,4 +1,4 @@
-/*  src/CodebaseImporter.jsx  – With Fix for processAndStageSelectedFiles */
+/*  src/CodebaseImporter.jsx  – Fix for "+ Add Files" working independently */
 import {
   useState, useCallback, useEffect, useReducer, useRef
 } from 'preact/hooks';
@@ -95,7 +95,6 @@ async function scanDirectoryForMinimalMetadata(rootHandle) {
   return { tops, meta: preliminaryMeta, rejectionStats };
 }
 
-// REVISED: processAndStageSelectedFiles to correctly use handles
 async function processAndStageSelectedFiles(state) {
   const { root, meta: preliminaryMetaFromState, selected } = state;
   const out = [];
@@ -105,10 +104,8 @@ async function processAndStageSelectedFiles(state) {
   if (!root || !preliminaryMetaFromState || !selected) return { stagedFiles: out, rejectionStats };
   console.log('[processAndStage] Processing selected top-level items:', Array.from(selected));
 
-  // Queue stores { handle: FileSystemDirectoryHandle | FileSystemFileHandle, path: string (full relative path from root) }
   const processingQueue = [];
 
-  // Initialize queue with selected top-level items by getting their handles from root
   for (const topLevelName of selected) {
     const topLevelMetaItem = preliminaryMetaFromState.find(pm => pm.path === topLevelName);
     if (topLevelMetaItem) {
@@ -124,53 +121,40 @@ async function processAndStageSelectedFiles(state) {
       }
     }
   }
-
   console.log('[processAndStage] Initial processing queue size:', processingQueue.length);
 
   while (processingQueue.length > 0) {
-    if (out.length >= FILE_LIMIT) { // Check against `out.length` which is count of successfully staged files
+    if (out.length >= FILE_LIMIT) {
       rejectionStats.limitReached += processingQueue.length;
       console.log('[processAndStage] File limit for staging reached. Remaining queue:', processingQueue.length);
       break;
     }
-
     const { handle: currentHandle, path: currentItemPath, kind: currentItemKind } = processingQueue.shift();
-    
-    if (!currentHandle) {
-        console.warn(`[processAndStage] Null handle encountered for path: ${currentItemPath}`);
-        continue;
-    }
+    if (!currentHandle) { console.warn(`[processAndStage] Null handle encountered for path: ${currentItemPath}`); continue; }
 
     try {
       if (currentItemKind === 'file') {
-        filesProcessedCount++; // Count files we attempt to process
-        const file = await currentHandle.getFile(); // currentHandle is FileSystemFileHandle
-
-        if (file.size > MAX_TEXT_FILE_SIZE) { rejectionStats.tooLarge++; console.log(`Skipping large file: ${currentItemPath}`); continue; }
-        if (!isTextLike(file)) { rejectionStats.unsupportedType++; console.log(`Skipping non-text: ${currentItemPath}`); continue; }
-        
+        filesProcessedCount++;
+        const file = await currentHandle.getFile();
+        if (file.size > MAX_TEXT_FILE_SIZE) { rejectionStats.tooLarge++; continue; }
+        if (!isTextLike(file)) { rejectionStats.unsupportedType++; continue; }
         const text = await file.text();
-        if (text.length > MAX_CHAR_LEN) { rejectionStats.tooLong++; console.log(`Skipping long file: ${currentItemPath}`); continue; }
-        
+        if (text.length > MAX_CHAR_LEN) { rejectionStats.tooLong++; continue; }
         const fileName = currentItemPath.substring(currentItemPath.lastIndexOf('/') + 1);
         out.push(makeStagedFile(currentItemPath, file.size, file.type, text, true, fileName));
-
       } else if (currentItemKind === 'directory') {
-        // currentHandle is FileSystemDirectoryHandle
-        for await (const entry of currentHandle.values()) { // entry is FileSystemFileHandle or FileSystemDirectoryHandle
+        for await (const entry of currentHandle.values()) {
           const entryPath = `${currentItemPath}/${entry.name}`;
-          // Push the actual handle 'entry' for the next level
           processingQueue.push({ handle: entry, path: entryPath, kind: entry.kind });
         }
       }
     } catch (e) {
       console.error(`[processAndStage] Error processing item ${currentItemPath}:`, e.name, e.message);
       if (e.name === 'NotAllowedError' || e.name === 'SecurityError') rejectionStats.permissionDenied++;
-      else if (e.name === 'NotFoundError') rejectionStats.readError++; // File might have been moved/deleted
+      else if (e.name === 'NotFoundError') rejectionStats.readError++;
       else rejectionStats.readError++;
     }
   }
-  
   console.log('[processAndStage] Staging complete. Staged files created:', out.length, "Attempted to process:", filesProcessedCount);
   return {stagedFiles: out, rejectionStats};
 }
@@ -190,50 +174,51 @@ export default function CodebaseImporter({
   const performScan = useCallback(async (handleToScan, context) => {
     if (!handleToScan) {
         console.warn(`[performScan] Called without a valid handle. Context: ${context}`);
-        dispatch({ type: 'CLEAR_ALL' });
-        return;
+        dispatch({ type: 'CLEAR_ALL' }); return;
     }
     if (scanInProgressRef.current) {
-        console.log(`[performScan] Scan already in progress for ${handleToScan.name}. Skipping new scan for context: ${context}.`);
-        return;
+        console.log(`[performScan] Scan already in progress for ${handleToScan.name}. Skipping for context: ${context}.`); return;
     }
     scanInProgressRef.current = true;
     console.log(`[performScan] Starting scan for ${handleToScan.name} due to ${context}`);
     try {
         const { tops, meta, rejectionStats } = await scanDirectoryForMinimalMetadata(handleToScan);
-        // Check if still live and if the root for this scan is still the active root in state
-        if (impState.root?.name === handleToScan.name && impState.tag === 'SCANNING') {
+        if (impState.root?.name === handleToScan.name && impState.tag === 'SCANNING') { // Check if still relevant
             dispatch({ type: 'SCAN_DONE', tops, meta });
             const msg = formatRejectionMessage(rejectionStats, `folder scan on ${context}`);
             if (msg) toastFn?.(msg, 15000);
         } else {
-            console.log(`[performScan] Scan for ${handleToScan.name} completed, but state has changed or root is different. Discarding results. Current state: ${impState.tag}, Current root: ${impState.root?.name}`);
+            console.log(`[performScan] Scan for ${handleToScan.name} completed, but state/root changed. Discarding. State: ${impState.tag}, Root: ${impState.root?.name}`);
         }
     } catch (err) {
         console.error(`[performScan] Error during scan for ${handleToScan.name} (context: ${context}):`, err);
         if (impState.root?.name === handleToScan.name) {
-            dispatch({ type: 'CLEAR_ALL' });
-            onProjectRootChange?.(null);
-            clearIDBRoot().catch(console.warn);
+            dispatch({ type: 'CLEAR_ALL' }); onProjectRootChange?.(null); clearIDBRoot().catch(console.warn);
         }
         toastFn?.(`Error scanning directory (${context}): ` + err.message, 5000);
     } finally {
         scanInProgressRef.current = false;
     }
-  }, [toastFn, onProjectRootChange, impState.root, impState.tag]); // impState.root and impState.tag are crucial here
+  }, [toastFn, onProjectRootChange, impState.root, impState.tag]); // impState.root and .tag are critical
 
   useEffect(() => { // SyncEffect
     const currentEffectRootName = impState.root?.name;
     console.log('[SyncEffect] Running. ParentRootName:', currentProjectRootNameFromBuilder, 'ImporterState:', impState.tag, 'CurrentImporterRootName:', currentEffectRootName, 'InitialLoadAttempted:', initialLoadAttemptedRef.current, 'ScanInProgress:', scanInProgressRef.current);
 
-    // Scenario 1: Parent wants to clear the root
+    // Scenario 1: Parent indicates no project root is active
     if (currentProjectRootNameFromBuilder === null) {
-      if (impState.root || (impState.tag !== 'IDLE' && !impState.root)) {
-        console.log('[SyncEffect] SCENARIO 1: Parent cleared root or context. Resetting importer.');
-        if(impState.root) clearIDBRoot().catch(console.warn);
+      // FIX: Refined condition for clearing
+      if (impState.root) { // If there *was* an active project root, clear it.
+        console.log('[SyncEffect] SCENARIO 1A: Parent cleared project root. Resetting importer.');
+        clearIDBRoot().catch(console.warn);
+        dispatch({ type: 'CLEAR_ALL' });
+      } else if (!impState.root && (impState.tag === 'FILTER' || impState.tag === 'SCANNING' || impState.tag === 'STAGING')) {
+        // No project root, but state implies one was expected (e.g., mid-scan/filter for a now-gone root)
+        console.log('[SyncEffect] SCENARIO 1B: Parent wants no root, and importer is in a root-dependent intermediate state. Resetting.');
         dispatch({ type: 'CLEAR_ALL' });
       } else {
-        console.log('[SyncEffect] SCENARIO 1: ParentRoot is null, importer already IDLE or no root to clear.');
+        // Parent wants no root, and importer is IDLE or STAGED (with individual files, no root). This is fine.
+        console.log('[SyncEffect] SCENARIO 1C: ParentRoot is null, and importer is IDLE or STAGED without a root. No change needed.');
       }
       initialLoadAttemptedRef.current = true;
       return;
@@ -251,18 +236,17 @@ export default function CodebaseImporter({
       // Condition 2B: Importer needs to establish or re-establish this root, or is already scanning it.
       if (impState.tag === 'SCANNING' && currentEffectRootName === currentProjectRootNameFromBuilder) {
           console.log('[SyncEffect] SCENARIO 2B: State is SCANNING for the target root. Triggering performScan if not already in progress.');
-          if (impState.root) performScan(impState.root, "SyncEffect - state was SCANNING"); // performScan has its own guard
+          if (impState.root) performScan(impState.root, "SyncEffect - state was SCANNING");
           return;
       }
       
-      // Condition 2C: Root name from parent is different, or state is IDLE. Load and dispatch PICK_ROOT.
       if (currentEffectRootName !== currentProjectRootNameFromBuilder || impState.tag === 'IDLE') {
         console.log('[SyncEffect] SCENARIO 2C: Parent wants root:', currentProjectRootNameFromBuilder, '. Current importer root:', currentEffectRootName, 'State:', impState.tag, '. Attempting to load/set.');
         initialLoadAttemptedRef.current = true;
         loadRoot().then(handleFromIDB => {
           if (handleFromIDB?.name === currentProjectRootNameFromBuilder) {
             console.log('[SyncEffect] SCENARIO 2C: Loaded matching root from IDB:', handleFromIDB.name);
-            dispatch({ type: 'PICK_ROOT', handle: handleFromIDB }); // This sets to SCANNING, SyncEffect will re-run and hit 2B's scan logic
+            dispatch({ type: 'PICK_ROOT', handle: handleFromIDB }); // SyncEffect will re-run, hit 2B, then call performScan
           } else {
             console.log('[SyncEffect] SCENARIO 2C: No matching root in IDB for', currentProjectRootNameFromBuilder, '. Importer to IDLE.');
             if (handleFromIDB) clearIDBRoot().catch(console.warn);
@@ -297,7 +281,6 @@ export default function CodebaseImporter({
     }
   }, [impState.tag, impState.tops]);
 
-  // FIX: Simplified pickFolder.
   const pickFolder = useCallback(async () => {
     if (!window.showDirectoryPicker) { toastFn?.('Directory picker not supported.', 4000); return; }
     setAdding(true);
@@ -307,26 +290,26 @@ export default function CodebaseImporter({
       await saveRoot(dirHandle);
       
       if (impState.root?.name === dirHandle.name && (impState.tag === 'FILTER' || impState.tag === 'STAGED')) {
-        // User re-picked the exact same folder that's already active (but not scanning).
-        // Dispatch RESCAN_ROOT to signal intent to re-process this root.
-        console.log('[pickFolder] Re-picking same folder. Dispatching RESCAN_ROOT.');
-        dispatch({ type: 'RESCAN_ROOT' }); // Reducer sets to SCANNING, SyncEffect will call performScan.
+        console.log('[pickFolder] Re-picking same folder name. Dispatching RESCAN_ROOT.');
+        dispatch({ type: 'RESCAN_ROOT' }); // SyncEffect will see SCANNING state and call performScan
       } else {
-        // New folder, or different folder, or importer is IDLE/SCANNING.
-        // Let onProjectRootChange trigger the SyncEffect to handle it.
-        onProjectRootChange?.(dirHandle.name);
+        onProjectRootChange?.(dirHandle.name); // For new/different folder, let SyncEffect handle PICK_ROOT and scan
       }
     } catch (e) {
       if (e.name !== 'AbortError') toastFn?.('Folder pick error: ' + e.message, 4000);
-      // If picking fails, don't change current root unless parent explicitly clears it.
-      // If there was no root, ensure we are IDLE.
-      if (!impState.root && impState.tag !== 'IDLE') dispatch({type: 'CLEAR_ALL'});
+      if (impState.root?.name && (!currentProjectRootNameFromBuilder || currentProjectRootNameFromBuilder === impState.root.name)) {
+          // If picking failed but we had a root that parent still knows about (or doesn't know about yet)
+          // tell parent there's no root now due to failure.
+          onProjectRootChange?.(null);
+      } else if (impState.tag !== 'IDLE') {
+          dispatch({type: 'CLEAR_ALL'});
+      }
     } finally {
       setAdding(false);
     }
   }, [toastFn, onProjectRootChange, impState.root, impState.tag]);
 
-  const handleCheckboxChange = useCallback((event, path) => {
+  const handleCheckboxChange = useCallback((event, path) => { /* ... (no change from previous) ... */
     if (impState.tag !== 'FILTER') return;
     const currentIndex = impState.tops.findIndex(t => t.name === path);
     const desiredState = event.target.checked;
@@ -347,7 +330,7 @@ export default function CodebaseImporter({
     }
   }, [impState.tag, impState.tops]);
 
-  const beginStagingAndReadTexts = useCallback(async () => {
+  const beginStagingAndReadTexts = useCallback(async () => { /* ... (no change from previous) ... */
     if (impState.tag !== 'FILTER') return;
     dispatch({ type: 'BEGIN_STAGING' });
     setAdding(true);
@@ -356,6 +339,7 @@ export default function CodebaseImporter({
       dispatch({ type: 'STAGING_DONE', files: stagedFiles });
       const msg = formatRejectionMessage(rejectionStats, "file staging");
       if (msg) toastFn?.(msg, 15000);
+
     } catch (e) {
       toastFn?.('Error reading file contents: ' + e.message, 5000);
       dispatch({ type: 'CLEAR_ALL' });
@@ -364,14 +348,14 @@ export default function CodebaseImporter({
     }
   }, [impState, toastFn]);
 
-  const clearAllStatesAndNotifyParent = useCallback(() => {
+  const clearAllStatesAndNotifyParent = useCallback(() => { /* ... (no change from previous) ... */
     if (!confirm('Remove all selected files and clear project root?')) return;
     if(impState.root) clearIDBRoot().catch(err => console.error("Error clearing root from IDB:", err));
     dispatch({ type: 'CLEAR_ALL' });
     onProjectRootChange?.(null);
   }, [onProjectRootChange, impState.root]);
 
-  const pickTextFilesAndDispatch = useCallback(async () => {
+  const pickTextFilesAndDispatch = useCallback(async () => { /* ... (no change from previous) ... */
     if (!window.showOpenFilePicker) { toastFn?.('File picker not supported.', 4000); return; }
     setAdding(true);
     const rejectionStats = { tooLarge: 0, tooLong: 0, unsupportedType: 0, limitReached: 0, readError: 0 };
