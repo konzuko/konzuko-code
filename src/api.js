@@ -17,6 +17,33 @@ export const CHATS_PAGE_LIMIT = 20;
 
 const isoNow = () => new Date().toISOString()
 
+// Define your hardcoded system prompt here
+const HARDCODED_GEMINI_SYSTEM_PROMPT = `You're an ai with vast knowledge of all things.
+You're here to help the user in every way.
+You prefer concision. Avoid redundancy.
+
+When providing responses for coding, ensure their length is only as long as it needs to be to convey the important information.
+Responses should be as follows:
+1. In simple terms, the issue.
+2. In simple and technical terms, why it's happening
+3. In simple and technical terms, the fix
+
+Your primary role is coding but you can do everything.
+
+When writing a program, reflect on its quality, simplicity, correctness, and ease of modification, and MOST IMPORTANTLY,
+how all the code interacts and interfaces with each other - because code is intertwined and influences its surrounding code 
+- this is the rubrick that will help you know if you've done a good job of coding for the user or not.
+
+Always doublecheck to ensure you've put in the correct respective imports/exports
+
+
+## IMPORTANT: Skip sycophantic flattery; avoid hollow praise and empty validation. Probe all user assumptions, surface bias, present counter‑evidence, challenge emotional framing, and disagree openly when warranted; agreement must be earned through reason.
+
+## You shouldn't ever remove or change the functionality of a user's code without them asking for it - 
+ALWAYS doublecheck to ensure you havent done this, especially when doing refactors and upgrades,
+ALWAYS ALERT THE USER when radical changes will be done that will overwrite and/or contradict functionality and decisions 
+they've already made.`;
+
 function validateKey(raw = '') {
   const key = raw ? raw.trim() : '';
   if (!/^[A-Za-z0-9_\-]{30,60}$/.test(key)) {
@@ -69,7 +96,7 @@ export async function getCurrentUser({ forceRefresh = false } = {}) {
 
 export async function callApiForText({
   messages = [],
-  apiKey   = '', 
+  apiKey   = '',
   signal
 } = {}) {
   const callTimestamp = new Date().toISOString();
@@ -77,17 +104,17 @@ export async function callApiForText({
 
   let validatedKey;
   try {
-    validatedKey = validateKey(apiKey); 
+    validatedKey = validateKey(apiKey);
   } catch (err) {
     console.error(`[API - callApiForText @ ${callTimestamp}] API Key validation failed:`, err.message);
-    throw err; 
+    throw err;
   }
 
   if (signal?.aborted) {
     const abortError = new Error('Request aborted by caller before API call');
     abortError.name = 'AbortError';
     console.warn(`[API - callApiForText @ ${callTimestamp}] Request aborted by caller (pre-call).`);
-    throw abortError; 
+    throw abortError;
   }
 
   let ai;
@@ -95,10 +122,10 @@ export async function callApiForText({
     ai = new GoogleGenAI({ apiKey: validatedKey });
   } catch (err) {
     console.error(`[API - callApiForText @ ${callTimestamp}] @google/genai SDK initialisation failed:`, err.message, err);
-    throw new Error('@google/genai SDK initialisation failed: ' + err.message); 
+    throw new Error('@google/genai SDK initialisation failed: ' + err.message);
   }
 
-  let systemInstructionText = "";
+  let systemInstructionTextFromMessages = "";
   const historyContents = [];
   console.log(`[API - callApiForText @ ${callTimestamp}] Processing ${messages.length} input messages.`);
 
@@ -124,7 +151,7 @@ export async function callApiForText({
     if (parts.length > 0) {
       if (msg.role === 'system') {
         const systemTextPart = parts.find(p => p.text);
-        if (systemTextPart) systemInstructionText += (systemInstructionText ? "\n" : "") + systemTextPart.text;
+        if (systemTextPart) systemInstructionTextFromMessages += (systemInstructionTextFromMessages ? "\n" : "") + systemTextPart.text;
       } else {
         historyContents.push({
           role: msg.role === 'assistant' ? 'model' : msg.role,
@@ -134,9 +161,15 @@ export async function callApiForText({
     }
   }
 
-  if (historyContents.length === 0 && !systemInstructionText) {
+  // Combine hardcoded system prompt with any dynamic system prompt from messages
+  let finalSystemInstruction = HARDCODED_GEMINI_SYSTEM_PROMPT;
+  if (systemInstructionTextFromMessages.trim()) {
+    finalSystemInstruction += "\n\n" + systemInstructionTextFromMessages.trim();
+  }
+
+  if (historyContents.length === 0 && !finalSystemInstruction) { // Check against finalSystemInstruction
     console.error(`[API - callApiForText @ ${callTimestamp}] No content (history or system instruction) to send to the model.`);
-    throw new Error("No content to send to the model."); 
+    throw new Error("No content to send to the model.");
   }
 
   const requestPayload = {
@@ -151,22 +184,22 @@ export async function callApiForText({
         { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "OFF" },
         { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "OFF" },
       ],
-      ...(systemInstructionText && { systemInstruction: systemInstructionText }),
+      ...(finalSystemInstruction && { systemInstruction: finalSystemInstruction }), // Use the combined system instruction
     },
   };
 
   if (requestPayload.contents.length === 0 && !requestPayload.config.systemInstruction) {
       console.error(`[API - callApiForText @ ${callTimestamp}] Final check: No contents or system instruction to send to API.`);
-      throw new Error("No contents or system instruction to send to API."); 
+      throw new Error("No contents or system instruction to send to API.");
   }
 
-  console.log(`[API - callApiForText @ ${callTimestamp}] Sending request to Gemini. Model: ${requestPayload.model}, History items: ${historyContents.length}, System instruction present: ${!!systemInstructionText}`);
+  console.log(`[API - callApiForText @ ${callTimestamp}] Sending request to Gemini. Model: ${requestPayload.model}, History items: ${historyContents.length}, System instruction present: ${!!finalSystemInstruction}`);
   // For very detailed debugging, you might log the full payload, but be mindful of size and PII:
   // console.log(`[API - callApiForText @ ${callTimestamp}] Request Payload:`, JSON.stringify(requestPayload, null, 2));
 
 
   let timeoutId;
-  const controller = new AbortController(); 
+  const controller = new AbortController();
   if(signal) {
     signal.addEventListener('abort', () => {
         console.warn(`[API - callApiForText @ ${callTimestamp}] External signal aborted. Aborting Gemini request.`);
@@ -179,7 +212,7 @@ export async function callApiForText({
     const timeoutPromise = new Promise((_, rej) => {
       timeoutId = setTimeout(() => {
         console.warn(`[API - callApiForText @ ${callTimestamp}] Request timed out after ${GEMINI_API_TIMEOUT_MS}ms. Aborting Gemini request.`);
-        controller.abort(); 
+        controller.abort();
         rej(new Error(`Request timed out after ${GEMINI_API_TIMEOUT_MS / 1000}s`));
       }, GEMINI_API_TIMEOUT_MS);
     });
@@ -221,31 +254,31 @@ export async function callApiForText({
     } else if (response && typeof response.text === 'string') { // Fallback for simpler response structures if any
         textContent = response.text;
     }
-    
+
     if (textContent) {
       console.log(`[API - callApiForText @ ${callTimestamp}] Extracted text content successfully. Length: ${textContent.length}`);
-      return { content: textContent }; 
+      return { content: textContent };
     } else {
       const finishReason = response?.candidates?.[0]?.finishReason;
       const errMessage = `No text content generated by the model. Finish reason: ${finishReason || 'N/A'}. Full response logged above.`;
       console.warn(`[API - callApiForText @ ${callTimestamp}] ${errMessage}`);
-      throw new Error(errMessage); 
+      throw new Error(errMessage);
     }
 
   } catch (err) {
     clearTimeout(timeoutId); // Ensure timeout is cleared on any error
     console.error(`[API - callApiForText @ ${callTimestamp}] Error during Gemini call or processing:`, err.message, err.name, err.stack, err);
-    
+
     if (err.name === 'AbortError' && signal?.aborted) {
         console.warn(`[API - callApiForText @ ${callTimestamp}] Confirmed AbortError due to external signal.`);
         throw err; // Re-throw the original abort error
     }
     if (err.name === 'AbortError' && !signal?.aborted) { // This means timeoutPromise likely won
         console.warn(`[API - callApiForText @ ${callTimestamp}] Confirmed AbortError due to timeout.`);
-        throw new Error(`Request timed out after ${GEMINI_API_TIMEOUT_MS / 1000}s`); 
+        throw new Error(`Request timed out after ${GEMINI_API_TIMEOUT_MS / 1000}s`);
     }
     // For other errors, re-throw them.
-    throw err; 
+    throw err;
   }
 }
 
@@ -281,25 +314,25 @@ export async function createChat({ title = 'New Chat', model = GEMINI_MODEL_NAME
 }
 
 export async function updateChatTitle(id, newTitle) {
-  const user = await getCurrentUser(); 
+  const user = await getCurrentUser();
   const { data, error } = await supabase
     .from('chats')
     .update({ title: newTitle })
     .eq('id', id)
     .eq('user_id', user.id)
-    .select() 
-    .single(); 
+    .select()
+    .single();
   if (error) throw error;
-  return data; 
+  return data;
 }
 
 export async function deleteChat(id) {
-  const user = await getCurrentUser(); 
+  const user = await getCurrentUser();
   const { error } = await supabase
     .from('chats')
     .update({ deleted_at: isoNow() })
     .eq('id', id)
-    .eq('user_id', user.id); 
+    .eq('user_id', user.id);
   if (error) throw error;
   return { success: true, id };
 }
@@ -363,10 +396,10 @@ export async function archiveMessagesAfter(chat_id, anchorCreatedAt) {
 export async function deleteMessage(id) {
   const { error } = await supabase
     .from('messages')
-    .update({ deleted_at: isoNow() }) 
+    .update({ deleted_at: isoNow() })
     .eq('id', id);
   if (error) throw error;
-  return { success: true, id }; 
+  return { success: true, id };
 }
 
 export async function undoDeleteMessage(id) {
@@ -379,4 +412,3 @@ export async function undoDeleteMessage(id) {
   if (error) throw error;
   return data;
 }
-
