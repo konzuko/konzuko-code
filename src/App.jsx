@@ -39,12 +39,10 @@ const debounce = (func, delay) => {
 export default function App() {
   const [settings, setSettings] = useSettings();
   const previousChatIdRef = useRef(null);
-  // const inFlightSendSnapshotMarkerRef = useRef(null); // Not clearly used, can be removed if confirmed
   const [isSwitchingChat, setIsSwitchingChat] = useState(false);
   const [hasLastSendFailed, setHasLastSendFailed] = useState(false);
   const [isAppGloballySending, setIsAppGloballySending] = useState(false);
 
-  // PR-5: State for files from CodebaseImporter, to be passed to PromptBuilder
   const [stagedCodeFiles, setStagedCodeFiles] = useState([]);
 
   const {
@@ -75,8 +73,6 @@ export default function App() {
     isResendingMessage,
   } = useMessageManager(currentChatId, settings.apiKey, setIsAppGloballySending, setHasLastSendFailed);
 
-  // PR-5: usePromptBuilder no longer manages 'pendingFiles' state for code files.
-  // It will receive 'stagedCodeFiles' via PromptBuilder props.
   const {
     form,
     setForm,
@@ -87,13 +83,11 @@ export default function App() {
     removePendingImage,
     pendingPDFs,
     addPendingPDF,
-    // pendingFiles, // Removed
-    // setPendingFiles, // Removed
     currentProjectRootName,
-    handleProjectRootChange, // This will be passed to CodebaseImporter to signal root changes
-    userPromptText, // This will now be built using stagedCodeFiles
+    handleProjectRootChange,
+    userPromptText,
     resetPrompt,
-  } = usePromptBuilder(stagedCodeFiles); // Pass stagedCodeFiles here
+  } = usePromptBuilder(stagedCodeFiles);
 
   const {
     scrollContainerRef,
@@ -105,7 +99,7 @@ export default function App() {
   const handleSelectChat = useCallback(
     (newChatId) => {
       if (newChatId === currentChatId && !isSwitchingChat) return;
-      if (isSwitchingChat && newChatId === currentChatId) return; // Already switching to this
+      if (isSwitchingChat && newChatId === currentChatId) return;
       if (isAppGloballySending) {
         Toast("An operation is in progress. Please wait.", 3000);
         return;
@@ -121,7 +115,6 @@ export default function App() {
   const tokenCountVersionRef = useRef(0);
   const debouncedApiCallRef = useRef(null);
 
-  // PR-5: userPromptText from usePromptBuilder already incorporates stagedCodeFiles
   const itemsForApiCount = useTokenizableContent(
     messages,
     userPromptText,
@@ -140,7 +133,7 @@ export default function App() {
         return;
       }
       if (tokenCountVersionRef.current === currentVersion) setIsCountingApiTokens(true);
-      else return; // A newer call is already in progress or scheduled
+      else return;
 
       countTokensWithGemini(apiKey, model, currentItemsForApi)
         .then(count => {
@@ -148,13 +141,13 @@ export default function App() {
         })
         .catch(error => {
           console.warn("Total token counting error:", error);
-          if (tokenCountVersionRef.current === currentVersion) setTotalApiTokenCount(0); // Reset on error
+          if (tokenCountVersionRef.current === currentVersion) setTotalApiTokenCount(0);
         })
         .finally(() => {
           if (tokenCountVersionRef.current === currentVersion) setIsCountingApiTokens(false);
         });
     },
-    [] // No dependencies, it's a stable function
+    []
   );
 
   useEffect(() => {
@@ -168,12 +161,9 @@ export default function App() {
 
   const currentTotalPromptTokens = useMemo(() => {
     let estimatedImageTokens = 0;
-    // Estimate tokens for images not yet part of `messages` (i.e., pending in PromptBuilder)
-    // Only if not currently sending, as they'd be included in `messages` optimistically then.
     if (!isAppGloballySending) {
       estimatedImageTokens += pendingImages.length * IMAGE_TOKEN_ESTIMATE;
     }
-    // Estimate tokens for images already in messages
     (messages || []).forEach(msg => {
       const contentBlocks = Array.isArray(msg.content)
         ? msg.content
@@ -202,7 +192,7 @@ export default function App() {
   );
 
   const navRailDisabled = useMemo(
-    () => isLoadingSession || isSwitchingChat, // Nav rail is independent of message sending
+    () => isLoadingSession || isSwitchingChat,
     [isLoadingSession, isSwitchingChat]
   );
 
@@ -216,36 +206,24 @@ export default function App() {
       if (isSendingMessage) return { text: 'Sending…', disabled: true };
       if (isSavingEdit) return { text: 'Saving…', disabled: true };
       if (isResendingMessage) return { text: 'Resending…', disabled: true };
-      return { text: 'Processing…', disabled: true }; // Generic processing
+      return { text: 'Processing…', disabled: true };
     }
-
-    if (!settings.apiKey) return { text: 'Set API Key', disabled: false }; // Not disabled, allows opening settings
-    if (!currentChatId) return { text: 'Select Chat', disabled: false }; // Not disabled, allows selecting chat
+    if (!settings.apiKey) return { text: 'Set API Key', disabled: false };
+    if (!currentChatId) return { text: 'Select Chat', disabled: false };
     if (isHardTokenLimitReached) return { text: 'Token Limit Exceeded', disabled: true };
-
     return { text: 'Send', disabled: false };
   }, [
-    isAppGloballySending,
-    isSendingMessage,
-    isSavingEdit,
-    isResendingMessage,
-    settings.apiKey,
-    currentChatId,
-    isHardTokenLimitReached,
+    isAppGloballySending, isSendingMessage, isSavingEdit, isResendingMessage,
+    settings.apiKey, currentChatId, isHardTokenLimitReached,
   ]);
 
-  // The actual disabled state for the send button considers global busy states too
   const finalSendButtonDisabled = sendButtonDisplayInfo.disabled || globalBusy;
 
-
   useEffect(() => {
-    // Auto-scroll to bottom logic
     if (messages.length > 0 && currentChatId && !isSwitchingChat) {
         const lastMessage = messages[messages.length - 1];
-        // Scroll if last message is assistant's or if it's user's and not being edited
         if (lastMessage.role === 'assistant' || (lastMessage.role === 'user' && !editingId)) {
             const box = scrollContainerRef.current;
-            // Only auto-scroll if user is already near the bottom
             if (box && (box.scrollHeight - box.scrollTop - box.clientHeight < 100)) {
                 scrollToBottom('smooth');
             }
@@ -254,22 +232,18 @@ export default function App() {
   }, [messages, editingId, scrollToBottom, scrollContainerRef, currentChatId, isSwitchingChat]);
 
   useEffect(() => {
-    // Chat switch cleanup logic
     let cleanupRaf, scrollRaf, transitionEndRaf;
-
     if (currentChatId !== previousChatIdRef.current) {
       setHasLastSendFailed(false);
-      // inFlightSendSnapshotMarkerRef.current = null; // If re-enabled, manage here
       cleanupRaf = requestAnimationFrame(() => {
         if (editingId) cancelEdit();
-        // Reset prompt builder state on chat switch, except for images/PDFs which are global for now
-        // resetPrompt(); // This might be too aggressive if user wants to carry over prompt text
+        resetPrompt(); // This calls handleProjectRootChange(null), leading to CodebaseImporter clearing and calling onFilesChange([])
+        // FIX: Removed redundant setStagedCodeFiles([]) here.
       });
       if (currentChatId) {
         scrollRaf = requestAnimationFrame(() => scrollToBottom('auto'));
       }
       if (isSwitchingChat) {
-        // Ensure isSwitchingChat is reset after animations/transitions could complete
         transitionEndRaf = requestAnimationFrame(() => setIsSwitchingChat(false));
       }
       previousChatIdRef.current = currentChatId;
@@ -283,19 +257,9 @@ export default function App() {
 
 
   function handleSend() {
-    if (isAppGloballySending) {
-        Toast("An operation is already in progress. Please wait.", 3000);
-        return;
-    }
-    if (isHardTokenLimitReached) {
-        Toast(`Prompt too large (max ${MAX_ABSOLUTE_TOKEN_LIMIT.toLocaleString()} tokens). Please reduce content.`, 8000);
-        return;
-    }
-
-    if (!currentChatId) {
-      Toast('Please select or create a chat first.', 3000);
-      return;
-    }
+    if (isAppGloballySending) { Toast("An operation is already in progress.", 3000); return; }
+    if (isHardTokenLimitReached) { Toast(`Prompt too large (max ${MAX_ABSOLUTE_TOKEN_LIMIT.toLocaleString()} tokens).`, 8000); return; }
+    if (!currentChatId) { Toast('Please select or create a chat first.', 3000); return; }
     if (!settings.apiKey || String(settings.apiKey).trim() === '') {
       Toast('Gemini API Key missing. Please set it in settings.', 5000);
       setSettings((s) => ({ ...s, showSettings: true }));
@@ -303,101 +267,35 @@ export default function App() {
     }
 
     const userMessageContentBlocks = [];
-    // PDFs and Images are handled by usePromptBuilder's pendingPDFs/pendingImages
     pendingPDFs.forEach((p) =>
       userMessageContentBlocks.push({
         type: 'file',
-        file: {
-          file_id: p.fileId,
-          original_name: p.name,
-          mime_type: p.mimeType,
-        },
+        file: { file_id: p.fileId, original_name: p.name, mime_type: p.mimeType, },
       })
     );
     pendingImages.forEach((img) =>
       userMessageContentBlocks.push({
         type: 'image_url',
-        image_url: {
-          url: img.url,
-          detail: 'high', // Or 'auto' or 'low'
-          original_name: img.name,
-        },
+        image_url: { url: img.url, detail: 'high', original_name: img.name, },
       })
     );
-
-    // userPromptText already includes content from stagedCodeFiles (via usePromptBuilder)
     if (userPromptText?.trim()) {
       userMessageContentBlocks.push({ type: 'text', text: userPromptText });
     }
+    if (userMessageContentBlocks.length === 0) { Toast('Cannot send an empty message.', 3000); return; }
 
-    if (userMessageContentBlocks.length === 0) {
-      Toast('Cannot send an empty message.', 3000);
-      return;
-    }
-
-    const onSendSuccess = () => {
-      // inFlightSendSnapshotMarkerRef.current = null; // If re-enabled
-    };
-
-    sendMessage({
-      userMessageContentBlocks,
-      existingMessages: messages, // Pass current messages for context
-      onSendSuccess: onSendSuccess,
-    });
-
-    resetPrompt(); // Clears form, pendingImages, pendingPDFs. CodebaseImporter state is separate.
+    sendMessage({ userMessageContentBlocks, existingMessages: messages });
+    resetPrompt(); // This will also lead to stagedCodeFiles being cleared via CodebaseImporter's onFilesChange.
+    // FIX: Removed redundant setStagedCodeFiles([]) here.
   }
 
-  const handleCopyAll = () => {
-    const txt = messages
-      .map((m) => {
-        const blocks = Array.isArray(m.content)
-          ? m.content
-          : [{ type: 'text', text: String(m.content ?? '') }];
-        return blocks
-          .filter((b) => b.type === 'text')
-          .map((b) => b.text)
-          .join('\n');
-      })
-      .join('\n\n');
-    navigator.clipboard
-      .writeText(txt)
-      .then(() => Toast('Copied all text!', 2000))
-      .catch(() => Toast('Copy failed.', 4000));
+  const handleCopyAll = () => { /* ... (no change) ... */
+    const txt = messages.map((m) => { const blocks = Array.isArray(m.content) ? m.content : [{ type: 'text', text: String(m.content ?? '') }]; return blocks.filter((b) => b.type === 'text').map((b) => b.text).join('\n'); }).join('\n\n');
+    navigator.clipboard.writeText(txt).then(() => Toast('Copied all text!', 2000)).catch(() => Toast('Copy failed.', 4000));
   };
-
-  const handleUpdateChatTitleTrigger = useCallback(
-    (id, title) => {
-      if (isAppGloballySending) {
-          Toast("Cannot update title while an operation is in progress.", 3000);
-          return;
-      }
-      if (!id) {
-        console.error('handleUpdateChatTitleTrigger called with undefined id');
-        Toast('Error: Could not update title.', 4000);
-        return;
-      }
-      updateChatTitle({ id, title });
-    },
-    [updateChatTitle, isAppGloballySending]
-  );
-
-  const handleNewChatTrigger = useCallback(() => {
-    if (isAppGloballySending) {
-        Toast("Cannot create new chat while an operation is in progress.", 3000);
-        return;
-    }
-    createChat(); // Default title/model handled by useChatSessionManager
-  }, [createChat, isAppGloballySending]);
-
-  const handleDeleteChatTrigger = useCallback((chatId) => {
-    if (isAppGloballySending) {
-        Toast("Cannot delete chat while an operation is in progress.", 3000);
-        return;
-    }
-    deleteChat(chatId);
-  }, [deleteChat, isAppGloballySending]);
-
+  const handleUpdateChatTitleTrigger = useCallback( /* ... (no change) ... */ (id, title) => { if (isAppGloballySending) { Toast("Cannot update title while an operation is in progress.", 3000); return; } if (!id) { console.error('handleUpdateChatTitleTrigger called with undefined id'); Toast('Error: Could not update title.', 4000); return; } updateChatTitle({ id, title }); }, [updateChatTitle, isAppGloballySending]);
+  const handleNewChatTrigger = useCallback( /* ... (no change) ... */ () => { if (isAppGloballySending) { Toast("Cannot create new chat while an operation is in progress.", 3000); return; } createChat(); }, [createChat, isAppGloballySending]);
+  const handleDeleteChatTrigger = useCallback( /* ... (no change) ... */ (chatId) => { if (isAppGloballySending) { Toast("Cannot delete chat while an operation is in progress.", 3000); return; } deleteChat(chatId); }, [deleteChat, isAppGloballySending]);
 
   return (
     <div className="app-container">
@@ -409,96 +307,26 @@ export default function App() {
         onUpdateChatTitleTrigger={handleUpdateChatTitleTrigger}
         appDisabled={chatListDisabled}
       />
-
       <div className="main-content">
         <div className="top-bar">
-          <button
-            className="button"
-            onClick={() =>
-              setSettings((s) => ({ ...s, showSettings: !s.showSettings }))
-            }
-            disabled={globalBusy} // Disable if any global operation is busy
-          >
+          <button className="button" onClick={() => setSettings((s) => ({ ...s, showSettings: !s.showSettings }))} disabled={globalBusy} >
             {settings.showSettings ? 'Close Settings' : 'Open Settings'}
           </button>
-
           <span style={{ margin: '0 1em', fontWeight: 'bold' }}>
-            Konzuko&nbsp;AI {isAppGloballySending &&
-              (isSendingMessage ? "(Sending...)" :
-               isSavingEdit ? "(Saving...)" :
-               isResendingMessage ? "(Resending...)" :
-               "(Processing...)") // Fallback for other global sending states
-            }
+            Konzuko&nbsp;AI {isAppGloballySending && (isSendingMessage ? "(Sending...)" : isSavingEdit ? "(Saving...)" : isResendingMessage ? "(Resending...)" : "(Processing...)") }
           </span>
-
-          <div
-            style={{
-              marginLeft: 'auto',
-              display: 'flex',
-              gap: '0.5em',
-              alignItems: 'center',
-            }}
-          >
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.5em', alignItems: 'center', }} >
             {isSoftMemoryLimitReached && (
-              <div
-                style={{
-                  color: isHardTokenLimitReached
-                    ? 'var(--error)'
-                    : 'var(--warning)',
-                  fontWeight: 'bold',
-                  padding: 'var(--space-xs) var(--space-sm)',
-                  border: `1px solid ${
-                    isHardTokenLimitReached ? 'var(--error)' : 'var(--warning)'
-                  }`,
-                  borderRadius: 'var(--radius)',
-                  marginRight: 'var(--space-sm)',
-                }}
-              >
-                {isHardTokenLimitReached
-                  ? 'MAX\u00A0TOKENS\u00A0REACHED'
-                  : 'MEMORY\u00A0AT\u00A0LIMIT'}
+              <div style={{ color: isHardTokenLimitReached ? 'var(--error)' : 'var(--warning)', fontWeight: 'bold', padding: 'var(--space-xs) var(--space-sm)', border: `1px solid ${ isHardTokenLimitReached ? 'var(--error)' : 'var(--warning)' }`, borderRadius: 'var(--radius)', marginRight: 'var(--space-sm)', }} >
+                {isHardTokenLimitReached ? 'MAX\u00A0TOKENS\u00A0REACHED' : 'MEMORY\u00A0AT\u00A0LIMIT'}
               </div>
             )}
-
-            <div
-              className="token-count-display"
-              style={
-                isHardTokenLimitReached
-                  ? {
-                      color: 'var(--error)',
-                      fontWeight: 'bold',
-                      border: '1px solid var(--error)',
-                    }
-                  : {}
-              }
-            >
-              Tokens:&nbsp;
-              {currentTotalPromptTokens.toLocaleString()} /{' '}
-              {USER_FACING_TOKEN_LIMIT.toLocaleString()}
-              {isHardTokenLimitReached && (
-                <span style={{ marginLeft: 4 }}>
-                  {' '}
-                  (Max&nbsp;
-                  {MAX_ABSOLUTE_TOKEN_LIMIT.toLocaleString()})
-                </span>
-              )}
-              {isCountingApiTokens && (
-                <span style={{ marginLeft: 5, fontStyle: 'italic' }}>
-                  (...)
-                </span>
-              )}
+            <div className="token-count-display" style={ isHardTokenLimitReached ? { color: 'var(--error)', fontWeight: 'bold', border: '1px solid var(--error)', } : {} } >
+              Tokens:&nbsp; {currentTotalPromptTokens.toLocaleString()} /{' '} {USER_FACING_TOKEN_LIMIT.toLocaleString()}
+              {isHardTokenLimitReached && ( <span style={{ marginLeft: 4 }}> {' '} (Max&nbsp; {MAX_ABSOLUTE_TOKEN_LIMIT.toLocaleString()}) </span> )}
+              {isCountingApiTokens && ( <span style={{ marginLeft: 5, fontStyle: 'italic' }}> (...) </span> )}
             </div>
-
-            <button
-              className="button"
-              onClick={handleCopyAll}
-              disabled={
-                !messages ||
-                messages.length === 0 ||
-                globalBusy || // Disable if any global operation is busy
-                isLoadingMessageOps // Also disable if message ops are specifically busy
-              }
-            >
+            <button className="button" onClick={handleCopyAll} disabled={ !messages || messages.length === 0 || globalBusy || isLoadingMessageOps } >
               Copy All Text
             </button>
           </div>
@@ -507,29 +335,12 @@ export default function App() {
         {settings.showSettings && (
           <div className="settings-panel">
             <div className="form-group">
-              <label htmlFor="apiKeyInputApp">
-                Gemini API Key (Google AI Studio):
-              </label>
-              <input
-                id="apiKeyInputApp"
-                className="form-input"
-                type="password"
-                value={settings.apiKey}
-                onInput={(e) =>
-                  setSettings((s) => ({ ...s, apiKey: e.target.value }))
-                }
-                placeholder="Enter your Gemini API Key"
-              />
+              <label htmlFor="apiKeyInputApp"> Gemini API Key (Google AI Studio): </label>
+              <input id="apiKeyInputApp" className="form-input" type="password" value={settings.apiKey} onInput={(e) => setSettings((s) => ({ ...s, apiKey: e.target.value })) } placeholder="Enter your Gemini API Key" />
             </div>
-
             <div className="form-group">
               <label htmlFor="modelInputApp">Model:</label>
-              <input
-                id="modelInputApp"
-                className="form-input"
-                value={GEMINI_MODEL_NAME} // Display the constant model name
-                readOnly // Make it read-only as it's fixed
-              />
+              <input id="modelInputApp" className="form-input" value={GEMINI_MODEL_NAME} readOnly />
             </div>
           </div>
         )}
@@ -537,72 +348,32 @@ export default function App() {
         <div className="content-container">
           <div className="chat-container" ref={scrollContainerRef}>
             <div className="chat-nav-rail">
-              <button
-                className="button icon-button"
-                onClick={scrollToPrev}
-                title="Scroll Up"
-                disabled={navRailDisabled} // Use specific disabled state for nav rail
-              >
-                ↑
-              </button>
-              <button
-                className="button icon-button"
-                onClick={scrollToNext}
-                title="Scroll Down"
-                disabled={navRailDisabled} // Use specific disabled state for nav rail
-              >
-                ↓
-              </button>
+              <button className="button icon-button" onClick={scrollToPrev} title="Scroll Up" disabled={navRailDisabled} > ↑ </button>
+              <button className="button icon-button" onClick={scrollToNext} title="Scroll Down" disabled={navRailDisabled} > ↓ </button>
             </div>
-
             {currentChatId ? (
               <ChatArea
-                key={currentChatId} // Ensure re-mount on chat switch for clean state
-                messages={messages}
-                isLoading={isLoadingMessages}
-                forceLoading={isSwitchingChat} // Show loading placeholder during chat switch
-                editingId={editingId}
-                editText={editText}
-                loadingSend={isAppGloballySending} // General sending state
-                savingEdit={isAppGloballySending && isSavingEdit} // Specific saving edit state
-                setEditText={setEditText}
-                handleSaveEdit={saveEdit}
-                handleCancelEdit={cancelEdit}
-                handleStartEdit={startEdit}
-                handleResendMessage={resendMessage}
-                handleDeleteMessage={deleteMessage}
-                actionsDisabled={chatAreaActionsDisabled} // Disable actions based on broader app state
+                key={currentChatId} messages={messages} isLoading={isLoadingMessages} forceLoading={isSwitchingChat}
+                editingId={editingId} editText={editText} loadingSend={isAppGloballySending} savingEdit={isAppGloballySending && isSavingEdit}
+                setEditText={setEditText} handleSaveEdit={saveEdit} handleCancelEdit={cancelEdit} handleStartEdit={startEdit}
+                handleResendMessage={resendMessage} handleDeleteMessage={deleteMessage} actionsDisabled={chatAreaActionsDisabled}
               />
-            ) : (
-              <div className="chat-empty-placeholder">
-                Select or create a chat to begin.
-              </div>
-            )}
+            ) : ( <div className="chat-empty-placeholder"> Select or create a chat to begin. </div> )}
           </div>
 
           <div className="prompt-builder-area">
             <PromptBuilder
-              mode={mode}
-              setMode={setMode}
-              form={form}
-              setForm={setForm}
-              sendDisabled={finalSendButtonDisabled} // Use the most comprehensive disabled state
-              sendButtonText={sendButtonDisplayInfo.text}
-              handleSend={handleSend}
-              showToast={Toast}
-              imagePreviews={pendingImages}
-              pdfPreviews={pendingPDFs}
-              onRemoveImage={removePendingImage}
-              onAddImage={addPendingImage} // For PR-4, these are passed through
-              onAddPDF={addPendingPDF}     // For PR-4
-              settings={settings}
-              hasLastSendFailed={hasLastSendFailed}
-              // PR-5: Pass stagedCodeFiles from App state, and onFilesChange to update it
+              mode={mode} setMode={setMode} form={form} setForm={setForm}
+              sendDisabled={finalSendButtonDisabled} sendButtonText={sendButtonDisplayInfo.text}
+              handleSend={handleSend} showToast={Toast}
+              imagePreviews={pendingImages} pdfPreviews={pendingPDFs}
+              onRemoveImage={removePendingImage} onAddImage={addPendingImage} onAddPDF={addPendingPDF}
+              settings={settings} hasLastSendFailed={hasLastSendFailed}
               importedCodeFiles={stagedCodeFiles}
-              onCodeFilesChange={setStagedCodeFiles} // This is what CodebaseImporter will call
-              onProjectRootChange={handleProjectRootChange} // Pass down for CodebaseImporter
-              promptBuilderRootName={currentProjectRootName} // Pass down for CodebaseImporter
-              currentChatId={currentChatId} // Pass for context if needed by PromptBuilder/Importer
+              onCodeFilesChange={setStagedCodeFiles}
+              onProjectRootChange={handleProjectRootChange}
+              promptBuilderRootName={currentProjectRootName}
+              currentChatId={currentChatId}
             />
           </div>
         </div>

@@ -1,46 +1,34 @@
 /* src/PromptBuilder.jsx
-   - Accepts currentChatId, sendDisabled, and sendButtonText props.
-   - Uses sendDisabled for button disable state.
-   - Uses sendButtonText for the button's dynamic text.
-   - PR-5: Receives `importedCodeFiles` instead of managing `pendingFiles`.
-   - PR-5: Receives `onCodeFilesChange` to update App's `stagedCodeFiles`.
+   STAGE 2: Receives `importedCodeFiles` and `onCodeFilesChange` from App.jsx.
+   `onCodeFilesChange` is passed to CodebaseImporter as `onFilesChange`.
 */
 import { useEffect, useRef, useMemo } from 'preact/hooks';
-import { del } from 'idb-keyval';
+// import { del } from 'idb-keyval'; // FIX: Removed obsolete del('devCtx')
 import CodebaseImporter from './CodebaseImporter.jsx';
 import { autoResizeTextarea } from './lib/domUtils.js';
 
-const MAX_PROMPT_TEXTAREA_HEIGHT = 250; // px
+const MAX_PROMPT_TEXTAREA_HEIGHT = 250;
 
 export default function PromptBuilder({
   mode,
   setMode,
-
   form,
   setForm,
-
   sendDisabled,
   sendButtonText,
   handleSend,
   showToast,
-
-  imagePreviews = [], // Still managed by usePromptBuilder, passed from App
-  pdfPreviews = [],   // Still managed by usePromptBuilder, passed from App
-  onRemoveImage,      // Still managed by usePromptBuilder, passed from App
-
-  onAddImage,         // Passed from App for CodebaseImporter
-  onAddPDF,           // Passed from App for CodebaseImporter
-
+  imagePreviews = [],
+  pdfPreviews = [],
+  onRemoveImage,
+  onAddImage,
+  onAddPDF,
   settings,
   hasLastSendFailed,
-
-  // PR-5: Props related to code files are now different
-  importedCodeFiles,      // Received from App.jsx (this is `stagedCodeFiles` from App)
-  onCodeFilesChange,    // This is `setStagedCodeFiles` from App.jsx, passed to CodebaseImporter as `onFilesChange`
-
-  onProjectRootChange,    // Passed from App for CodebaseImporter
-  promptBuilderRootName,  // Passed from App for CodebaseImporter (this is `currentProjectRootName` from App's usePromptBuilder)
-
+  importedCodeFiles,
+  onCodeFilesChange,
+  onProjectRootChange,
+  promptBuilderRootName,
   currentChatId,
 }) {
   const formRef = useRef(form);
@@ -68,10 +56,8 @@ export default function PromptBuilder({
     };
   }, []);
 
-  useEffect(() => {
-    // This was likely for an old context mechanism, can probably be removed if 'devCtx' is no longer used.
-    del('devCtx').catch(() => {});
-  }, []);
+  // FIX: Removed obsolete del('devCtx') useEffect
+  // useEffect(() => { del('devCtx').catch(() => {}); }, []);
 
   const fields = useMemo(
     () => [
@@ -117,7 +103,7 @@ export default function PromptBuilder({
       {mode === 'DEVELOP' &&
         fields.map(([label, key, rows]) => {
           if (key === 'developReturnFormat_custom') {
-            return (
+            return ( /* ... (Return Format JSX unchanged) ... */
               <div key={key} className="form-group">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
                   <label htmlFor={key} style={{ fontWeight: 'normal' }}>{label}</label>
@@ -158,7 +144,7 @@ export default function PromptBuilder({
               </div>
             );
           }
-          return (
+          return ( /* ... (Other fields JSX unchanged) ... */
             <div key={key} className="form-group">
               <label htmlFor={key}>{label}</label>
               <textarea
@@ -179,97 +165,39 @@ export default function PromptBuilder({
 
       {mode === 'DEVELOP' && (
         <CodebaseImporter
-          // PR-5: Pass `onCodeFilesChange` from App as `onFilesChange` to CodebaseImporter
-          // The `files` prop to CodebaseImporter is removed, as it now manages its internal state
-          // and only calls `onFilesChange` (which is `onCodeFilesChange` here) to update App.
           onFilesChange={onCodeFilesChange}
           toastFn={showToast}
-          onAddImage={onAddImage} // Passed through for PR-4
-          onAddPDF={onAddPDF}     // Passed through for PR-4
+          onAddImage={onAddImage}
+          onAddPDF={onAddPDF}
           settings={settings}
-          onProjectRootChange={onProjectRootChange} // Pass through from App
-          currentProjectRootNameFromBuilder={promptBuilderRootName} // Pass through from App
+          onProjectRootChange={onProjectRootChange}
+          currentProjectRootNameFromBuilder={promptBuilderRootName}
         />
       )}
 
-      {imagePreviews.length > 0 && (
+      {imagePreviews.length > 0 && ( /* ... (Image previews JSX unchanged) ... */
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, margin: '8px 0' }}>
           {imagePreviews.map((img, i) => (
             <div key={`${img.url}-${i}`} style={{ position: 'relative' }}>
-              <img
-                src={img.url}
-                alt={img.name}
-                style={{ width: 100, borderRadius: 4 }}
-              />
-              <div
-                onClick={() => onRemoveImage(i)}
-                title="Remove image"
-                style={{
-                  position: 'absolute',
-                  top: 2,
-                  right: 2,
-                  width: 20,
-                  height: 20,
-                  borderRadius: '50%',
-                  background: 'rgba(0,0,0,0.65)',
-                  color: '#fff',
-                  textAlign: 'center',
-                  lineHeight: '20px',
-                  cursor: 'pointer',
-                }}
-              >
-                ×
-              </div>
-              <div
-                style={{
-                  width: 100,
-                  marginTop: 2,
-                  fontSize: '0.7rem',
-                  overflow: 'hidden',
-                  whiteSpace: 'nowrap',
-                  textOverflow: 'ellipsis',
-                  textAlign: 'center',
-                  color: 'var(--text-secondary)',
-                }}
-              >
-                {img.name}
-              </div>
+              <img src={img.url} alt={img.name} style={{ width: 100, borderRadius: 4 }} />
+              <div onClick={() => onRemoveImage(i)} title="Remove image" style={{ position: 'absolute', top: 2, right: 2, width: 20, height: 20, borderRadius: '50%', background: 'rgba(0,0,0,0.65)', color: '#fff', textAlign: 'center', lineHeight: '20px', cursor: 'pointer', }} > × </div>
+              <div style={{ width: 100, marginTop: 2, fontSize: '0.7rem', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', textAlign: 'center', color: 'var(--text-secondary)', }} > {img.name} </div>
             </div>
           ))}
         </div>
       )}
 
-      {pdfPreviews.length > 0 && (
+      {pdfPreviews.length > 0 && ( /* ... (PDF previews JSX unchanged) ... */
         <div style={{ margin: '8px 0' }}>
           <strong>PDFs:</strong>
-          <ul
-            style={{
-              margin: '4px 0 0 16px',
-              paddingLeft: 0,
-              listStylePosition: 'inside',
-            }}
-          >
-            {pdfPreviews.map((p, i) => (
-              <li key={`${p.fileId}-${i}`}>{p.name}</li>
-            ))}
+          <ul style={{ margin: '4px 0 0 16px', paddingLeft: 0, listStylePosition: 'inside', }} >
+            {pdfPreviews.map((p, i) => ( <li key={`${p.fileId}-${i}`}>{p.name}</li> ))}
           </ul>
         </div>
       )}
 
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'flex-end',
-          alignItems: 'center',
-          marginTop: 'auto',
-          paddingTop: 12,
-        }}
-      >
-        <button
-          className={`button send-button ${hasLastSendFailed && !sendDisabled ? 'send-button--error' : ''}`}
-          disabled={sendDisabled}
-          onClick={guardedSend}
-        >
+      <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginTop: 'auto', paddingTop: 12, }} >
+        <button className={`button send-button ${hasLastSendFailed && !sendDisabled ? 'send-button--error' : ''}`} disabled={sendDisabled} onClick={guardedSend} >
           {sendButtonText}
         </button>
       </div>
