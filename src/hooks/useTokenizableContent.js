@@ -1,12 +1,12 @@
 import { useMemo } from 'preact/hooks';
-// asciiTree is not used here anymore, it's used by usePromptBuilder to create userPromptText
 
-// buildUserPromptInternal is removed.
+// buildUserPromptInternal was removed.
 // The hook now expects userPromptText (the main text part of the user's next message) as an argument.
+// asciiTree is used by usePromptBuilder to create userPromptText.
 
 export function useTokenizableContent(
     currentChatMessages,
-    userPromptText, // This is the pre-constructed text from usePromptBuilder
+    userPromptText, // This is the pre-constructed text from usePromptBuilder (includes code files)
     currentPendingPDFs,
     isSending // New parameter to indicate if a message is currently being sent
 ) {
@@ -37,7 +37,7 @@ export function useTokenizableContent(
         // 2. If NOT currently sending, add the content for the next message from the prompt builder state.
         //    If isSending is true, this content is assumed to be part of currentChatMessages due to optimistic update.
         if (!isSending) {
-            // Add the main user prompt text (which now includes form inputs, file contents, and file tree)
+            // Add the main user prompt text (which now includes form inputs, file contents from stagedCodeFiles, and file tree)
             if (userPromptText && String(userPromptText).trim() !== "") {
                 itemsForApiCount.push({ type: 'text', value: userPromptText });
             }
@@ -50,9 +50,10 @@ export function useTokenizableContent(
                 });
             }
         }
+        // Note: Pending images are not added here; their token cost is estimated separately in App.jsx.
+        // The `userPromptText` already contains the text representation of the code files.
 
         return itemsForApiCount;
 
     }, [currentChatMessages, userPromptText, currentPendingPDFs, isSending]);
 }
-

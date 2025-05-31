@@ -39,10 +39,13 @@ const debounce = (func, delay) => {
 export default function App() {
   const [settings, setSettings] = useSettings();
   const previousChatIdRef = useRef(null);
-  const inFlightSendSnapshotMarkerRef = useRef(null);
+  // const inFlightSendSnapshotMarkerRef = useRef(null); // Not clearly used, can be removed if confirmed
   const [isSwitchingChat, setIsSwitchingChat] = useState(false);
   const [hasLastSendFailed, setHasLastSendFailed] = useState(false);
   const [isAppGloballySending, setIsAppGloballySending] = useState(false);
+
+  // PR-5: State for files from CodebaseImporter, to be passed to PromptBuilder
+  const [stagedCodeFiles, setStagedCodeFiles] = useState([]);
 
   const {
     currentChatId,
@@ -72,6 +75,8 @@ export default function App() {
     isResendingMessage,
   } = useMessageManager(currentChatId, settings.apiKey, setIsAppGloballySending, setHasLastSendFailed);
 
+  // PR-5: usePromptBuilder no longer manages 'pendingFiles' state for code files.
+  // It will receive 'stagedCodeFiles' via PromptBuilder props.
   const {
     form,
     setForm,
@@ -82,13 +87,13 @@ export default function App() {
     removePendingImage,
     pendingPDFs,
     addPendingPDF,
-    pendingFiles,
-    setPendingFiles,
+    // pendingFiles, // Removed
+    // setPendingFiles, // Removed
     currentProjectRootName,
-    handleProjectRootChange,
-    userPromptText,
+    handleProjectRootChange, // This will be passed to CodebaseImporter to signal root changes
+    userPromptText, // This will now be built using stagedCodeFiles
     resetPrompt,
-  } = usePromptBuilder();
+  } = usePromptBuilder(stagedCodeFiles); // Pass stagedCodeFiles here
 
   const {
     scrollContainerRef,
@@ -100,7 +105,7 @@ export default function App() {
   const handleSelectChat = useCallback(
     (newChatId) => {
       if (newChatId === currentChatId && !isSwitchingChat) return;
-      if (isSwitchingChat && newChatId === currentChatId) return;
+      if (isSwitchingChat && newChatId === currentChatId) return; // Already switching to this
       if (isAppGloballySending) {
         Toast("An operation is in progress. Please wait.", 3000);
         return;
@@ -116,6 +121,7 @@ export default function App() {
   const tokenCountVersionRef = useRef(0);
   const debouncedApiCallRef = useRef(null);
 
+  // PR-5: userPromptText from usePromptBuilder already incorporates stagedCodeFiles
   const itemsForApiCount = useTokenizableContent(
     messages,
     userPromptText,
@@ -134,7 +140,7 @@ export default function App() {
         return;
       }
       if (tokenCountVersionRef.current === currentVersion) setIsCountingApiTokens(true);
-      else return;
+      else return; // A newer call is already in progress or scheduled
 
       countTokensWithGemini(apiKey, model, currentItemsForApi)
         .then(count => {
@@ -142,13 +148,13 @@ export default function App() {
         })
         .catch(error => {
           console.warn("Total token counting error:", error);
-          if (tokenCountVersionRef.current === currentVersion) setTotalApiTokenCount(0);
+          if (tokenCountVersionRef.current === currentVersion) setTotalApiTokenCount(0); // Reset on error
         })
         .finally(() => {
           if (tokenCountVersionRef.current === currentVersion) setIsCountingApiTokens(false);
         });
     },
-    []
+    [] // No dependencies, it's a stable function
   );
 
   useEffect(() => {
@@ -159,11 +165,15 @@ export default function App() {
     debouncedApiCallRef.current(itemsForApiCount, settings.apiKey, modelToUse);
   }, [itemsForApiCount, settings.apiKey, settings.model, callWorkerForTotalTokenCount]);
 
+
   const currentTotalPromptTokens = useMemo(() => {
     let estimatedImageTokens = 0;
+    // Estimate tokens for images not yet part of `messages` (i.e., pending in PromptBuilder)
+    // Only if not currently sending, as they'd be included in `messages` optimistically then.
     if (!isAppGloballySending) {
       estimatedImageTokens += pendingImages.length * IMAGE_TOKEN_ESTIMATE;
     }
+    // Estimate tokens for images already in messages
     (messages || []).forEach(msg => {
       const contentBlocks = Array.isArray(msg.content)
         ? msg.content
@@ -176,6 +186,7 @@ export default function App() {
     });
     return totalApiTokenCount + estimatedImageTokens;
   }, [totalApiTokenCount, pendingImages, messages, isAppGloballySending]);
+
 
   const isSoftMemoryLimitReached = currentTotalPromptTokens >= USER_FACING_TOKEN_LIMIT;
   const isHardTokenLimitReached = currentTotalPromptTokens >= MAX_ABSOLUTE_TOKEN_LIMIT;
@@ -190,9 +201,8 @@ export default function App() {
     [isLoadingSession, isSwitchingChat, isAppGloballySending]
   );
 
-  // New memoized state specifically for disabling the nav rail
   const navRailDisabled = useMemo(
-    () => isLoadingSession || isSwitchingChat,
+    () => isLoadingSession || isSwitchingChat, // Nav rail is independent of message sending
     [isLoadingSession, isSwitchingChat]
   );
 
@@ -206,11 +216,11 @@ export default function App() {
       if (isSendingMessage) return { text: 'Sending…', disabled: true };
       if (isSavingEdit) return { text: 'Saving…', disabled: true };
       if (isResendingMessage) return { text: 'Resending…', disabled: true };
-      return { text: 'Processing…', disabled: true };
+      return { text: 'Processing…', disabled: true }; // Generic processing
     }
 
-    if (!settings.apiKey) return { text: 'Set API Key', disabled: false };
-    if (!currentChatId) return { text: 'Select Chat', disabled: false };
+    if (!settings.apiKey) return { text: 'Set API Key', disabled: false }; // Not disabled, allows opening settings
+    if (!currentChatId) return { text: 'Select Chat', disabled: false }; // Not disabled, allows selecting chat
     if (isHardTokenLimitReached) return { text: 'Token Limit Exceeded', disabled: true };
 
     return { text: 'Send', disabled: false };
@@ -224,16 +234,19 @@ export default function App() {
     isHardTokenLimitReached,
   ]);
 
+  // The actual disabled state for the send button considers global busy states too
   const finalSendButtonDisabled = sendButtonDisplayInfo.disabled || globalBusy;
 
 
   useEffect(() => {
+    // Auto-scroll to bottom logic
     if (messages.length > 0 && currentChatId && !isSwitchingChat) {
         const lastMessage = messages[messages.length - 1];
+        // Scroll if last message is assistant's or if it's user's and not being edited
         if (lastMessage.role === 'assistant' || (lastMessage.role === 'user' && !editingId)) {
             const box = scrollContainerRef.current;
-            if (box && (box.scrollHeight - box.scrollTop - box.clientHeight > 100)) {
-            } else {
+            // Only auto-scroll if user is already near the bottom
+            if (box && (box.scrollHeight - box.scrollTop - box.clientHeight < 100)) {
                 scrollToBottom('smooth');
             }
         }
@@ -241,18 +254,22 @@ export default function App() {
   }, [messages, editingId, scrollToBottom, scrollContainerRef, currentChatId, isSwitchingChat]);
 
   useEffect(() => {
+    // Chat switch cleanup logic
     let cleanupRaf, scrollRaf, transitionEndRaf;
 
     if (currentChatId !== previousChatIdRef.current) {
-      setHasLastSendFailed(false); // Reset error state on chat switch
-      inFlightSendSnapshotMarkerRef.current = null;
+      setHasLastSendFailed(false);
+      // inFlightSendSnapshotMarkerRef.current = null; // If re-enabled, manage here
       cleanupRaf = requestAnimationFrame(() => {
         if (editingId) cancelEdit();
+        // Reset prompt builder state on chat switch, except for images/PDFs which are global for now
+        // resetPrompt(); // This might be too aggressive if user wants to carry over prompt text
       });
       if (currentChatId) {
         scrollRaf = requestAnimationFrame(() => scrollToBottom('auto'));
       }
       if (isSwitchingChat) {
+        // Ensure isSwitchingChat is reset after animations/transitions could complete
         transitionEndRaf = requestAnimationFrame(() => setIsSwitchingChat(false));
       }
       previousChatIdRef.current = currentChatId;
@@ -262,7 +279,8 @@ export default function App() {
       if (scrollRaf) cancelAnimationFrame(scrollRaf);
       if (transitionEndRaf) cancelAnimationFrame(transitionEndRaf);
     };
-  }, [currentChatId, isSwitchingChat, editingId, cancelEdit, scrollToBottom, setHasLastSendFailed]);
+  }, [currentChatId, isSwitchingChat, editingId, cancelEdit, scrollToBottom, setHasLastSendFailed, resetPrompt]);
+
 
   function handleSend() {
     if (isAppGloballySending) {
@@ -285,6 +303,7 @@ export default function App() {
     }
 
     const userMessageContentBlocks = [];
+    // PDFs and Images are handled by usePromptBuilder's pendingPDFs/pendingImages
     pendingPDFs.forEach((p) =>
       userMessageContentBlocks.push({
         type: 'file',
@@ -300,11 +319,13 @@ export default function App() {
         type: 'image_url',
         image_url: {
           url: img.url,
-          detail: 'high',
+          detail: 'high', // Or 'auto' or 'low'
           original_name: img.name,
         },
       })
     );
+
+    // userPromptText already includes content from stagedCodeFiles (via usePromptBuilder)
     if (userPromptText?.trim()) {
       userMessageContentBlocks.push({ type: 'text', text: userPromptText });
     }
@@ -315,16 +336,16 @@ export default function App() {
     }
 
     const onSendSuccess = () => {
-      inFlightSendSnapshotMarkerRef.current = null;
+      // inFlightSendSnapshotMarkerRef.current = null; // If re-enabled
     };
 
     sendMessage({
       userMessageContentBlocks,
-      existingMessages: messages,
+      existingMessages: messages, // Pass current messages for context
       onSendSuccess: onSendSuccess,
     });
 
-    resetPrompt();
+    resetPrompt(); // Clears form, pendingImages, pendingPDFs. CodebaseImporter state is separate.
   }
 
   const handleCopyAll = () => {
@@ -366,7 +387,7 @@ export default function App() {
         Toast("Cannot create new chat while an operation is in progress.", 3000);
         return;
     }
-    createChat();
+    createChat(); // Default title/model handled by useChatSessionManager
   }, [createChat, isAppGloballySending]);
 
   const handleDeleteChatTrigger = useCallback((chatId) => {
@@ -396,7 +417,7 @@ export default function App() {
             onClick={() =>
               setSettings((s) => ({ ...s, showSettings: !s.showSettings }))
             }
-            disabled={globalBusy}
+            disabled={globalBusy} // Disable if any global operation is busy
           >
             {settings.showSettings ? 'Close Settings' : 'Open Settings'}
           </button>
@@ -406,7 +427,7 @@ export default function App() {
               (isSendingMessage ? "(Sending...)" :
                isSavingEdit ? "(Saving...)" :
                isResendingMessage ? "(Resending...)" :
-               "(Processing...)")
+               "(Processing...)") // Fallback for other global sending states
             }
           </span>
 
@@ -474,8 +495,8 @@ export default function App() {
               disabled={
                 !messages ||
                 messages.length === 0 ||
-                globalBusy ||
-                isLoadingMessageOps
+                globalBusy || // Disable if any global operation is busy
+                isLoadingMessageOps // Also disable if message ops are specifically busy
               }
             >
               Copy All Text
@@ -506,8 +527,8 @@ export default function App() {
               <input
                 id="modelInputApp"
                 className="form-input"
-                value={GEMINI_MODEL_NAME}
-                readOnly
+                value={GEMINI_MODEL_NAME} // Display the constant model name
+                readOnly // Make it read-only as it's fixed
               />
             </div>
           </div>
@@ -520,7 +541,7 @@ export default function App() {
                 className="button icon-button"
                 onClick={scrollToPrev}
                 title="Scroll Up"
-                disabled={navRailDisabled}
+                disabled={navRailDisabled} // Use specific disabled state for nav rail
               >
                 ↑
               </button>
@@ -528,7 +549,7 @@ export default function App() {
                 className="button icon-button"
                 onClick={scrollToNext}
                 title="Scroll Down"
-                disabled={navRailDisabled}
+                disabled={navRailDisabled} // Use specific disabled state for nav rail
               >
                 ↓
               </button>
@@ -536,21 +557,21 @@ export default function App() {
 
             {currentChatId ? (
               <ChatArea
-                key={currentChatId}
+                key={currentChatId} // Ensure re-mount on chat switch for clean state
                 messages={messages}
                 isLoading={isLoadingMessages}
-                forceLoading={isSwitchingChat}
+                forceLoading={isSwitchingChat} // Show loading placeholder during chat switch
                 editingId={editingId}
                 editText={editText}
-                loadingSend={isAppGloballySending}
-                savingEdit={isAppGloballySending && isSavingEdit}
+                loadingSend={isAppGloballySending} // General sending state
+                savingEdit={isAppGloballySending && isSavingEdit} // Specific saving edit state
                 setEditText={setEditText}
                 handleSaveEdit={saveEdit}
                 handleCancelEdit={cancelEdit}
                 handleStartEdit={startEdit}
                 handleResendMessage={resendMessage}
                 handleDeleteMessage={deleteMessage}
-                actionsDisabled={chatAreaActionsDisabled}
+                actionsDisabled={chatAreaActionsDisabled} // Disable actions based on broader app state
               />
             ) : (
               <div className="chat-empty-placeholder">
@@ -565,22 +586,23 @@ export default function App() {
               setMode={setMode}
               form={form}
               setForm={setForm}
-              sendDisabled={finalSendButtonDisabled}
+              sendDisabled={finalSendButtonDisabled} // Use the most comprehensive disabled state
               sendButtonText={sendButtonDisplayInfo.text}
               handleSend={handleSend}
               showToast={Toast}
               imagePreviews={pendingImages}
               pdfPreviews={pendingPDFs}
               onRemoveImage={removePendingImage}
-              onAddImage={addPendingImage}
-              onAddPDF={addPendingPDF}
+              onAddImage={addPendingImage} // For PR-4, these are passed through
+              onAddPDF={addPendingPDF}     // For PR-4
               settings={settings}
               hasLastSendFailed={hasLastSendFailed}
-              pendingFiles={pendingFiles}
-              onFilesChange={setPendingFiles}
-              onProjectRootChange={handleProjectRootChange}
-              promptBuilderRootName={currentProjectRootName}
-              currentChatId={currentChatId}
+              // PR-5: Pass stagedCodeFiles from App state, and onFilesChange to update it
+              importedCodeFiles={stagedCodeFiles}
+              onCodeFilesChange={setStagedCodeFiles} // This is what CodebaseImporter will call
+              onProjectRootChange={handleProjectRootChange} // Pass down for CodebaseImporter
+              promptBuilderRootName={currentProjectRootName} // Pass down for CodebaseImporter
+              currentChatId={currentChatId} // Pass for context if needed by PromptBuilder/Importer
             />
           </div>
         </div>

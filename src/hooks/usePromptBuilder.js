@@ -1,14 +1,15 @@
 // src/hooks/usePromptBuilder.js
 
 import { useState, useEffect, useCallback, useMemo } from 'preact/hooks';
-import { useFormData, useMode, INITIAL_FORM_DATA } from '../hooks.js';
+import { useFormData, useMode, INITIAL_FORM_DATA } from '../hooks.js'; // Assuming hooks.js is in the same dir or adjust path
 import { asciiTree } from '../lib/textUtils.js';
 
 const safeTrim = (val) => (val ?? '').trim();
 
 const AUTO_INPUT_STRING_FOR_RETURN_FORMAT = "return the complete refactored code for the respective changed files in FULL with NO OMISSIONS so that i can paste it directly into my ide";
 
-function buildNewUserPromptText(currentForm, currentMode, currentPendingFiles, projectRootName) {
+// PR-5: `currentImportedCodeFiles` is now passed in, representing the files from CodebaseImporter
+function buildNewUserPromptText(currentForm, currentMode, currentImportedCodeFiles, projectRootName) {
   if (currentMode === 'DEVELOP') {
     const out = ['## MODE # DEVELOP'];
 
@@ -19,18 +20,16 @@ function buildNewUserPromptText(currentForm, currentMode, currentPendingFiles, p
       out.push(`FEATURES: ${safeTrim(currentForm.developFeatures)}`);
     }
 
-    // Construct the effective developReturnFormat
     let effectiveDevelopReturnFormat = safeTrim(currentForm.developReturnFormat_custom);
     if (currentForm.developReturnFormat_autoIncludeDefault) {
       if (effectiveDevelopReturnFormat === '') {
         effectiveDevelopReturnFormat = AUTO_INPUT_STRING_FOR_RETURN_FORMAT;
       } else {
-        // Append with a newline if custom text exists
         effectiveDevelopReturnFormat = effectiveDevelopReturnFormat + '\n' + AUTO_INPUT_STRING_FOR_RETURN_FORMAT;
       }
     }
 
-    if (effectiveDevelopReturnFormat) { // Only add if non-empty
+    if (effectiveDevelopReturnFormat) {
       out.push(`RETURN FORMAT: ${effectiveDevelopReturnFormat}`);
     }
 
@@ -38,19 +37,20 @@ function buildNewUserPromptText(currentForm, currentMode, currentPendingFiles, p
       out.push(`THINGS TO REMEMBER/WARNINGS: ${safeTrim(currentForm.developWarnings)}`);
     }
 
-    const treePaths = currentPendingFiles.filter(f => f.insideProject).map(f => f.fullPath);
+    // Use currentImportedCodeFiles for the tree and content
+    const treePaths = currentImportedCodeFiles.filter(f => f.insideProject).map(f => f.fullPath);
     if (projectRootName && treePaths.length > 0) {
       out.push(`${projectRootName}/`);
       out.push(asciiTree(treePaths));
     }
 
-    currentPendingFiles.forEach(f => {
+    currentImportedCodeFiles.forEach(f => {
       out.push('```yaml');
       out.push(`file: ${f.fullPath}`);
-      if (f.note) out.push(`# ${f.note}`);
+      if (f.note) out.push(`# ${f.note}`); // Assuming 'note' might still exist on file objects
       out.push('```');
       out.push('```');
-      out.push(f.text);
+      out.push(f.text); // Assuming 'text' is available on these file objects
       out.push('```');
     });
 
@@ -93,13 +93,14 @@ const revokeOnce = obj => {
   }
 };
 
-export function usePromptBuilder() {
+// PR-5: Accept `importedCodeFiles` from App.jsx (via PromptBuilder props)
+export function usePromptBuilder(importedCodeFiles = []) {
   const [form, setForm] = useFormData();
   const [mode, setMode] = useMode();
 
   const [pendingImages, setPendingImages] = useState([]);
   const [pendingPDFs, setPendingPDFs] = useState([]);
-  const [pendingFiles, setPendingFiles] = useState([]);
+  // const [pendingFiles, setPendingFiles] = useState([]); // PR-5: Removed, code files come from importedCodeFiles
   const [currentProjectRootName, setCurrentProjectRootName] = useState(null);
 
   useEffect(() => {
@@ -109,12 +110,13 @@ export function usePromptBuilder() {
     };
   }, [pendingImages]);
 
+  // PR-5: userPromptText now uses importedCodeFiles
   const userPromptText = useMemo(() => buildNewUserPromptText(
     form,
     mode,
-    pendingFiles,
+    importedCodeFiles, // Use the prop from App.jsx
     currentProjectRootName
-  ), [form, mode, pendingFiles, currentProjectRootName]);
+  ), [form, mode, importedCodeFiles, currentProjectRootName]);
 
 
   const addPendingImage = useCallback(img => {
@@ -133,34 +135,30 @@ export function usePromptBuilder() {
     setPendingPDFs(prev => [...prev, pdf]);
   }, []);
 
+  // This function is called by App.jsx when CodebaseImporter signals a root change.
+  // It updates the local `currentProjectRootName` which is used by `buildNewUserPromptText`.
+  // PR-5: It no longer needs to filter `pendingFiles` as that state is removed.
+  // The actual clearing of files related to a project root is now handled by CodebaseImporter's
+  // reducer logic and its `onFilesChange` callback to App.jsx.
   const handleProjectRootChange = useCallback(newRootName => {
     setCurrentProjectRootName(newRootName);
-    if (newRootName === null) {
-      setPendingFiles(files => files.filter(f => !f.insideProject));
-    }
+    // No longer need to filter pendingFiles here:
+    // if (newRootName === null) {
+    //   setPendingFiles(files => files.filter(f => !f.insideProject));
+    // }
   }, []);
 
   const resetPrompt = useCallback(() => {
     setPendingImages([]);
     setPendingPDFs([]);
 
-    // --- Order of operations changed here (April 2024) ---
-    // 1. Clear project-root context *first*.
-    //    This ensures that when CodebaseImporter re-renders, its internal state
-    //    (projectRoot, step, entryFilter, initialScanResults) is reset *before*
-    //    its useEffect that depends on the `files` prop runs. If the `files` prop
-    //    was cleared first, that effect might run with stale internal project context
-    //    and incorrectly re-add files to `pendingFiles` via `onFilesChange`.
-    //    By clearing the project context first, the CodebaseImporter's file merging
-    //    useEffect should bail out due to `projectRoot` being null or `step` being 'FILTER'.
+    // PR-5: `setPendingFiles([])` is removed.
+    // The `handleProjectRootChange(null)` call is still important because it signals
+    // to CodebaseImporter (via App -> PromptBuilder -> CodebaseImporter props)
+    // that the project root context should be cleared. CodebaseImporter's reducer
+    // will then handle clearing its internal state and calling `onFilesChange([])`
+    // which updates `stagedCodeFiles` in App.jsx.
     handleProjectRootChange(null);
-
-    // 2. Now clear the actual list of staged files.
-    //    Since the CodebaseImporter's context that might re-add files has been reset,
-    //    this `setPendingFiles([])` should now reliably clear the list displayed to the user
-    //    and ensure the next message doesn't include these files.
-    setPendingFiles([]);
-    // --- End of order change ---
 
     setForm(prevForm => ({
       ...INITIAL_FORM_DATA,
@@ -176,16 +174,15 @@ export function usePromptBuilder() {
     pendingImages,
     addPendingImage,
     removePendingImage,
-    setPendingImages,
+    setPendingImages, // Still needed if App wants to clear them directly (e.g. on chat switch)
     pendingPDFs,
     addPendingPDF,
-    setPendingPDFs,
-    pendingFiles,
-    setPendingFiles,
+    setPendingPDFs,   // Still needed
+    // pendingFiles,      // PR-5: Removed
+    // setPendingFiles,   // PR-5: Removed
     currentProjectRootName,
-    handleProjectRootChange,
+    handleProjectRootChange, // This is passed to App, then to PromptBuilder, then to CodebaseImporter
     userPromptText,
     resetPrompt
   };
 }
-

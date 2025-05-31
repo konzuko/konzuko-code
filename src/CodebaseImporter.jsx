@@ -1,89 +1,23 @@
-/* src/CodebaseImporter.jsx
-   ------------------------------------------------------------
-   Handles:
-   • Text/code file selection (+Add Files)
-   • Folder scanning with FILTER step (+Add Folder) - items default to unselected
-   • Image selection, compression (1024px WebP), and Supabase upload (+Add Images)
-   • Image paste from clipboard, compression, and Supabase upload (Paste Image)
-   • PDF selection and direct browser upload to Gemini Files API using user's key (+Add PDF)
-------------------------------------------------------------*/
-import { useState, useCallback, useEffect, useRef } from 'preact/hooks';
-import { GoogleGenAI } from "@google/genai";
-
-import { loadRoot, saveRoot, clearRoot, getFullPath } from './lib/fsRoot.js';
+/*  src/CodebaseImporter.jsx  – With Fix for processAndStageSelectedFiles */
 import {
-  isTextLike,
-  MAX_TEXT_FILE_SIZE,
-  MAX_CHAR_LEN
+  useState, useCallback, useEffect, useReducer, useRef
+} from 'preact/hooks';
+import { GoogleGenAI }          from '@google/genai';
+import { supabase }             from './lib/supabase.js';
+import {
+  isTextLike, MAX_TEXT_FILE_SIZE, MAX_CHAR_LEN
 } from './lib/fileTypeGuards.js';
-import { FILE_LIMIT }             from './config.js';
-import { checksum32 }             from './lib/checksum.js';
-import { compressImageToWebP }    from './lib/imageUtils.js';
-import { supabase }               from './lib/supabase.js';
-
-const NOTE =
-  'checksum suffix added because this file is named exactly the same as another, yet its content is different';
-
-function hex6(ck) {
-  return ck.toString(16).padStart(8, '0').slice(0, 6);
-}
-
-function withHash(path, ck, taken) {
-  const m = path.match(/^(.*?)(\.[^.]+)?$/);
-  const stem = m[1], ext = m[2] || '';
-  let name = `${stem}.${hex6(ck)}${ext}`;
-  if (!taken.has(name)) return name;
-  let i = 1;
-  while (taken.has(`${name}(${i})`)) i++;
-  return `${name}(${i})`;
-}
-
-function mergeFiles(existing = [], incoming = []) {
-  const taken = new Map();
-  const out   = [...existing];
-
-  existing.forEach(f => {
-    const s = taken.get(f.fullPath) || new Set();
-    s.add(f.checksum);
-    taken.set(f.fullPath, s);
-  });
-
-  for (const f of incoming) {
-    if (out.length >= FILE_LIMIT) break;
-
-    const s = taken.get(f.fullPath);
-    if (!s) {
-      taken.set(f.fullPath, new Set([f.checksum]));
-      out.push(f);
-      continue;
-    }
-    if (s.has(f.checksum)) {
-      const alreadyExists = out.some(ef => ef.fullPath === f.fullPath && ef.checksum === f.checksum);
-      if (!alreadyExists) {
-          out.push(f);
-      }
-      continue;
-    }
-    const newPath = withHash(f.fullPath, f.checksum, taken);
-    taken.set(newPath, new Set([f.checksum]));
-    out.push({ ...f, fullPath: newPath, note: NOTE });
-  }
-  return out;
-}
-
-function isIncluded(fullPath, filterMap) {
-  const parts = fullPath.split('/');
-
-  if (parts.length === 1) {
-    return filterMap[parts[0]] === true;
-  }
-
-  const topLevelDirInPath = parts[0];
-  return filterMap[topLevelDirInPath] === true;
-}
+import { FILE_LIMIT }           from './config.js';
+import { compressImageToWebP }  from './lib/imageUtils.js';
+import {
+  reducer, initialState,
+  makeTopEntry,
+  makeStagedFile
+} from './codeImporter/state.js';
+import { loadRoot, saveRoot, clearRoot as clearIDBRoot } from './lib/fsRoot.js';
 
 
-function formatRejectionMessage(rejectionStats) {
+function formatRejectionMessage(rejectionStats, context = "folder scan") {
   const {
     tooLarge = 0,
     tooLong = 0,
@@ -92,804 +26,561 @@ function formatRejectionMessage(rejectionStats) {
     permissionDenied = 0,
     readError = 0,
   } = rejectionStats;
-
   const lines = [];
   let hasSkipsOrErrors = false;
+  if (tooLarge > 0) { lines.push(`- ${tooLarge} file(s) skipped (over ${MAX_TEXT_FILE_SIZE / 1024}KB).`); hasSkipsOrErrors = true; }
+  if (tooLong > 0) { lines.push(`- ${tooLong} file(s) skipped (over ${MAX_CHAR_LEN / 1000}k chars).`); hasSkipsOrErrors = true; }
+  if (unsupportedType > 0) { lines.push(`- ${unsupportedType} file(s) skipped (not text/code).`); hasSkipsOrErrors = true; }
+  if (limitReached > 0) { const item = context === "folder scan" ? "entries during scan" : "files"; lines.push(`- ${limitReached} ${item} skipped (limit ${context === "folder scan" ? FILE_LIMIT * 4 : FILE_LIMIT} reached).`); hasSkipsOrErrors = true; }
+  if (permissionDenied > 0) { lines.push(`- ${permissionDenied} item(s) SKIPPED DUE TO PERMISSION ERROR.`); hasSkipsOrErrors = true; }
+  if (readError > 0) { lines.push(`- ${readError} file(s) SKIPPED DUE TO READ ERROR.`); hasSkipsOrErrors = true; }
+  if (!hasSkipsOrErrors) return null;
+  const header = context === "folder scan" ? "Some items were skipped during folder scan (this is normal):" : "Some files were skipped during individual add:";
+  return header + '\n' + lines.join('\n');
+}
 
-  if (tooLarge > 0) {
-    lines.push(`- ${tooLarge} file${tooLarge > 1 ? 's were' : ' was'} skipped because they were over the ${MAX_TEXT_FILE_SIZE / 1024}KB size limit.`);
-    hasSkipsOrErrors = true;
+async function scanDirectoryForMinimalMetadata(rootHandle) {
+  const tops = [];
+  const preliminaryMeta = [];
+  const rejectionStats = { permissionDenied: 0, readError: 0, limitReached: 0 };
+  console.log('[scanMinimalMetadata] Starting for root:', rootHandle.name);
+  try {
+    for await (const [name, h] of rootHandle.entries()) {
+      tops.push(makeTopEntry(name, h.kind));
+    }
+  } catch (e) {
+    console.error('[scanMinimalMetadata] Error listing top entries for root:', rootHandle.name, e);
+    rejectionStats.permissionDenied++;
+    return { tops, meta: preliminaryMeta, rejectionStats };
   }
-  if (tooLong > 0) {
-    lines.push(`- ${tooLong} file${tooLong > 1 ? 's' : ''} had too much text (over ${MAX_CHAR_LEN / 1000}k characters) and were skipped.`);
-    hasSkipsOrErrors = true;
+  console.log('[scanMinimalMetadata] Top entries:', tops.map(t => t.name));
+
+  const DISCOVERY_CAP = FILE_LIMIT * 4;
+  const queue = [{ handle: rootHandle, pathPrefix: '' }];
+  let processedEntries = 0;
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current || !current.handle) continue;
+    processedEntries++;
+    if (processedEntries > DISCOVERY_CAP * 2) {
+        console.warn('[scanMinimalMetadata] Exceeded max processed entries.');
+        rejectionStats.limitReached += (queue.length +1) ;
+        break;
+    }
+    try {
+      for await (const [name, childHandle] of current.handle.entries()) {
+        if (preliminaryMeta.length >= DISCOVERY_CAP) {
+            rejectionStats.limitReached++; break;
+        }
+        const relativePath = current.pathPrefix ? `${current.pathPrefix}/${name}` : name;
+        try {
+          preliminaryMeta.push({ path: relativePath, kind: childHandle.kind });
+          if (childHandle.kind === 'directory') {
+            queue.push({ handle: childHandle, pathPrefix: relativePath });
+          }
+        } catch (err) {
+          console.warn(`[scanMinimalMetadata] Inner error for ${relativePath}:`, err.name);
+          rejectionStats.readError++;
+        }
+      }
+       if (preliminaryMeta.length >= DISCOVERY_CAP) break;
+    } catch (dirError) {
+        if (dirError.name === 'NotAllowedError') rejectionStats.permissionDenied++;
+        else rejectionStats.readError++;
+        console.warn(`[scanMinimalMetadata] FS error iterating dir ${current.pathPrefix || rootHandle.name}:`, dirError.name);
+    }
   }
-  if (unsupportedType > 0) {
-    lines.push(`- ${unsupportedType} file${unsupportedType > 1 ? 's were' : ' was'} skipped because they didn't appear to be text or code files (e.g., images, videos, applications).`);
-    hasSkipsOrErrors = true;
-  }
-  if (limitReached > 0) {
-    lines.push(`- ${limitReached} file${limitReached > 1 ? 's were' : ' was'} skipped because an internal processing limit of ${FILE_LIMIT} text files was reached.`);
-    hasSkipsOrErrors = true;
+  console.log('[scanMinimalMetadata] Complete. Preliminary meta items found:', preliminaryMeta.length);
+  return { tops, meta: preliminaryMeta, rejectionStats };
+}
+
+// REVISED: processAndStageSelectedFiles to correctly use handles
+async function processAndStageSelectedFiles(state) {
+  const { root, meta: preliminaryMetaFromState, selected } = state;
+  const out = [];
+  const rejectionStats = { tooLarge: 0, tooLong: 0, unsupportedType: 0, readError: 0, permissionDenied: 0, limitReached: 0 };
+  let filesProcessedCount = 0;
+
+  if (!root || !preliminaryMetaFromState || !selected) return { stagedFiles: out, rejectionStats };
+  console.log('[processAndStage] Processing selected top-level items:', Array.from(selected));
+
+  // Queue stores { handle: FileSystemDirectoryHandle | FileSystemFileHandle, path: string (full relative path from root) }
+  const processingQueue = [];
+
+  // Initialize queue with selected top-level items by getting their handles from root
+  for (const topLevelName of selected) {
+    const topLevelMetaItem = preliminaryMetaFromState.find(pm => pm.path === topLevelName);
+    if (topLevelMetaItem) {
+      try {
+        if (topLevelMetaItem.kind === 'file') {
+          processingQueue.push({ handle: await root.getFileHandle(topLevelMetaItem.path, { create: false }), path: topLevelMetaItem.path, kind: 'file' });
+        } else if (topLevelMetaItem.kind === 'directory') {
+          processingQueue.push({ handle: await root.getDirectoryHandle(topLevelMetaItem.path, { create: false }), path: topLevelMetaItem.path, kind: 'directory' });
+        }
+      } catch (e) {
+        console.error(`[processAndStage] Could not get initial handle for: ${topLevelMetaItem.path}`, e);
+        rejectionStats.readError++;
+      }
+    }
   }
 
-  if (permissionDenied > 0) {
-    hasSkipsOrErrors = true;
-    const itemStr = permissionDenied > 1 ? 'items (files/folders)' : 'item (file/folder)';
-    const message =
-      `- ${permissionDenied} ${itemStr} SKIPPED DUE TO ERROR:\n` +
-      `  Your computer's OS (Windows, macOS, Linux) denied read access.\n` +
-      `  This means your browser lacks 'Read' permission for it.\n` +
-      `  To fix: Adjust permissions on your computer.\n` +
-      `  (e.g., Win: Properties > Security; Mac: Get Info > Permissions).`;
-    lines.push(message);
-  }
+  console.log('[processAndStage] Initial processing queue size:', processingQueue.length);
 
-  if (readError > 0) {
-    hasSkipsOrErrors = true;
-    lines.push(`- ${readError} file${readError > 1 ? 's' : ''} SKIPPED DUE TO ERROR: Could not be read (general system error).`);
-  }
+  while (processingQueue.length > 0) {
+    if (out.length >= FILE_LIMIT) { // Check against `out.length` which is count of successfully staged files
+      rejectionStats.limitReached += processingQueue.length;
+      console.log('[processAndStage] File limit for staging reached. Remaining queue:', processingQueue.length);
+      break;
+    }
 
-  if (!hasSkipsOrErrors) {
-    return null;
-  }
+    const { handle: currentHandle, path: currentItemPath, kind: currentItemKind } = processingQueue.shift();
+    
+    if (!currentHandle) {
+        console.warn(`[processAndStage] Null handle encountered for path: ${currentItemPath}`);
+        continue;
+    }
 
-  const header = "This isn't an error; skipping some files is normal during import.";
-  return header + '\n\n' + lines.join('\n\n');
+    try {
+      if (currentItemKind === 'file') {
+        filesProcessedCount++; // Count files we attempt to process
+        const file = await currentHandle.getFile(); // currentHandle is FileSystemFileHandle
+
+        if (file.size > MAX_TEXT_FILE_SIZE) { rejectionStats.tooLarge++; console.log(`Skipping large file: ${currentItemPath}`); continue; }
+        if (!isTextLike(file)) { rejectionStats.unsupportedType++; console.log(`Skipping non-text: ${currentItemPath}`); continue; }
+        
+        const text = await file.text();
+        if (text.length > MAX_CHAR_LEN) { rejectionStats.tooLong++; console.log(`Skipping long file: ${currentItemPath}`); continue; }
+        
+        const fileName = currentItemPath.substring(currentItemPath.lastIndexOf('/') + 1);
+        out.push(makeStagedFile(currentItemPath, file.size, file.type, text, true, fileName));
+
+      } else if (currentItemKind === 'directory') {
+        // currentHandle is FileSystemDirectoryHandle
+        for await (const entry of currentHandle.values()) { // entry is FileSystemFileHandle or FileSystemDirectoryHandle
+          const entryPath = `${currentItemPath}/${entry.name}`;
+          // Push the actual handle 'entry' for the next level
+          processingQueue.push({ handle: entry, path: entryPath, kind: entry.kind });
+        }
+      }
+    } catch (e) {
+      console.error(`[processAndStage] Error processing item ${currentItemPath}:`, e.name, e.message);
+      if (e.name === 'NotAllowedError' || e.name === 'SecurityError') rejectionStats.permissionDenied++;
+      else if (e.name === 'NotFoundError') rejectionStats.readError++; // File might have been moved/deleted
+      else rejectionStats.readError++;
+    }
+  }
+  
+  console.log('[processAndStage] Staging complete. Staged files created:', out.length, "Attempted to process:", filesProcessedCount);
+  return {stagedFiles: out, rejectionStats};
 }
 
 
 export default function CodebaseImporter({
-  files = [],
-  onFilesChange,
-  toastFn,
-  onAddImage,
-  onAddPDF,
-  settings,
-  onProjectRootChange,
-  currentProjectRootNameFromBuilder
+  onFilesChange, toastFn, onAddImage, onAddPDF, settings,
+  onProjectRootChange, currentProjectRootNameFromBuilder
 }) {
   const [adding, setAdding] = useState(false);
-  const [projectRoot, setProjectRoot] = useState(null);
-  const [entryFilter, setEntryFilter] = useState({});
-  const [step, setStep] = useState('FILTER');
-  const [topEntries, setTopEntries] = useState([]);
-  const [initialScanResults, setInitialScanResults] = useState([]);
+  const [impState, dispatch] = useReducer(reducer, initialState);
   const lastCheckedIndexRef = useRef(null);
+  const initialLoadAttemptedRef = useRef(false);
+  const lastNotifiedFilesIdHashRef = useRef('');
+  const scanInProgressRef = useRef(false);
 
-  // Effect A: Handles changes to currentProjectRootNameFromBuilder (parent-driven root changes)
-  // and syncs internal project state.
-  useEffect(() => {
-    let live = true;
-    if (currentProjectRootNameFromBuilder === null && projectRoot !== null) {
-      // Parent wants to clear the project root.
-      console.log('[CodebaseImporter Effect A] Parent signaled project root clear. Current internal projectRoot:', projectRoot?.name);
-
-      // Before clearing internal root state, remove any files from the parent's list
-      // that were part of this project. This should only happen once when the
-      // transition to a null root is detected from the parent.
-      const projectFilesExist = files.some(f => f.insideProject);
-      if (projectFilesExist) {
-        console.log('[CodebaseImporter Effect A] Removing project-specific files from parent list. Current files prop length:', files.length);
-        onFilesChange(files.filter(f => !f.insideProject));
-      } else {
-        console.log('[CodebaseImporter Effect A] No project-specific files found in current files prop to remove.');
-      }
-
-      clearRoot()
-        .catch(err => console.warn("CodebaseImporter: Failed to clear root from IDB during reset via prop", err))
-        .finally(() => {
-          if (live) {
-            console.log('[CodebaseImporter Effect A] Setting internal project states to null/initial.');
-            setProjectRoot(null);
-            setTopEntries([]);
-            setEntryFilter({});
-            setInitialScanResults([]);
-            setStep('FILTER');
-            lastCheckedIndexRef.current = null;
-          }
-        });
-    } else if (currentProjectRootNameFromBuilder && (!projectRoot || projectRoot.name !== currentProjectRootNameFromBuilder)) {
-      // Parent has specified a project root, and we either don't have one internally, or it's different.
-      // Attempt to load it. This primarily handles cases where the parent re-establishes a root
-      // or on initial load if parent has a root name but this component doesn't have the handle yet.
-      console.log('[CodebaseImporter Effect A] Parent specified root, attempting to load/sync:', currentProjectRootNameFromBuilder, 'Current internal projectRoot:', projectRoot?.name);
-      loadRoot().then(h => {
-        if (live) {
-          if (h && h.name === currentProjectRootNameFromBuilder) {
-            console.log('[CodebaseImporter Effect A] Loaded matching root from IDB:', h.name);
-            setProjectRoot(h);
-            // Note: This doesn't re-scan. Scanning is typically part of `addFolder`.
-            // If `topEntries` etc. need to be repopulated, that's a more complex sync,
-            // usually triggered by user action (`addFolder`) or if `initialScanResults` are empty.
-          } else if (h && h.name !== currentProjectRootNameFromBuilder) {
-            // IDB has a root, but it's not what the parent wants. Clear IDB.
-            console.log('[CodebaseImporter Effect A] Mismatch between parent root and IDB root. Clearing IDB. IDB root:', h.name);
-            clearRoot().finally(() => {
-              if (live) setProjectRoot(null); // No valid root to set internally
-            });
-          } else if (!h) {
-            // No root in IDB, and parent wants one. Parent should trigger `addFolder` if scan is needed.
-            console.log('[CodebaseImporter Effect A] No root in IDB, parent wants one. Setting internal projectRoot to null.');
-            setProjectRoot(null);
-          }
-        }
-      }).catch((err) => {
-        console.warn('[CodebaseImporter Effect A] Error loading root from IDB:', err);
-        if (live) setProjectRoot(null);
-      });
-    }
-    return () => { live = false; };
-  }, [currentProjectRootNameFromBuilder, projectRoot, files, onFilesChange]); // `files` and `onFilesChange` are needed for the conditional call.
-
-  // Effect for initial load of projectRoot from IDB if not driven by prop from parent
-  // This ensures that if the app reloads, CodebaseImporter tries to pick up an existing root.
-  useEffect(() => {
-    let live = true;
-    if (!currentProjectRootNameFromBuilder && !projectRoot) { // Only if parent hasn't specified and we don't have one
-        console.log('[CodebaseImporter InitialMountEffect] Attempting to load root from IDB.');
-        loadRoot().then(h => {
-            if (live) {
-                if (h) {
-                    console.log('[CodebaseImporter InitialMountEffect] Loaded root from IDB:', h.name);
-                    setProjectRoot(h);
-                    onProjectRootChange?.(h.name); // Inform parent
-                    // If a root is loaded, we might want to re-populate topEntries and initialScanResults
-                    // This is complex because `addFolder` normally handles scanning.
-                    // For now, this effect primarily syncs `projectRoot` and informs parent.
-                    // A full re-scan might be too heavy for an initial load effect without user action.
-                    // Consider if `addFolder` logic needs to be callable to re-process an existing handle.
-                } else {
-                    console.log('[CodebaseImporter InitialMountEffect] No root found in IDB.');
-                    onProjectRootChange?.(null); // Ensure parent knows there's no root
-                }
-            }
-        }).catch((err) => {
-            console.warn('[CodebaseImporter InitialMountEffect] Error loading root from IDB:', err);
-            if (live) {
-                onProjectRootChange?.(null);
-            }
-        });
-    }
-    return () => { live = false; };
-  }, [onProjectRootChange, currentProjectRootNameFromBuilder, projectRoot]);
-
-
-  // Effect B: Merges files based on internal filters and updates parent (onFilesChange)
-  // This effect is primarily for when the user interacts with the filter checkboxes for a loaded project.
-  useEffect(() => {
-    console.log('[CodebaseImporter Effect B] Checking conditions. Props/States:', {
-        filesPropLength: files.length, // from parent
-        currentProjectRootNameFromBuilder, // from parent
-        internalStep: step,
-        internalProjectRootName: projectRoot ? projectRoot.name : null,
-        internalInitialScanResultsLength: initialScanResults.length,
-        internalTopEntriesLength: topEntries.length,
-        internalEntryFilterKeys: Object.keys(entryFilter).length,
-    });
-
-    // Guard:
-    // 1. If parent is signaling a full reset (currentProjectRootNameFromBuilder is null), bail out.
-    //    Effect A is responsible for handling the reset, including clearing project-specific files from parent.
-    // 2. If there's no internal projectRoot (folder handle), bail out.
-    // 3. If not in the 'FILES' step (i.e., still in 'FILTER' step of selecting top-level entries), bail out.
-    // 4. If there are no initial scan results AND no top-level entries (empty or uninitialized project), bail out.
-    if (currentProjectRootNameFromBuilder === null ||
-        !projectRoot ||
-        step !== 'FILES' ||
-        (initialScanResults.length === 0 && topEntries.length === 0)) {
-        console.log('[CodebaseImporter Effect B] Bailing out due to guard conditions.');
-        if (!projectRoot && initialScanResults.length > 0) {
-            // This ensures that if projectRoot is cleared (e.g., by "Clear List" button or Effect A),
-            // we don't use stale initialScanResults from a previous project.
-            console.log('[CodebaseImporter Effect B] Clearing stale initialScanResults as projectRoot is null.');
-            setInitialScanResults([]);
-        }
+  const performScan = useCallback(async (handleToScan, context) => {
+    if (!handleToScan) {
+        console.warn(`[performScan] Called without a valid handle. Context: ${context}`);
+        dispatch({ type: 'CLEAR_ALL' });
         return;
     }
-
-    console.log('[CodebaseImporter Effect B] Proceeding to merge files.');
-    const userFilteredProjectFiles = initialScanResults.filter(f => isIncluded(f.fullPath, entryFilter));
-    const nonProjectFiles = files.filter(f => !f.insideProject); // Files from parent not part of current project
-    const combinedListBeforeFinalLimit = mergeFiles([], nonProjectFiles);
-    const remainingSlotsForProjectFiles = FILE_LIMIT - combinedListBeforeFinalLimit.length;
-    let finalProjectFilesToMerge = userFilteredProjectFiles;
-    let countExcludedByFileLimit = 0;
-
-    if (remainingSlotsForProjectFiles < userFilteredProjectFiles.length) {
-        if (remainingSlotsForProjectFiles > 0) {
-            finalProjectFilesToMerge = userFilteredProjectFiles.slice(0, remainingSlotsForProjectFiles);
-            countExcludedByFileLimit = userFilteredProjectFiles.length - finalProjectFilesToMerge.length;
-        } else {
-            finalProjectFilesToMerge = [];
-            countExcludedByFileLimit = userFilteredProjectFiles.length;
-        }
-    }
-
-    const newCompleteFileList = mergeFiles(combinedListBeforeFinalLimit, finalProjectFilesToMerge);
-    const currentFilesString = files.map(f => `${f.fullPath}|${f.checksum}`).join(',');
-    const newFilesString = newCompleteFileList.map(f => `${f.fullPath}|${f.checksum}`).join(',');
-
-    if (newFilesString !== currentFilesString) {
-        console.log('[CodebaseImporter Effect B] Files list changed. Calling onFilesChange with:', newCompleteFileList.map(f=>f.fullPath));
-        onFilesChange(newCompleteFileList);
-
-        const numSelectedProjectFiles = finalProjectFilesToMerge.length;
-        if (numSelectedProjectFiles > 0) {
-            let message = `${numSelectedProjectFiles} project file${numSelectedProjectFiles > 1 ? 's' : ''} picked.`;
-            if (countExcludedByFileLimit > 0) {
-                message += ` ${countExcludedByFileLimit} more were available from selection but excluded by file limit.`;
-            }
-            toastFn?.(message, 4000);
-        } else if (Object.values(entryFilter).some(v => v === true) && numSelectedProjectFiles === 0 && initialScanResults.length > 0) {
-            toastFn?.('Selection resulted in 0 project files. Try selecting other items.', 4000);
-        } else if (files.length > newCompleteFileList.length && countExcludedByFileLimit === 0 && initialScanResults.length === (userFilteredProjectFiles.length)) {
-            const actualRemoved = files.length - newCompleteFileList.length;
-            if (actualRemoved > 0) {
-                 toastFn?.(`Removed ${actualRemoved} duplicate item${actualRemoved > 1 ? 's' : ''}.`, 3000);
-            }
-        }
-    } else {
-        console.log('[CodebaseImporter Effect B] Files list did not change. Not calling onFilesChange.');
-    }
-  }, [
-    entryFilter, step, projectRoot, topEntries, files, onFilesChange, toastFn, initialScanResults,
-    currentProjectRootNameFromBuilder // Added to ensure this effect respects parent's reset signal
-  ]);
-
-
-  const clearAll = useCallback(() => {
-    if (!files.length && !projectRoot && topEntries.length === 0 && Object.keys(entryFilter).length === 0 && initialScanResults.length === 0) return;
-    if (!confirm('Remove all selected files and clear project root?')) return;
-
-    clearRoot().then(() => {
-      setProjectRoot(null);
-      onProjectRootChange?.(null); // Signal parent that root is gone
-    }).catch(err => console.error("Error clearing root from IDB:", err));
-
-    setEntryFilter({});
-    setTopEntries([]);
-    setInitialScanResults([]);
-    setStep('FILTER');
-    onFilesChange([]); // Directly tell parent the list is empty
-    lastCheckedIndexRef.current = null;
-  }, [files.length, projectRoot, topEntries.length, Object.keys(entryFilter).length, initialScanResults.length, onFilesChange, onProjectRootChange]);
-
-
-  const addFiles = useCallback(async () => {
-    if (!window.showOpenFilePicker) {
-        toastFn?.('File picker is not supported in this browser.', 4000);
+    if (scanInProgressRef.current) {
+        console.log(`[performScan] Scan already in progress for ${handleToScan.name}. Skipping new scan for context: ${context}.`);
         return;
     }
+    scanInProgressRef.current = true;
+    console.log(`[performScan] Starting scan for ${handleToScan.name} due to ${context}`);
     try {
-      setAdding(true);
-      const handles = await window.showOpenFilePicker({ multiple: true });
-      const batch = [];
-      const rejectionStats = {
-          count: 0, tooLarge: 0, tooLong: 0, unsupportedType: 0,
-          limitReached: 0, permissionDenied: 0, readError: 0
-      };
-
-      for (const h of handles) {
-        if (files.length + batch.length >= FILE_LIMIT) {
-          rejectionStats.limitReached++;
-          rejectionStats.count++;
-          continue;
-        }
-
-        let currentFileRejected = false;
-        let fileData = null;
-        try {
-            fileData = await h.getFile();
-        } catch (fileAccessError) {
-            console.warn(`Could not access file ${h.name}:`, fileAccessError);
-            if (fileAccessError.name === 'NotAllowedError' || fileAccessError.name === 'SecurityError') {
-                rejectionStats.permissionDenied++;
-            } else {
-                rejectionStats.readError++;
-            }
-            currentFileRejected = true;
-        }
-
-        if (currentFileRejected || !fileData) {
-            if (!currentFileRejected) rejectionStats.count++;
-            continue;
-        }
-
-        const f = fileData;
-
-        if (f.size > MAX_TEXT_FILE_SIZE) {
-          rejectionStats.tooLarge++;
-          currentFileRejected = true;
-        }
-
-        if (!isTextLike(f)) {
-          if (!currentFileRejected) rejectionStats.unsupportedType++;
-          currentFileRejected = true;
-        }
-
-        if (!currentFileRejected) {
-            const text = await f.text();
-            if (text.length > MAX_CHAR_LEN) {
-              rejectionStats.tooLong++;
-              currentFileRejected = true;
-            }
-        }
-
-        if (currentFileRejected) {
-          rejectionStats.count++;
-          continue;
-        }
-
-        const textContent = await f.text();
-        const ck = checksum32(textContent);
-        const { fullPath, insideProject } = await getFullPath(h, projectRoot);
-        batch.push({ fullPath, text: textContent, checksum: ck, insideProject, name: f.name });
-      }
-
-      let totalSpecificRejections = rejectionStats.tooLarge + rejectionStats.tooLong + rejectionStats.unsupportedType + rejectionStats.limitReached + rejectionStats.permissionDenied + rejectionStats.readError;
-      if (rejectionStats.count < totalSpecificRejections) {
-          rejectionStats.count = totalSpecificRejections;
-      }
-
-      const rejectionMessage = formatRejectionMessage(rejectionStats);
-      if (rejectionMessage) {
-        const duration = (rejectionStats.permissionDenied > 0 || rejectionStats.readError > 0) ? 20000 : 15000;
-        toastFn?.(rejectionMessage, duration);
-      }
-
-      const merged = mergeFiles(files, batch);
-      onFilesChange(merged);
-    } catch (err) {
-      if (err.name !== 'AbortError') toastFn?.('File pick error: ' + err.message, 5000);
-    } finally {
-      setAdding(false);
-    }
-  }, [files, onFilesChange, projectRoot, toastFn]);
-
-  async function scanDirForCandidates(handle, candidateCollector, rejectionStats, rootHandle, currentPath = '') {
-    const DISCOVERY_CAP = FILE_LIMIT * 2;
-
-    for await (const [name, h] of handle.entries()) {
-      if (candidateCollector.length >= DISCOVERY_CAP && DISCOVERY_CAP > 0) {
-          break;
-      }
-
-      const entryPath = currentPath ? `${currentPath}/${name}` : name;
-      let rejectedThisFileForCause = false;
-      let fileProcessedForCounting = false;
-
-      try {
-        if (h.kind === 'file') {
-          const f = await h.getFile();
-          if (f.size > MAX_TEXT_FILE_SIZE) { rejectionStats.tooLarge++; rejectedThisFileForCause = true; }
-
-          if (!isTextLike(f)) {
-            if(!rejectedThisFileForCause) rejectionStats.unsupportedType++;
-            rejectedThisFileForCause = true;
-          }
-
-          if (!rejectedThisFileForCause) {
-            const text = await f.text();
-            if (text.length > MAX_CHAR_LEN) { rejectionStats.tooLong++; rejectedThisFileForCause = true; }
-
-            if (!rejectedThisFileForCause) {
-                const ck = checksum32(text);
-                candidateCollector.push({ fullPath: entryPath, text, checksum: ck, insideProject: true, name: f.name });
-            }
-          }
-          if (rejectedThisFileForCause && !fileProcessedForCounting) {
-            rejectionStats.count++;
-            fileProcessedForCounting = true;
-          }
-
-        } else if (h.kind === 'directory') {
-          await scanDirForCandidates(h, candidateCollector, rejectionStats, rootHandle, entryPath);
-        }
-      } catch (err) {
-        if (!fileProcessedForCounting) {
-            rejectionStats.count++;
-            fileProcessedForCounting = true;
-        }
-        if (err.name === 'NotAllowedError' || err.name === 'SecurityError') {
-          rejectionStats.permissionDenied++;
+        const { tops, meta, rejectionStats } = await scanDirectoryForMinimalMetadata(handleToScan);
+        // Check if still live and if the root for this scan is still the active root in state
+        if (impState.root?.name === handleToScan.name && impState.tag === 'SCANNING') {
+            dispatch({ type: 'SCAN_DONE', tops, meta });
+            const msg = formatRejectionMessage(rejectionStats, `folder scan on ${context}`);
+            if (msg) toastFn?.(msg, 15000);
         } else {
-          rejectionStats.readError++;
-          console.warn(`FS error scanning ${entryPath}:`, err);
+            console.log(`[performScan] Scan for ${handleToScan.name} completed, but state has changed or root is different. Discarding results. Current state: ${impState.tag}, Current root: ${impState.root?.name}`);
         }
+    } catch (err) {
+        console.error(`[performScan] Error during scan for ${handleToScan.name} (context: ${context}):`, err);
+        if (impState.root?.name === handleToScan.name) {
+            dispatch({ type: 'CLEAR_ALL' });
+            onProjectRootChange?.(null);
+            clearIDBRoot().catch(console.warn);
+        }
+        toastFn?.(`Error scanning directory (${context}): ` + err.message, 5000);
+    } finally {
+        scanInProgressRef.current = false;
+    }
+  }, [toastFn, onProjectRootChange, impState.root, impState.tag]); // impState.root and impState.tag are crucial here
+
+  useEffect(() => { // SyncEffect
+    const currentEffectRootName = impState.root?.name;
+    console.log('[SyncEffect] Running. ParentRootName:', currentProjectRootNameFromBuilder, 'ImporterState:', impState.tag, 'CurrentImporterRootName:', currentEffectRootName, 'InitialLoadAttempted:', initialLoadAttemptedRef.current, 'ScanInProgress:', scanInProgressRef.current);
+
+    // Scenario 1: Parent wants to clear the root
+    if (currentProjectRootNameFromBuilder === null) {
+      if (impState.root || (impState.tag !== 'IDLE' && !impState.root)) {
+        console.log('[SyncEffect] SCENARIO 1: Parent cleared root or context. Resetting importer.');
+        if(impState.root) clearIDBRoot().catch(console.warn);
+        dispatch({ type: 'CLEAR_ALL' });
+      } else {
+        console.log('[SyncEffect] SCENARIO 1: ParentRoot is null, importer already IDLE or no root to clear.');
+      }
+      initialLoadAttemptedRef.current = true;
+      return;
+    }
+
+    // Scenario 2: Parent specifies a root name
+    if (currentProjectRootNameFromBuilder) {
+      // Condition 2A: Importer already has this exact root and is in a stable state (FILTER or STAGED). Do nothing.
+      if (currentEffectRootName === currentProjectRootNameFromBuilder && (impState.tag === 'FILTER' || impState.tag === 'STAGED')) {
+        console.log('[SyncEffect] SCENARIO 2A: Importer already has correct root and stable state.');
+        initialLoadAttemptedRef.current = true;
+        return;
+      }
+
+      // Condition 2B: Importer needs to establish or re-establish this root, or is already scanning it.
+      if (impState.tag === 'SCANNING' && currentEffectRootName === currentProjectRootNameFromBuilder) {
+          console.log('[SyncEffect] SCENARIO 2B: State is SCANNING for the target root. Triggering performScan if not already in progress.');
+          if (impState.root) performScan(impState.root, "SyncEffect - state was SCANNING"); // performScan has its own guard
+          return;
+      }
+      
+      // Condition 2C: Root name from parent is different, or state is IDLE. Load and dispatch PICK_ROOT.
+      if (currentEffectRootName !== currentProjectRootNameFromBuilder || impState.tag === 'IDLE') {
+        console.log('[SyncEffect] SCENARIO 2C: Parent wants root:', currentProjectRootNameFromBuilder, '. Current importer root:', currentEffectRootName, 'State:', impState.tag, '. Attempting to load/set.');
+        initialLoadAttemptedRef.current = true;
+        loadRoot().then(handleFromIDB => {
+          if (handleFromIDB?.name === currentProjectRootNameFromBuilder) {
+            console.log('[SyncEffect] SCENARIO 2C: Loaded matching root from IDB:', handleFromIDB.name);
+            dispatch({ type: 'PICK_ROOT', handle: handleFromIDB }); // This sets to SCANNING, SyncEffect will re-run and hit 2B's scan logic
+          } else {
+            console.log('[SyncEffect] SCENARIO 2C: No matching root in IDB for', currentProjectRootNameFromBuilder, '. Importer to IDLE.');
+            if (handleFromIDB) clearIDBRoot().catch(console.warn);
+            if (impState.tag !== 'IDLE') dispatch({ type: 'CLEAR_ALL' });
+          }
+        }).catch(err => {
+          console.warn('[SyncEffect] SCENARIO 2C: Error in loadRoot():', err);
+          if (impState.tag !== 'IDLE') dispatch({ type: 'CLEAR_ALL' });
+        });
+        return;
       }
     }
-  }
 
-  const addFolder = useCallback(async () => {
-    if (!window.showDirectoryPicker) {
-        toastFn?.('Directory picker is not supported in this browser.', 4000);
-        return;
+    // Scenario 3: Initial mount, no root from parent, try to load from IDB once
+    if (!currentProjectRootNameFromBuilder && impState.tag === 'IDLE' && !currentEffectRootName && !initialLoadAttemptedRef.current) {
+      console.log('[SyncEffect] SCENARIO 3: Initial mount, no parent root. Attempting IDB load.');
+      initialLoadAttemptedRef.current = true;
+      loadRoot().then(handleFromIDB => {
+        if (handleFromIDB) {
+          console.log('[SyncEffect] SCENARIO 3: Initial mount: Loaded root from IDB:', handleFromIDB.name);
+          onProjectRootChange?.(handleFromIDB.name);
+        } else {
+          console.log('[SyncEffect] SCENARIO 3: Initial mount: No root in IDB.');
+        }
+      }).catch(err => console.warn('[SyncEffect] SCENARIO 3: Initial mount: Error loading root:', err));
     }
+  }, [currentProjectRootNameFromBuilder, onProjectRootChange, toastFn, impState.tag, impState.root?.name, performScan]);
+
+  useEffect(() => {
+    if (impState.tag === 'FILTER') {
+        lastCheckedIndexRef.current = null;
+    }
+  }, [impState.tag, impState.tops]);
+
+  // FIX: Simplified pickFolder.
+  const pickFolder = useCallback(async () => {
+    if (!window.showDirectoryPicker) { toastFn?.('Directory picker not supported.', 4000); return; }
     setAdding(true);
     try {
-      setEntryFilter({});
-      setTopEntries([]);
-      setInitialScanResults([]);
-      setStep('FILTER');
-      lastCheckedIndexRef.current = null;
-
       const dirHandle = await window.showDirectoryPicker();
-
-      setProjectRoot(dirHandle);
-      onProjectRootChange?.(dirHandle.name); // Inform parent about the new root
+      console.log('[pickFolder] User selected folder:', dirHandle.name);
       await saveRoot(dirHandle);
-
-      const tops = [];
-      for await (const [name, h] of dirHandle.entries()) {
-        tops.push({ name, kind: h.kind });
+      
+      if (impState.root?.name === dirHandle.name && (impState.tag === 'FILTER' || impState.tag === 'STAGED')) {
+        // User re-picked the exact same folder that's already active (but not scanning).
+        // Dispatch RESCAN_ROOT to signal intent to re-process this root.
+        console.log('[pickFolder] Re-picking same folder. Dispatching RESCAN_ROOT.');
+        dispatch({ type: 'RESCAN_ROOT' }); // Reducer sets to SCANNING, SyncEffect will call performScan.
+      } else {
+        // New folder, or different folder, or importer is IDLE/SCANNING.
+        // Let onProjectRootChange trigger the SyncEffect to handle it.
+        onProjectRootChange?.(dirHandle.name);
       }
-      setTopEntries(tops);
-
-      const allScannedCandidates = [];
-      const folderRejectionStats = {
-        count: 0, tooLarge: 0, tooLong: 0, unsupportedType: 0,
-        permissionDenied: 0, readError: 0, limitReached: 0
-      };
-      await scanDirForCandidates(dirHandle, allScannedCandidates, folderRejectionStats, dirHandle);
-      setInitialScanResults(allScannedCandidates);
-
-      const freshMap = {};
-      tops.forEach(e => { freshMap[e.name] = false; });
-      setEntryFilter(freshMap);
-
-      // After adding a folder, we don't immediately push files to parent.
-      // The user needs to select entries and click "Pick these Files" (which sets step='FILES').
-      // Effect B will then handle merging and calling onFilesChange.
-      // However, we should clear any existing non-project files from the parent
-      // if the user is now focusing on a new project folder.
-      // Or, preserve them? Current merge logic in Effect B preserves nonProjectFiles.
-      // For now, let's ensure `files` prop (which contains nonProjectFiles) is considered by Effect B.
-      // No direct onFilesChange([]) here, let user interaction via filter drive it.
-      // If there were previous non-project files, they will be shown alongside the new filter UI.
-
-      const rejectionMessage = formatRejectionMessage(folderRejectionStats);
-      if (rejectionMessage) {
-        const duration = (folderRejectionStats.permissionDenied > 0 || folderRejectionStats.readError > 0) ? 20000 : 15000;
-        toastFn?.(rejectionMessage, duration);
-      }
-
-    } catch (err) {
-      if (err.name !== 'AbortError') toastFn?.('Folder pick error: ' + err.message, 5000);
+    } catch (e) {
+      if (e.name !== 'AbortError') toastFn?.('Folder pick error: ' + e.message, 4000);
+      // If picking fails, don't change current root unless parent explicitly clears it.
+      // If there was no root, ensure we are IDLE.
+      if (!impState.root && impState.tag !== 'IDLE') dispatch({type: 'CLEAR_ALL'});
     } finally {
       setAdding(false);
     }
-  }, [files, onFilesChange, onProjectRootChange, toastFn]); // `files` is needed if we decide to clear non-project files here.
+  }, [toastFn, onProjectRootChange, impState.root, impState.tag]);
 
-  const handleCheckboxChange = useCallback((event, name, index) => {
-    const { checked } = event.target;
-    let newFilterState = { ...entryFilter };
+  const handleCheckboxChange = useCallback((event, path) => {
+    if (impState.tag !== 'FILTER') return;
+    const currentIndex = impState.tops.findIndex(t => t.name === path);
+    const desiredState = event.target.checked;
 
-    if (event.shiftKey && lastCheckedIndexRef.current !== null && lastCheckedIndexRef.current !== index) {
-        const start = Math.min(lastCheckedIndexRef.current, index);
-        const end = Math.max(lastCheckedIndexRef.current, index);
+    if (event.shiftKey && lastCheckedIndexRef.current !== null && currentIndex !== -1 && lastCheckedIndexRef.current !== currentIndex) {
+        const start = Math.min(lastCheckedIndexRef.current, currentIndex);
+        const end = Math.max(lastCheckedIndexRef.current, currentIndex);
+        const pathsToToggle = [];
         for (let i = start; i <= end; i++) {
-            if (topEntries[i]) {
-                newFilterState[topEntries[i].name] = checked;
-            }
+            if (impState.tops[i]) pathsToToggle.push(impState.tops[i].name);
         }
+        dispatch({ type: 'BULK_SELECT', paths: pathsToToggle, select: desiredState });
     } else {
-        newFilterState[name] = checked;
+        dispatch({ type: 'TOGGLE_SELECT', path: path, desiredState: desiredState });
     }
-    setEntryFilter(newFilterState);
-    lastCheckedIndexRef.current = index;
-  }, [entryFilter, topEntries]);
-
-
-  const handleAddImages = useCallback(async () => {
-    if (!window.showOpenFilePicker) {
-        toastFn?.('File picker is not supported in this browser.', 4000);
-        return;
+    if (currentIndex !== -1) {
+        lastCheckedIndexRef.current = currentIndex;
     }
-    let handles;
+  }, [impState.tag, impState.tops]);
+
+  const beginStagingAndReadTexts = useCallback(async () => {
+    if (impState.tag !== 'FILTER') return;
+    dispatch({ type: 'BEGIN_STAGING' });
+    setAdding(true);
     try {
-        setAdding(true);
-        handles = await window.showOpenFilePicker({
-            multiple: true,
-            types: [{
-                description: 'Images',
-                accept: {
-                    'image/png': ['.png'],
-                    'image/jpeg': ['.jpg', '.jpeg'],
-                    'image/webp': ['.webp'],
-                    'image/gif': ['.gif'],
+      const {stagedFiles, rejectionStats} = await processAndStageSelectedFiles(impState);
+      dispatch({ type: 'STAGING_DONE', files: stagedFiles });
+      const msg = formatRejectionMessage(rejectionStats, "file staging");
+      if (msg) toastFn?.(msg, 15000);
+    } catch (e) {
+      toastFn?.('Error reading file contents: ' + e.message, 5000);
+      dispatch({ type: 'CLEAR_ALL' });
+    } finally {
+      setAdding(false);
+    }
+  }, [impState, toastFn]);
+
+  const clearAllStatesAndNotifyParent = useCallback(() => {
+    if (!confirm('Remove all selected files and clear project root?')) return;
+    if(impState.root) clearIDBRoot().catch(err => console.error("Error clearing root from IDB:", err));
+    dispatch({ type: 'CLEAR_ALL' });
+    onProjectRootChange?.(null);
+  }, [onProjectRootChange, impState.root]);
+
+  const pickTextFilesAndDispatch = useCallback(async () => {
+    if (!window.showOpenFilePicker) { toastFn?.('File picker not supported.', 4000); return; }
+    setAdding(true);
+    const rejectionStats = { tooLarge: 0, tooLong: 0, unsupportedType: 0, limitReached: 0, readError: 0 };
+    let filesAddedCount = 0;
+    const currentFileCount = (impState.tag === 'STAGED' && impState.files) ? impState.files.length : 0;
+    try {
+      const handles = await window.showOpenFilePicker({ multiple: true });
+      const newFilesPayload = [];
+      for (const h of handles) {
+        if (currentFileCount + newFilesPayload.length >= FILE_LIMIT) { rejectionStats.limitReached++; continue; }
+        try {
+            const file = await h.getFile();
+            let currentFileRejected = false;
+            if (file.size > MAX_TEXT_FILE_SIZE) { rejectionStats.tooLarge++; currentFileRejected = true; }
+            if (!isTextLike(file)) { if(!currentFileRejected) rejectionStats.unsupportedType++; currentFileRejected = true; }
+            if (!currentFileRejected) {
+                const textContent = await file.text();
+                if (textContent.length > MAX_CHAR_LEN) { rejectionStats.tooLong++; currentFileRejected = true; }
+                if (!currentFileRejected) {
+                    newFilesPayload.push(makeStagedFile(file.name, file.size, file.type, textContent, false, file.name));
+                    filesAddedCount++;
                 }
-            }]
-        });
-    } catch (pickerErr) {
-        if (pickerErr.name !== 'AbortError') {
-            toastFn?.('Image picker error: ' + pickerErr.message, 4000);
-        }
-        setAdding(false);
-        return;
-    }
-
-    const failedUploads = [];
-    let successfulUploads = 0;
-
-    for (const h of handles) {
-      let currentFileName = "Unnamed file";
-      try {
-        const file = await h.getFile();
-        currentFileName = file.name;
-        const blob = await compressImageToWebP(file, 1024, 0.85);
-
-        const path = `public/images/${crypto.randomUUID()}.webp`;
-        const { error: upErr } = await supabase
-          .storage.from('images')
-          .upload(path, blob, { contentType: 'image/webp', upsert: false });
-        if (upErr) throw upErr;
-
-        const { data: pub, error: pubErr } =
-          supabase.storage.from('images').getPublicUrl(path);
-        if (pubErr) throw pubErr;
-
-        onAddImage?.({ name: file.name, url: pub.publicUrl, revoke: null });
-        successfulUploads++;
-      } catch (fileProcessingErr) {
-        console.error(`Error processing image ${currentFileName}:`, fileProcessingErr);
-        failedUploads.push({ name: currentFileName, reason: fileProcessingErr.message });
+            }
+        } catch (fileError) { console.warn(`Error processing file ${h.name}:`, fileError); rejectionStats.readError++; }
       }
-    }
+      if (newFilesPayload.length > 0) dispatch({ type: 'FILES_ADDED', files: newFilesPayload });
+      const msg = formatRejectionMessage(rejectionStats, "individual add");
+      if (msg) toastFn?.(msg, 8000);
+      else if (filesAddedCount > 0) toastFn?.(`${filesAddedCount} file(s) added.`, 3000);
+    } catch (err) { if (err.name !== 'AbortError') toastFn?.('File pick error: ' + err.message, 5000); }
+    finally { setAdding(false); }
+  }, [toastFn, impState.tag, impState.files]);
 
-    if (failedUploads.length > 0) {
-        const errorLimit = 2;
-        let summary = `${failedUploads.length} image${failedUploads.length > 1 ? 's' : ''} failed to upload: `;
-        summary += failedUploads.slice(0, errorLimit).map(f => f.name).join(', ');
-        if (failedUploads.length > errorLimit) {
-            summary += ` and ${failedUploads.length - errorLimit} more.`;
+  const handleAddImages = useCallback(async () => { /* ... (no change from previous) ... */
+    if (!window.showOpenFilePicker) { toastFn?.('File picker not supported.', 4000); return; }
+    setAdding(true);
+    let handles;
+    try { handles = await window.showOpenFilePicker({ multiple: true, types: [{ description: 'Images', accept: {'image/*': ['.png','.jpg','.jpeg','.gif','.webp']}}] }); }
+    catch(e){ if(e.name !== 'AbortError') toastFn?.(e.message); setAdding(false); return; }
+    let successCount = 0; let failCount = 0;
+    for(const h of handles){
+        try{
+            const file = await h.getFile();
+            const blob = await compressImageToWebP(file);
+            const path = `public/images/${crypto.randomUUID()}.webp`;
+            const {error:upErr} = await supabase.storage.from('images').upload(path,blob,{contentType:'image/webp', upsert:false});
+            if(upErr) throw upErr;
+            const {data:pub,error:pubErr} = supabase.storage.from('images').getPublicUrl(path);
+            if(pubErr) throw pubErr;
+            onAddImage?.({name:file.name, url:pub.publicUrl, revoke:null});
+            successCount++;
+        }catch(e){console.error(`[handleAddImages] Error for ${h.name}:`, e); toastFn?.(`Image ${h.name} failed: ${e.message}`,4000); failCount++;}
+    }
+    if(successCount > 0 && failCount === 0) toastFn?.(`${successCount} image(s) added.`, 2000);
+    else if (successCount > 0 && failCount > 0) toastFn?.(`${successCount} image(s) added, ${failCount} failed. Check console.`, 4000);
+    else if (failCount > 0 && successCount === 0 && handles.length > 0) toastFn?.(`All ${failCount} image uploads failed. Check console.`, 4000);
+    setAdding(false);
+  }, [onAddImage, toastFn]);
+
+  const handlePasteImage = useCallback(async () => { /* ... (no change from previous) ... */
+    if(!navigator.clipboard?.read){ toastFn?.('Clipboard API not supported or permission denied.',4000); return; }
+    setAdding(true);
+    try{
+        const items = await navigator.clipboard.read();
+        let pasted = false;
+        for(const it of items){
+            const mime = it.types.find(t=>t.startsWith('image/'));
+            if(!mime) continue;
+            const raw = await it.getType(mime);
+            const blob = await compressImageToWebP(raw);
+            const name = `clipboard_${Date.now()}.webp`;
+            const path = `public/images/${crypto.randomUUID()}.webp`;
+            const {error:upErr} = await supabase.storage.from('images').upload(path,blob,{contentType:'image/webp', upsert: false});
+            if(upErr) throw upErr;
+            const {data:pub,error:pubErr} = supabase.storage.from('images').getPublicUrl(path);
+            if(pubErr) throw pubErr;
+            onAddImage?.({name,url:pub.publicUrl,revoke:null});
+            toastFn?.('Image pasted.',2000); pasted = true; break;
         }
-        summary += " Check console for details."
-        toastFn?.(summary, 8000);
-    } else if (successfulUploads > 0) {
-        toastFn?.(`${successfulUploads} image${successfulUploads > 1 ? 's' : ''} added.`, 3000);
+        if(!pasted && items.length > 0) toastFn?.('No image found in clipboard.', 3000);
+        else if (items.length === 0) toastFn?.('Clipboard is empty or no readable items.', 3000);
+    }catch(e){
+        if(e.name === 'NotAllowedError') toastFn?.('Clipboard permission denied by browser.', 5000);
+        else { console.error("[handlePasteImage] Error:", e); toastFn?.('Paste failed: '+e.message,4000); }
     }
     setAdding(false);
   }, [onAddImage, toastFn]);
 
-  const handlePasteImage = useCallback(async () => {
-    if (!navigator.clipboard?.read) {
-      toastFn?.('Paste requires a secure context (HTTPS) and compatible browser.', 4000);
-      return;
-    }
-    try {
-      setAdding(true);
-      const items = await navigator.clipboard.read();
-      let imagePasted = false;
-      for (const it of items) {
-        const mime = it.types.find(t => t.startsWith('image/'));
-        if (!mime) continue;
-
-        const raw  = await it.getType(mime);
-        const blob = await compressImageToWebP(raw, 1024, 0.85);
-        const name = `clipboard_${Date.now()}.webp`;
-        const path = `public/images/${crypto.randomUUID()}.webp`;
-
-        const { error: upErr } = await supabase
-          .storage.from('images')
-          .upload(path, blob, { contentType: 'image/webp', upsert: false });
-        if (upErr) throw upErr;
-
-        const { data: pub, error: pubErr } =
-          supabase.storage.from('images').getPublicUrl(path);
-        if (pubErr) throw pubErr;
-
-        onAddImage?.({ name, url: pub.publicUrl, revoke: null });
-        toastFn?.('Image pasted & added.', 2000);
-        imagePasted = true;
-        break;
-      }
-      if (!imagePasted) {
-          toastFn?.('No image found in clipboard.', 3000);
-      }
-    } catch (err) {
-      if (err.name === 'NotAllowedError') {
-        toastFn?.('Browser denied clipboard access. Please check permissions.', 5000);
-      } else {
-        console.error("Paste image error:", err);
-        toastFn?.('Paste image failed: ' + err.message, 5000);
-      }
-    } finally {
-      setAdding(false);
-    }
-  }, [onAddImage, toastFn]);
-
-  const handleAddPDF = useCallback(async () => {
-    if (!settings || !settings.apiKey || String(settings.apiKey).trim() === "") {
-      toastFn?.('Gemini API Key not set. Please set it in application settings.', 5000);
-      return;
-    }
-    if (!window.showOpenFilePicker) {
-      toastFn?.('File picker is not supported in this browser.', 4000);
-      return;
-    }
-
+  const handleAddPDF = useCallback(async () => { /* ... (no change from previous) ... */
+    if (!settings?.apiKey || String(settings.apiKey).trim() === "") { toastFn?.('Gemini API Key not set.', 5000); return; }
+    if (!window.showOpenFilePicker) { toastFn?.('File picker not supported.', 4000); return; }
+    setAdding(true);
     let handles;
-    try {
-        setAdding(true);
-        handles = await window.showOpenFilePicker({
-            multiple: true,
-            types: [{ description: 'PDF', accept: { 'application/pdf': ['.pdf'] } }]
-        });
-    } catch (pickerErr) {
-        if (pickerErr.name !== 'AbortError') {
-            toastFn?.('PDF picker error: ' + pickerErr.message, 4000);
-        }
-        setAdding(false);
-        return;
-    }
-
-    const failedUploads = [];
-    let successfulUploads = 0;
+    try { handles = await window.showOpenFilePicker({ multiple: true, types: [{ description: 'PDF', accept: { 'application/pdf': ['.pdf'] } }] }); }
+    catch (e) { if (e.name !== 'AbortError') toastFn?.('PDF picker error: ' + e.message, 4000); setAdding(false); return; }
+    let successCount = 0; let failCount = 0;
     let genAI;
-    try {
-        genAI = new GoogleGenAI({ apiKey: settings.apiKey });
-    } catch(sdkErr) {
-        toastFn?.('Failed to initialize Gemini SDK: ' + sdkErr.message, 5000);
-        setAdding(false);
-        return;
-    }
+    try { genAI = new GoogleGenAI({ apiKey: settings.apiKey });
+    } catch (sdkInitError) { console.error('[handleAddPDF] SDK Init Error:', sdkInitError); toastFn?.('Gemini SDK init failed: ' + sdkInitError.message, 5000); setAdding(false); return; }
 
     for (const h of handles) {
       let currentFileName = "Unnamed PDF";
       try {
-        const file = await h.getFile();
-        currentFileName = file.name;
-
-        const uploadedFile = await genAI.files.upload({
-          file: file,
-          config: {
-            mimeType: file.type || 'application/pdf',
-            displayName: file.name,
-          }
-        });
-
-        if (uploadedFile && uploadedFile.uri && uploadedFile.name) {
-          onAddPDF?.({
-            name: file.name,
-            fileId: uploadedFile.uri,
-            mimeType: uploadedFile.mimeType || 'application/pdf',
-            resourceName: uploadedFile.name
-          });
-          successfulUploads++;
-        } else {
-          throw new Error(`Gemini file upload for ${file.name} did not return expected data.`);
-        }
-      } catch (fileProcessingErr) {
-        console.error(`[CodebaseImporter - handleAddPDF] Error processing PDF ${currentFileName}:`, fileProcessingErr, fileProcessingErr.stack);
-        failedUploads.push({ name: currentFileName, reason: fileProcessingErr.message });
-      }
+        const file = await h.getFile(); currentFileName = file.name;
+        const uploadedFileResponse = await genAI.files.upload({ file: file, config: { mimeType: file.type || 'application/pdf', displayName: file.name, } });
+        if (uploadedFileResponse?.uri) {
+          onAddPDF?.({ name: uploadedFileResponse.displayName || file.name, fileId: uploadedFileResponse.uri, mimeType: uploadedFileResponse.mimeType, resourceName: uploadedFileResponse.name, });
+          successCount++;
+        } else throw new Error(`Gemini PDF upload for ${file.name} missing URI.`);
+      } catch (fileProcessingErr) { console.error(`[handleAddPDF] Error for ${currentFileName}:`, fileProcessingErr); toastFn?.(`PDF ${currentFileName} failed: ${fileProcessingErr.message}`, 6000); failCount++; }
     }
-
-    if (failedUploads.length > 0) {
-        const errorLimit = 2;
-        let summary = `${failedUploads.length} PDF${failedUploads.length > 1 ? 's' : ''} failed to upload: `;
-        summary += failedUploads.slice(0, errorLimit).map(f => f.name).join(', ');
-        if (failedUploads.length > errorLimit) {
-            summary += ` and ${failedUploads.length - errorLimit} more.`;
-        }
-        summary += " Check console for details."
-        toastFn?.(summary, 8000);
-    } else if (successfulUploads > 0) {
-        toastFn?.(`${successfulUploads} PDF${successfulUploads > 1 ? 's' : ''} added.`, 3000);
-    }
+    if (successCount > 0 && failCount === 0) toastFn?.(`${successCount} PDF(s) uploaded.`, 3000);
+    else if (successCount > 0 && failCount > 0) toastFn?.(`${successCount} PDF(s) uploaded, ${failCount} failed.`, 5000);
+    else if (failCount > 0 && successCount === 0 && handles.length > 0) toastFn?.(`All ${failCount} PDF uploads failed.`, 5000);
     setAdding(false);
   }, [onAddPDF, settings, toastFn]);
 
+  useEffect(() => { // Effect to call onFilesChange
+    if (impState.tag === 'STAGED') {
+      const filesToParent = impState.files.map(f => ({
+          id: f.id,
+          fullPath: f.path,
+          text: f.text,
+          insideProject: f.insideProject,
+          name: f.name
+      }));
+      const currentHash = filesToParent.map(f => f.id).sort().join(',');
+      if (currentHash !== lastNotifiedFilesIdHashRef.current) {
+          console.log('[onFilesChangeEffect] STAGED. Notifying parent with', filesToParent.length, 'files. UID Hash:', currentHash);
+          onFilesChange(filesToParent.slice(0, FILE_LIMIT));
+          lastNotifiedFilesIdHashRef.current = currentHash;
+      } else {
+          console.log('[onFilesChangeEffect] STAGED. File list (by ID) unchanged, not notifying parent. UID Hash:', currentHash);
+      }
+    } else if (impState.tag === 'IDLE') {
+      if (lastNotifiedFilesIdHashRef.current !== '') {
+          console.log('[onFilesChangeEffect] IDLE. Notifying parent with [].');
+          onFilesChange([]);
+          lastNotifiedFilesIdHashRef.current = '';
+      }
+    }
+  }, [impState, onFilesChange]);
 
-  return (
+  const phase = impState.tag;
+  const currentRootName = impState.root ? impState.root.name : null;
+  const isLoadingOperation = adding || phase === 'SCANNING' || phase === 'STAGING';
+
+  return ( /* ... JSX remains largely the same ... */
     <div className="file-pane-container">
       <h2>Codebase Importer</h2>
-      {projectRoot && (
-        <div style={{ marginBottom: 8, fontSize: '0.85rem', opacity: 0.8 }}>
-          Root: <code>{projectRoot.name}</code>
-        </div>
-      )}
+      {currentRootName && ( <div style={{ marginBottom: 8, fontSize: '0.85rem', opacity: 0.8 }}> Root: <code>{currentRootName}</code> </div> )}
       <div style={{ display: 'flex', gap: 8, marginBottom: '1rem', flexWrap: 'wrap' }}>
-        <button className="button" onClick={addFiles}        disabled={adding}>+ Add Files</button>
-        <button className="button" onClick={addFolder}       disabled={adding}>+ Add Folder</button>
+        <button className="button" onClick={pickTextFilesAndDispatch} disabled={isLoadingOperation}>+ Add Files</button>
+        <button className="button" onClick={pickFolder} disabled={isLoadingOperation}>+ Add Folder</button>
         <button className="button" onClick={handleAddImages} disabled={adding}>+ Add Images</button>
         <button className="button" onClick={handlePasteImage} disabled={adding}>Paste Image</button>
-        <button className="button" onClick={handleAddPDF}    disabled={adding}>+ Add PDF</button>
-        <button
-          className="button"
-          onClick={clearAll}
-          disabled={adding}
-          style={files.length || projectRoot || topEntries.length || Object.keys(entryFilter).length ? { background: '#b71c1c', color: '#fff' } : {}}
-        >
-          Clear List
+        <button className="button" onClick={handleAddPDF} disabled={adding}>+ Add PDF</button>
+        <button className="button" onClick={clearAllStatesAndNotifyParent}
+          disabled={isLoadingOperation || phase === 'IDLE'}
+          style={(phase !== 'IDLE') ? { background: '#b71c1c', color: '#fff' } : {}} > Clear List
         </button>
       </div>
-      {step === 'FILTER' && topEntries.length > 0 && projectRoot && (
-        <div>
-          <h3>Select entries to include from '{projectRoot.name}'</h3>
-          {adding && (
-            <div className="analysing-animation-container">
-              <span className="analysing-text">Analysing project files</span>
-              <div className="analysing-dots">
-                <span></span>
-                <span></span>
-                <span></span>
-              </div>
-            </div>
-          )}
-          <div style={{
-            maxHeight: '200px',
-            overflowY: 'auto',
-            padding: '4px 0',
-            border: '1px solid var(--border)',
-            borderRadius: '4px',
-            marginBottom: '8px'
-          }}>
-            {topEntries.map(({ name, kind }, index) => (
-              <label key={name} style={{ display: 'block', margin: '4px 8px', cursor: 'pointer' }}>
-                <input
-                  type="checkbox"
-                  checked={entryFilter[name] === true}
-                  onChange={e => handleCheckboxChange(e, name, index)}
-                  style={{ marginRight: '8px' }}
-                  disabled={adding}
-                />
-                {kind === 'directory' ? '📁' : '📄'} <strong>{name}</strong>
+      {(phase === 'SCANNING' || phase === 'STAGING') && (
+         <div className="analysing-animation-container">
+            <span className="analysing-text">{phase === 'SCANNING' ? 'Scanning folder (metadata)...' : 'Processing selected files...'}</span>
+            <div className="analysing-dots"><span></span><span></span><span></span></div>
+        </div>
+      )}
+      {phase === 'FILTER' && impState.tops && (
+        <>
+          <h3>Select entries to include from '{currentRootName}'</h3>
+          <div style={{ maxHeight: '200px', overflowY: 'auto', padding: '4px 0', border: '1px solid var(--border)', borderRadius: '4px', marginBottom: '8px' }}>
+            {impState.tops.map((t, index) => (
+              <label key={t.name} style={{ display: 'block', margin: '4px 8px', cursor: 'pointer' }}>
+                <input type="checkbox" checked={impState.selected.has(t.name)}
+                  onChange={e => handleCheckboxChange(e, t.name)}
+                  style={{ marginRight: '8px' }} disabled={isLoadingOperation} />
+                {t.kind === 'directory' ? '📁' : '📄'} <strong>{t.name}</strong>
               </label>
             ))}
           </div>
-          <button
-            className="button button-accent button-glow"
-            style={{ marginTop: 8 }}
-            onClick={() => setStep('FILES')}
-            disabled={adding}
-          >
-            { adding ? 'Analysing…' : 'Pick these Files' }
+          <button className="button button-accent button-glow" style={{ marginTop: 8 }}
+            disabled={isLoadingOperation || !impState.selected || impState.selected.size === 0}
+            onClick={beginStagingAndReadTexts} > Pick these Files
           </button>
-        </div>
+        </>
       )}
-      {(step === 'FILES' || (step === 'FILTER' && (!projectRoot || topEntries.length === 0))) && (
+      {phase === 'STAGED' && impState.files && (
         <>
-          {!!files.length && (
-            <p style={{ marginBottom: '8px', fontSize: '0.9em' }}>
-              {files.length} text file{files.length !== 1 ? 's' : ''} ready for prompt.
-            </p>
-          )}
-          {!!files.length && (
+          <p style={{ marginBottom: '8px', fontSize: '0.9em' }}> {impState.files.length} text file(s) staged. </p>
+          {impState.files.length > 0 && (
             <ul className="file-pane-filelist">
-              {files.map((f, i) => (
-                <li key={`${f.fullPath}-${i}-${f.checksum}`} style={{ position: 'relative' }}>
-                  {f.note
-                    ? <span title={f.note}>{f.fullPath}</span>
-                    : f.insideProject
-                      ? f.fullPath
-                      : <span title="This file is not part of the selected project root. Its path is its name.">📄 {f.fullPath}</span>
-                  }
+              {impState.files.map((f) => (
+                <li key={f.id} title={f.path}> 
+                  {f.path.length > 50 ? `...${f.path.slice(-47)}` : f.path}
+                  {/* Example Remove Button:
                   <button
-                    className="remove-file-btn"
-                    style={{
-                      position: 'absolute', top: 2, right: 4,
-                      background: 'none', border: 'none',
-                      color: '#ff7373', cursor: 'pointer',
-                      fontWeight: 'bold', fontSize: '1rem',
-                      padding: '0 4px', lineHeight: '1'
-                    }}
-                    title="Remove"
-                    onClick={() => onFilesChange(files.filter((_, j) => j !== i))}
-                  >×</button>
+                    onClick={() => dispatch({type: 'REMOVE_STAGED_FILE', id: f.id})}
+                    style={{ marginLeft: '10px', cursor: 'pointer', color: 'red', background: 'none', border: 'none'}}
+                  > × </button>
+                  */}
                 </li>
               ))}
             </ul>
           )}
-          {files.length === 0 && (step === 'FILES' || (step === 'FILTER' && (!projectRoot || topEntries.length === 0))) && (
-            <p style={{ color: 'var(--text-secondary)' }}>No text files added yet. Use the buttons above or select items from a chosen folder.</p>
-          )}
-           {files.length === 0 && step === 'FILES' && projectRoot && topEntries.length > 0 && (
-            <p style={{ color: 'var(--text-secondary)' }}>No top-level items selected from '{projectRoot.name}'. Check some boxes and click "Pick these Files".</p>
-          )}
+          {impState.files.length === 0 && ( <p style={{ color: 'var(--text-secondary)' }}>No text files staged. Add files or select from a folder.</p> )}
         </>
       )}
+      {phase === 'IDLE' && !isLoadingOperation && ( <p style={{ color: 'var(--text-secondary)' }}>No text files added yet. Use "+ Add Files" or select a folder.</p> )}
     </div>
   );
 }

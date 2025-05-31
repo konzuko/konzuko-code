@@ -2,6 +2,8 @@
    - Accepts currentChatId, sendDisabled, and sendButtonText props.
    - Uses sendDisabled for button disable state.
    - Uses sendButtonText for the button's dynamic text.
+   - PR-5: Receives `importedCodeFiles` instead of managing `pendingFiles`.
+   - PR-5: Receives `onCodeFilesChange` to update App's `stagedCodeFiles`.
 */
 import { useEffect, useRef, useMemo } from 'preact/hooks';
 import { del } from 'idb-keyval';
@@ -22,20 +24,22 @@ export default function PromptBuilder({
   handleSend,
   showToast,
 
-  imagePreviews = [],
-  pdfPreviews = [],
-  onRemoveImage,
+  imagePreviews = [], // Still managed by usePromptBuilder, passed from App
+  pdfPreviews = [],   // Still managed by usePromptBuilder, passed from App
+  onRemoveImage,      // Still managed by usePromptBuilder, passed from App
 
-  onAddImage,
-  onAddPDF,
+  onAddImage,         // Passed from App for CodebaseImporter
+  onAddPDF,           // Passed from App for CodebaseImporter
 
   settings,
   hasLastSendFailed,
 
-  pendingFiles,
-  onFilesChange,
-  onProjectRootChange,
-  promptBuilderRootName,
+  // PR-5: Props related to code files are now different
+  importedCodeFiles,      // Received from App.jsx (this is `stagedCodeFiles` from App)
+  onCodeFilesChange,    // This is `setStagedCodeFiles` from App.jsx, passed to CodebaseImporter as `onFilesChange`
+
+  onProjectRootChange,    // Passed from App for CodebaseImporter
+  promptBuilderRootName,  // Passed from App for CodebaseImporter (this is `currentProjectRootName` from App's usePromptBuilder)
 
   currentChatId,
 }) {
@@ -65,6 +69,7 @@ export default function PromptBuilder({
   }, []);
 
   useEffect(() => {
+    // This was likely for an old context mechanism, can probably be removed if 'devCtx' is no longer used.
     del('devCtx').catch(() => {});
   }, []);
 
@@ -112,13 +117,10 @@ export default function PromptBuilder({
       {mode === 'DEVELOP' &&
         fields.map(([label, key, rows]) => {
           if (key === 'developReturnFormat_custom') {
-            // Special handling for RETURN FORMAT field
             return (
               <div key={key} className="form-group">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                  <label htmlFor={key} style={{ fontWeight: 'normal' }}>{label}</label> {/* Label: RETURN FORMAT */}
-
-                  {/* Switch and its label */}
+                  <label htmlFor={key} style={{ fontWeight: 'normal' }}>{label}</label>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                     <span style={{ fontSize: '0.9em', color: 'var(--text-primary)', userSelect: 'none' }}>Complete Codeblocks</span>
                     <div
@@ -126,7 +128,7 @@ export default function PromptBuilder({
                       onClick={() => setForm(f => ({ ...f, developReturnFormat_autoIncludeDefault: !f.developReturnFormat_autoIncludeDefault }))}
                       role="switch"
                       aria-checked={form.developReturnFormat_autoIncludeDefault}
-                      tabIndex={0} // Make it focusable
+                      tabIndex={0}
                       onKeyPress={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setForm(f => ({ ...f, developReturnFormat_autoIncludeDefault: !f.developReturnFormat_autoIncludeDefault }));}}}
                       title={form.developReturnFormat_autoIncludeDefault
                               ? "ON: Auto-include instruction for full code blocks. Click or press Space/Enter to turn OFF."
@@ -141,12 +143,12 @@ export default function PromptBuilder({
                   </div>
                 </div>
                 <textarea
-                  id={key} // Matches htmlFor
+                  id={key}
                   ref={(el) => (textareaRefs.current[key] = el)}
                   rows={rows}
                   className="form-textarea"
                   style={{ maxHeight: `${MAX_PROMPT_TEXTAREA_HEIGHT}px` }}
-                  value={form[key]} // Binds to developReturnFormat_custom
+                  value={form[key]}
                   onInput={(e) => {
                     setForm((f) => ({ ...f, [key]: e.target.value }));
                     autoResizeTextarea(e.target, MAX_PROMPT_TEXTAREA_HEIGHT);
@@ -156,12 +158,11 @@ export default function PromptBuilder({
               </div>
             );
           }
-          // Default handling for other fields
           return (
             <div key={key} className="form-group">
               <label htmlFor={key}>{label}</label>
               <textarea
-                id={key} // Matches htmlFor
+                id={key}
                 ref={(el) => (textareaRefs.current[key] = el)}
                 rows={rows}
                 className="form-textarea"
@@ -178,14 +179,16 @@ export default function PromptBuilder({
 
       {mode === 'DEVELOP' && (
         <CodebaseImporter
-          files={pendingFiles}
-          onFilesChange={onFilesChange}
+          // PR-5: Pass `onCodeFilesChange` from App as `onFilesChange` to CodebaseImporter
+          // The `files` prop to CodebaseImporter is removed, as it now manages its internal state
+          // and only calls `onFilesChange` (which is `onCodeFilesChange` here) to update App.
+          onFilesChange={onCodeFilesChange}
           toastFn={showToast}
-          onAddImage={onAddImage}
-          onAddPDF={onAddPDF}
+          onAddImage={onAddImage} // Passed through for PR-4
+          onAddPDF={onAddPDF}     // Passed through for PR-4
           settings={settings}
-          onProjectRootChange={onProjectRootChange}
-          currentProjectRootNameFromBuilder={promptBuilderRootName}
+          onProjectRootChange={onProjectRootChange} // Pass through from App
+          currentProjectRootNameFromBuilder={promptBuilderRootName} // Pass through from App
         />
       )}
 
