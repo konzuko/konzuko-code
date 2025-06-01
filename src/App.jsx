@@ -10,7 +10,7 @@ import {
 import ChatList from './ChatList.jsx';
 import PromptBuilder from './PromptBuilder.jsx';
 import ChatArea from './components/ChatArea.jsx';
-import Toast from './components/Toast.jsx';
+import Toast from './components/Toast.jsx'; // Direct import for Toast
 
 import { GEMINI_MODEL_NAME } from './api.js';
 import {
@@ -19,7 +19,7 @@ import {
     MAX_ABSOLUTE_TOKEN_LIMIT
 } from './config.js';
 
-import { useSettings } from './hooks.js';
+import { useDisplaySettings } from './hooks.js'; // UPDATED: Was useSettings
 import { useChatSessionManager } from './hooks/useChatSessionManager.js';
 import { useMessageManager } from './hooks/useMessageManager.js';
 import { usePromptBuilder } from './hooks/usePromptBuilder.js';
@@ -27,6 +27,7 @@ import { useScrollNavigation } from './hooks/useScrollNavigation.js';
 
 import { useTokenizableContent } from './hooks/useTokenizableContent.js';
 import { countTokensWithGemini } from './lib/tokenWorkerClient.js';
+import { supabase } from './lib/supabase.js'; // NEW: For Edge Function calls
 
 const debounce = (func, delay) => {
   let timeoutId;
@@ -37,7 +38,17 @@ const debounce = (func, delay) => {
 };
 
 export default function App() {
-  const [settings, setSettings] = useSettings();
+  const [displaySettings, setDisplaySettings] = useDisplaySettings();
+  const [apiKey, setApiKey] = useState('');
+  const [isApiKeyLoading, setIsApiKeyLoading] = useState(true);
+  // const [apiKeyError, setApiKeyError] = useState(null); // For displaying error if needed
+
+  // Memoized combined settings object for passing to other components/hooks
+  const settings = useMemo(() => ({
+    ...displaySettings,
+    apiKey,
+  }), [displaySettings, apiKey]);
+
   const previousChatIdRef = useRef(null);
   const [isSwitchingChat, setIsSwitchingChat] = useState(false);
   const [hasLastSendFailed, setHasLastSendFailed] = useState(false);
@@ -55,6 +66,7 @@ export default function App() {
     isCreatingChat,
   } = useChatSessionManager();
 
+  // Pass the reactive `settings.apiKey` (which comes from `apiKey` state)
   const {
     messages,
     isLoadingMessages,
@@ -96,6 +108,66 @@ export default function App() {
     scrollToBottom,
   } = useScrollNavigation();
 
+  // Fetch API key on initial mount
+  useEffect(() => {
+    const fetchApiKey = async () => {
+      setIsApiKeyLoading(true);
+      // setApiKeyError(null);
+      try {
+        const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+        if (sessionError || !sessionData.session) {
+          // User not logged in, AuthGate will handle this. API key remains empty.
+          // console.log("No session, API key not fetched by App.jsx.");
+          setIsApiKeyLoading(false);
+          return;
+        }
+
+        const { data, error: invokeError } = await supabase.functions.invoke('manage-api-key', {
+          method: 'GET',
+        });
+
+        if (invokeError) throw invokeError;
+        
+        if (data && typeof data.apiKey === 'string') {
+          setApiKey(data.apiKey);
+        } else if (data && data.error) { // Error from within the function's JSON response
+            throw new Error(data.error);
+        }
+      } catch (err) {
+        console.error('Failed to fetch API key:', err);
+        // setApiKeyError(err.message || 'Failed to load API key.');
+        Toast(`Error fetching API key: ${err.message}`, 5000);
+      } finally {
+        setIsApiKeyLoading(false);
+      }
+    };
+    fetchApiKey();
+  }, []); // Empty dependency array ensures this runs once on mount
+
+  // Save API key to Supabase Edge Function
+  const handleApiKeyChangeAndSave = async (newApiKey) => {
+    const oldApiKey = apiKey;
+    setApiKey(newApiKey); // Optimistic UI update
+
+    try {
+      const { error: invokeError, data:responseData } = await supabase.functions.invoke('manage-api-key', {
+        method: 'POST',
+        body: { apiKey: newApiKey },
+      });
+
+      if (invokeError) throw invokeError;
+      if (responseData && responseData.error) throw new Error(responseData.error);
+
+      Toast('API key saved!', 3000);
+    } catch (err) {
+      console.error('Failed to save API key:', err);
+      setApiKey(oldApiKey); // Revert on error
+      Toast(`Error saving API key: ${err.message}`, 5000);
+      // setApiKeyError(err.message || 'Failed to save API key.');
+    }
+  };
+
+
   const handleSelectChat = useCallback(
     (newChatId) => {
       if (newChatId === currentChatId && !isSwitchingChat) return;
@@ -123,9 +195,9 @@ export default function App() {
   );
 
   const callWorkerForTotalTokenCount = useCallback(
-    (currentItemsForApi, apiKey, model) => {
+    (currentItemsForApi, currentApiKey, model) => { // Added currentApiKey
       const currentVersion = ++tokenCountVersionRef.current;
-      if (!apiKey || String(apiKey).trim() === "" || !currentItemsForApi || currentItemsForApi.length === 0) {
+      if (!currentApiKey || String(currentApiKey).trim() === "" || !currentItemsForApi || currentItemsForApi.length === 0) {
         if (tokenCountVersionRef.current === currentVersion) {
           setTotalApiTokenCount(0);
           setIsCountingApiTokens(false);
@@ -135,7 +207,7 @@ export default function App() {
       if (tokenCountVersionRef.current === currentVersion) setIsCountingApiTokens(true);
       else return;
 
-      countTokensWithGemini(apiKey, model, currentItemsForApi)
+      countTokensWithGemini(currentApiKey, model, currentItemsForApi) // Pass currentApiKey
         .then(count => {
           if (tokenCountVersionRef.current === currentVersion) setTotalApiTokenCount(count);
         })
@@ -155,7 +227,7 @@ export default function App() {
       debouncedApiCallRef.current = debounce(callWorkerForTotalTokenCount, 1500);
     }
     const modelToUse = settings.model || GEMINI_MODEL_NAME;
-    debouncedApiCallRef.current(itemsForApiCount, settings.apiKey, modelToUse);
+    debouncedApiCallRef.current(itemsForApiCount, settings.apiKey, modelToUse); // Pass settings.apiKey
   }, [itemsForApiCount, settings.apiKey, settings.model, callWorkerForTotalTokenCount]);
 
 
@@ -187,8 +259,8 @@ export default function App() {
   );
 
   const globalBusy = useMemo(
-    () => isLoadingSession || isSwitchingChat || isAppGloballySending,
-    [isLoadingSession, isSwitchingChat, isAppGloballySending]
+    () => isLoadingSession || isSwitchingChat || isAppGloballySending || isApiKeyLoading, // Added isApiKeyLoading
+    [isLoadingSession, isSwitchingChat, isAppGloballySending, isApiKeyLoading]
   );
 
   const navRailDisabled = useMemo(
@@ -208,13 +280,14 @@ export default function App() {
       if (isResendingMessage) return { text: 'Resending…', disabled: true };
       return { text: 'Processing…', disabled: true };
     }
+    if (isApiKeyLoading) return { text: 'Loading Key...', disabled: true }; // NEW
     if (!settings.apiKey) return { text: 'Set API Key', disabled: false };
     if (!currentChatId) return { text: 'Select Chat', disabled: false };
     if (isHardTokenLimitReached) return { text: 'Token Limit Exceeded', disabled: true };
     return { text: 'Send', disabled: false };
   }, [
     isAppGloballySending, isSendingMessage, isSavingEdit, isResendingMessage,
-    settings.apiKey, currentChatId, isHardTokenLimitReached,
+    settings.apiKey, currentChatId, isHardTokenLimitReached, isApiKeyLoading, // Added isApiKeyLoading
   ]);
 
   const finalSendButtonDisabled = sendButtonDisplayInfo.disabled || globalBusy;
@@ -237,8 +310,7 @@ export default function App() {
       setHasLastSendFailed(false);
       cleanupRaf = requestAnimationFrame(() => {
         if (editingId) cancelEdit();
-        resetPrompt(); // This calls handleProjectRootChange(null), leading to CodebaseImporter clearing and calling onFilesChange([])
-        // FIX: Removed redundant setStagedCodeFiles([]) here.
+        resetPrompt();
       });
       if (currentChatId) {
         scrollRaf = requestAnimationFrame(() => scrollToBottom('auto'));
@@ -260,9 +332,14 @@ export default function App() {
     if (isAppGloballySending) { Toast("An operation is already in progress.", 3000); return; }
     if (isHardTokenLimitReached) { Toast(`Prompt too large (max ${MAX_ABSOLUTE_TOKEN_LIMIT.toLocaleString()} tokens).`, 8000); return; }
     if (!currentChatId) { Toast('Please select or create a chat first.', 3000); return; }
+    
     if (!settings.apiKey || String(settings.apiKey).trim() === '') {
+      if (isApiKeyLoading) { // Check if key is still loading
+        Toast('API Key is still loading. Please wait.', 3000);
+        return;
+      }
       Toast('Gemini API Key missing. Please set it in settings.', 5000);
-      setSettings((s) => ({ ...s, showSettings: true }));
+      setDisplaySettings((s) => ({ ...s, showSettings: true })); // Use setDisplaySettings
       return;
     }
 
@@ -285,17 +362,16 @@ export default function App() {
     if (userMessageContentBlocks.length === 0) { Toast('Cannot send an empty message.', 3000); return; }
 
     sendMessage({ userMessageContentBlocks, existingMessages: messages });
-    resetPrompt(); // This will also lead to stagedCodeFiles being cleared via CodebaseImporter's onFilesChange.
-    // FIX: Removed redundant setStagedCodeFiles([]) here.
+    resetPrompt();
   }
 
-  const handleCopyAll = () => { /* ... (no change) ... */
+  const handleCopyAll = () => {
     const txt = messages.map((m) => { const blocks = Array.isArray(m.content) ? m.content : [{ type: 'text', text: String(m.content ?? '') }]; return blocks.filter((b) => b.type === 'text').map((b) => b.text).join('\n'); }).join('\n\n');
     navigator.clipboard.writeText(txt).then(() => Toast('Copied all text!', 2000)).catch(() => Toast('Copy failed.', 4000));
   };
-  const handleUpdateChatTitleTrigger = useCallback( /* ... (no change) ... */ (id, title) => { if (isAppGloballySending) { Toast("Cannot update title while an operation is in progress.", 3000); return; } if (!id) { console.error('handleUpdateChatTitleTrigger called with undefined id'); Toast('Error: Could not update title.', 4000); return; } updateChatTitle({ id, title }); }, [updateChatTitle, isAppGloballySending]);
-  const handleNewChatTrigger = useCallback( /* ... (no change) ... */ () => { if (isAppGloballySending) { Toast("Cannot create new chat while an operation is in progress.", 3000); return; } createChat(); }, [createChat, isAppGloballySending]);
-  const handleDeleteChatTrigger = useCallback( /* ... (no change) ... */ (chatId) => { if (isAppGloballySending) { Toast("Cannot delete chat while an operation is in progress.", 3000); return; } deleteChat(chatId); }, [deleteChat, isAppGloballySending]);
+  const handleUpdateChatTitleTrigger = useCallback((id, title) => { if (isAppGloballySending) { Toast("Cannot update title while an operation is in progress.", 3000); return; } if (!id) { console.error('handleUpdateChatTitleTrigger called with undefined id'); Toast('Error: Could not update title.', 4000); return; } updateChatTitle({ id, title }); }, [updateChatTitle, isAppGloballySending]);
+  const handleNewChatTrigger = useCallback(() => { if (isAppGloballySending) { Toast("Cannot create new chat while an operation is in progress.", 3000); return; } createChat(); }, [createChat, isAppGloballySending]);
+  const handleDeleteChatTrigger = useCallback((chatId) => { if (isAppGloballySending) { Toast("Cannot delete chat while an operation is in progress.", 3000); return; } deleteChat(chatId); }, [deleteChat, isAppGloballySending]);
 
   return (
     <div className="app-container">
@@ -309,8 +385,8 @@ export default function App() {
       />
       <div className="main-content">
         <div className="top-bar">
-          <button className="button" onClick={() => setSettings((s) => ({ ...s, showSettings: !s.showSettings }))} disabled={globalBusy} >
-            {settings.showSettings ? 'Close Settings' : 'Open Settings'}
+          <button className="button" onClick={() => setDisplaySettings((s) => ({ ...s, showSettings: !s.showSettings }))} disabled={globalBusy} >
+            {displaySettings.showSettings ? 'Close Settings' : 'Open Settings'}
           </button>
           <span style={{ margin: '0 1em', fontWeight: 'bold' }}>
             Konzuko&nbsp;AI {isAppGloballySending && (isSendingMessage ? "(Sending...)" : isSavingEdit ? "(Saving...)" : isResendingMessage ? "(Resending...)" : "(Processing...)") }
@@ -332,15 +408,23 @@ export default function App() {
           </div>
         </div>
 
-        {settings.showSettings && (
+        {displaySettings.showSettings && (
           <div className="settings-panel">
             <div className="form-group">
               <label htmlFor="apiKeyInputApp"> Gemini API Key (Google AI Studio): </label>
-              <input id="apiKeyInputApp" className="form-input" type="password" value={settings.apiKey} onInput={(e) => setSettings((s) => ({ ...s, apiKey: e.target.value })) } placeholder="Enter your Gemini API Key" />
+              <input 
+                id="apiKeyInputApp" 
+                className="form-input" 
+                type="password" 
+                value={apiKey} // Use apiKey state
+                onInput={(e) => handleApiKeyChangeAndSave(e.target.value)} // Use new handler
+                placeholder={isApiKeyLoading ? "Loading API Key..." : "Enter your Gemini API Key"}
+                disabled={isApiKeyLoading}
+              />
             </div>
             <div className="form-group">
               <label htmlFor="modelInputApp">Model:</label>
-              <input id="modelInputApp" className="form-input" value={GEMINI_MODEL_NAME} readOnly />
+              <input id="modelInputApp" className="form-input" value={settings.model} readOnly />
             </div>
           </div>
         )}
@@ -368,7 +452,8 @@ export default function App() {
               handleSend={handleSend} showToast={Toast}
               imagePreviews={pendingImages} pdfPreviews={pendingPDFs}
               onRemoveImage={removePendingImage} onAddImage={addPendingImage} onAddPDF={addPendingPDF}
-              settings={settings} hasLastSendFailed={hasLastSendFailed}
+              settings={settings} // Pass combined settings (includes apiKey state)
+              hasLastSendFailed={hasLastSendFailed}
               importedCodeFiles={stagedCodeFiles}
               onCodeFilesChange={setStagedCodeFiles}
               onProjectRootChange={handleProjectRootChange}

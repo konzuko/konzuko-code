@@ -1,21 +1,12 @@
 /* -------------------------------------------------------------------------
    src/hooks.js
    Shared utility hooks + file/dir helpers
-
-   NOTE
-   ----
-   • The old synchronous token counter has been deleted.
-   • We now *re-export* the worker-based implementation from
-     "hooks/useTokenCount.js".  -> THIS COMMENT IS NOW OUTDATED.
-     The old useTokenCount.js (tiktoken for chat messages) will be removed.
-     The new prompt token counting logic is in App.jsx.
 ---------------------------------------------------------------------------*/
 
 import {
   useState,
   useEffect,
   useCallback,
-  // useRef // Not used directly in this file anymore
 } from 'preact/hooks';
 
 import { LOCALSTORAGE_DEBOUNCE } from './config.js';
@@ -29,33 +20,33 @@ const TARGET_GEMINI_MODEL = "gemini-2.5-pro-preview-05-06";
 export const INITIAL_FORM_DATA = {
   developGoal: '',
   developFeatures: '',
-  // developReturnFormat: 'return the complete refactored code for the respective changed files in FULL with NO OMISSIONS so that i can paste it directly into my ide', // Old field
-  developReturnFormat_custom: '', // User's custom part of the return format
-  developReturnFormat_autoIncludeDefault: true, // The toggle state, default ON
+  developReturnFormat_custom: '',
+  developReturnFormat_autoIncludeDefault: true,
   developWarnings: '',
-  // developContext: '', // Removed as per request
   fixCode: '',
   fixErrors: ''
 };
 
 /* ───────────────────── localStorage helpers ─────────────────── */
+// This generic hook remains, but its usage for settings will change.
 function useDebouncedLocalStorage(key, initial, delay = LOCALSTORAGE_DEBOUNCE) {
   const [value, setValue] = useState(() => {
     try {
       const storedValue = localStorage.getItem(key);
       if (storedValue !== null) {
         let parsed = JSON.parse(storedValue);
-        // Ensure the model is always the target model if it exists in settings
-        if (key === 'konzuko-settings' && parsed.hasOwnProperty('model')) {
-            parsed.model = TARGET_GEMINI_MODEL;
-        }
-        // For form data, merge with initial to ensure new fields get defaults
+        // Special handling for 'konzuko-form-data' (merging)
         if (key === 'konzuko-form-data') {
             parsed = { ...initial, ...parsed };
         }
+        // Special handling for 'konzuko-display-settings' (model enforcement)
+        // This is now handled by useDisplaySettings itself to keep this hook generic.
+        // if (key === 'konzuko-display-settings' && parsed.hasOwnProperty('model')) {
+        //     parsed.model = TARGET_GEMINI_MODEL;
+        // }
         return parsed;
       }
-      return initial; // Use the passed 'initial'
+      return initial;
     } catch {
       return initial;
     }
@@ -64,12 +55,11 @@ function useDebouncedLocalStorage(key, initial, delay = LOCALSTORAGE_DEBOUNCE) {
   useEffect(() => {
     const id = setTimeout(() => {
       try {
-        // Ensure the model is always the target model before saving settings
         let valueToStore = value;
-        if (key === 'konzuko-settings' && valueToStore && typeof valueToStore === 'object' && valueToStore.hasOwnProperty('model')) {
-            // Create a new object to ensure reactivity if value itself is not changing but its property is
-            valueToStore = { ...valueToStore, model: TARGET_GEMINI_MODEL };
-        }
+        // Model enforcement for 'konzuko-display-settings' is handled by useDisplaySettings.
+        // if (key === 'konzuko-display-settings' && valueToStore && typeof valueToStore === 'object' && valueToStore.hasOwnProperty('model')) {
+        //     valueToStore = { ...valueToStore, model: TARGET_GEMINI_MODEL };
+        // }
         localStorage.setItem(key, JSON.stringify(valueToStore));
       } catch (err) {
         console.warn('localStorage error:', err);
@@ -81,17 +71,27 @@ function useDebouncedLocalStorage(key, initial, delay = LOCALSTORAGE_DEBOUNCE) {
   return [value, setValue];
 }
 
-export function useSettings() {
-  return useDebouncedLocalStorage('konzuko-settings', {
-    apiKey       : '',
-    model        : TARGET_GEMINI_MODEL,
-    showSettings : false
+// Manages display-related settings (model, showSettings), persisted to localStorage.
+// API key is NOT managed here anymore.
+export function useDisplaySettings() {
+  const [displaySettings, setDisplaySettings] = useDebouncedLocalStorage('konzuko-display-settings', {
+    model        : TARGET_GEMINI_MODEL, // Default model
+    showSettings : false                 // Default for showing settings panel
+    // apiKey is intentionally removed from here
   });
+
+  // Ensure the model is always the target model, even if localStorage had something else.
+  useEffect(() => {
+    if (displaySettings.model !== TARGET_GEMINI_MODEL) {
+      setDisplaySettings(s => ({ ...s, model: TARGET_GEMINI_MODEL }));
+    }
+  }, [displaySettings.model, setDisplaySettings]);
+
+  return [displaySettings, setDisplaySettings];
 }
 
+
 export function useFormData() {
-  // Use the exported constant here for the initial state if nothing in localStorage
-  // The useDebouncedLocalStorage will merge stored data with INITIAL_FORM_DATA
   return useDebouncedLocalStorage('konzuko-form-data', INITIAL_FORM_DATA);
 }
 
@@ -236,11 +236,6 @@ export function useMode() {
   return [mode, setMode];
 }
 
-/* 
-   No re-export of useTokenCount as it's being removed.
-   usePromptTokenCount was also removed.
-*/
-
 export function useUndoableDelete(showToast) {
   return useCallback(
     async ({ itemLabel, confirmMessage, deleteFn, undoFn, afterDelete }) => {
@@ -261,4 +256,3 @@ export function useUndoableDelete(showToast) {
     [showToast]
   );
 }
-
