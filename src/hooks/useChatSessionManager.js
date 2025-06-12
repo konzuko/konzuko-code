@@ -3,11 +3,10 @@ import { useState, useCallback } from 'preact/hooks';
 import { useQueryClient, useMutation } from '@tanstack/react-query';
 import {
   createChat,
-  updateChatTitle,
+  updateChatTitle as apiUpdateChatTitle,
   deleteChat as apiDeleteChat,
   undoDeleteChat,
   GEMINI_MODEL_NAME,
-  // fetchChats // No longer needed here for initial check
 } from '../api.js';
 import Toast from '../components/Toast.jsx';
 
@@ -29,7 +28,7 @@ export function useChatSessionManager() {
     _setCurrentChatId(chatId);
     if (chatId) {
       try {
-        localStorage.setItem(LAST_CHAT_ID_KEY, String(chatId)); // Ensure it's a string
+        localStorage.setItem(LAST_CHAT_ID_KEY, String(chatId));
       } catch (e) {
         console.warn("Failed to save last chat ID to localStorage", e);
       }
@@ -42,18 +41,13 @@ export function useChatSessionManager() {
     }
   }, [_setCurrentChatId]);
 
-
-  // Removed the useQuery for 'chatsInitialCheck' and its associated useEffect
-  // as ChatList.jsx will now handle initial selection and "First Chat" creation
-  // based on the primary ['chats'] useInfiniteQuery.
-
   const createChatMutation = useMutation({
     mutationKey: ['createChat'],
     mutationFn: (newChatData) => createChat(newChatData),
     onSuccess: (newlyCreatedChat) => {
       queryClient.invalidateQueries({ queryKey: ['chats'] });
       if (newlyCreatedChat && newlyCreatedChat.id) {
-        setCurrentChatId(newlyCreatedChat.id); // This will also save to localStorage
+        setCurrentChatId(newlyCreatedChat.id);
       }
       Toast('New task created!', 2000);
     },
@@ -90,7 +84,7 @@ export function useChatSessionManager() {
     },
     onSuccess: (data, chatId) => {
       if (currentChatId === chatId) {
-        setCurrentChatId(null); // Clear currentChatId if it was deleted, also removes from localStorage
+        setCurrentChatId(null);
       }
       Toast('Task deleted.', 15000, () => {
         undoDeleteChatMutation.mutate(chatId);
@@ -105,7 +99,7 @@ export function useChatSessionManager() {
   });
 
   const updateChatTitleMutation = useMutation({
-    mutationFn: ({ id, title }) => updateChatTitle(id, title),
+    mutationFn: ({ id, title }) => apiUpdateChatTitle(id, title),
     onMutate: async ({ id, title }) => {
       await queryClient.cancelQueries({ queryKey: ['chats'] });
       const previousChatsData = queryClient.getQueryData(['chats']);
@@ -125,12 +119,13 @@ export function useChatSessionManager() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['chats'] });
-      Toast('Title updated!', 2000);
+      // Toast is removed from here; feedback is now handled locally in ChatItem.
     },
     onError: (err, variables, context) => {
       if (context?.previousChatsData) {
         queryClient.setQueryData(['chats'], context.previousChatsData);
       }
+      // The component will handle the error visually. A toast is still good for details.
       Toast('Failed to update title: ' + err.message, 5000);
     },
   });
@@ -147,8 +142,6 @@ export function useChatSessionManager() {
     }
   }, [internalDeleteChatMutation, undoDeleteChatMutation]);
 
-  // Removed useEffect related to initialChatsSuccess and initialChatsData for "First Chat" creation
-
   const isLoadingSession = createChatMutation.isPending ||
                            internalDeleteChatMutation.isPending ||
                            updateChatTitleMutation.isPending ||
@@ -156,10 +149,11 @@ export function useChatSessionManager() {
 
   return {
     currentChatId,
-    setCurrentChatId, // This is now the wrapped version that saves to localStorage
+    setCurrentChatId,
     createChat: handleCreateChat,
     deleteChat: handleDeleteChat,
-    updateChatTitle: updateChatTitleMutation.mutate,
+    // Expose mutateAsync to allow components to await the result
+    updateChatTitle: updateChatTitleMutation.mutateAsync,
     undoDeleteChat: undoDeleteChatMutation.mutate,
     isLoadingSession,
     isCreatingChat: createChatMutation.isPending,

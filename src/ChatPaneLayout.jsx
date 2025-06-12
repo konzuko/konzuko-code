@@ -3,17 +3,14 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'preact/hooks';
 
 const DEFAULT_TITLE = "Untitled Task";
+const STATUS_INDICATOR_DURATION_MS = 2000; // Duration for the save/error indicator
 
-// This component uses local state (`currentTitle`) for its title display.
-// This provides an instant visual update for the user, decoupling the UI
-// from the slower database save operation, which is handled in the background.
 function ChatItem({ chat, isActive, onSelectChat, onTitleUpdate, onDeleteChat, disabled }) {
   const [editing, setEditing] = useState(false);
+  const [status, setStatus] = useState('idle'); // 'idle', 'saving', 'success', 'error'
   const [currentTitle, setCurrentTitle] = useState(chat.title || DEFAULT_TITLE);
+  const inputRef = useRef(null);
 
-  // This effect syncs the local title with the parent prop.
-  // CRITICAL: It does NOT run while editing, to prevent a race condition
-  // where a background data refresh could wipe out the user's input.
   useEffect(() => {
     if (!editing) {
       setCurrentTitle(chat.title || DEFAULT_TITLE);
@@ -24,19 +21,33 @@ function ChatItem({ chat, isActive, onSelectChat, onTitleUpdate, onDeleteChat, d
   const date  = ts.toLocaleDateString([], { day: 'numeric', month: 'short'});
   const time  = ts.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-  const finishEdit = () => {
+  const finishEdit = async () => {
     setEditing(false);
+    const originalTitle = chat.title || DEFAULT_TITLE;
     const trimmedTitle = currentTitle.trim();
-    // Only call the update function if the title has actually changed and is not empty.
-    if (trimmedTitle && trimmedTitle !== (chat.title || DEFAULT_TITLE)) {
-      // The UI has already updated visually. Now, trigger the background save.
-      onTitleUpdate(chat.id, trimmedTitle);
+    
+    if (trimmedTitle && trimmedTitle !== originalTitle) {
+      setStatus('saving');
+      try {
+        await onTitleUpdate(chat.id, trimmedTitle);
+        setStatus('success');
+      } catch (error) {
+        setStatus('error');
+        setCurrentTitle(originalTitle); // Revert on failure
+      } finally {
+        setTimeout(() => setStatus('idle'), STATUS_INDICATOR_DURATION_MS);
+      }
     } else {
-      // If the title is empty or unchanged, revert local state to match the prop.
-      setCurrentTitle(chat.title || DEFAULT_TITLE); 
+      setCurrentTitle(originalTitle); 
     }
   };
   
+  const handleKeyPress = (e) => {
+    if (e.key === 'Enter') {
+      inputRef.current?.blur();
+    }
+  };
+
   const handleDoubleClick = () => {
     if (!disabled && onTitleUpdate) setEditing(true);
   };
@@ -56,11 +67,12 @@ function ChatItem({ chat, isActive, onSelectChat, onTitleUpdate, onDeleteChat, d
       <div className="chat-item-main">
         {editing ? (
           <input
+            ref={inputRef}
             className="chat-item-input"
             value={currentTitle}
             onInput={e => setCurrentTitle(e.target.value)}
             onBlur={finishEdit}
-            onKeyPress={e => e.key === 'Enter' && finishEdit()}
+            onKeyPress={handleKeyPress}
             onClick={e => e.stopPropagation()}
             autoFocus
             disabled={disabled}
@@ -86,7 +98,10 @@ function ChatItem({ chat, isActive, onSelectChat, onTitleUpdate, onDeleteChat, d
         )}
       </div>
       <div className="chat-item-meta">
-        {date} {time}
+        {status === 'idle' && <>{date} {time}</>}
+        {status === 'saving' && <span className="save-indicator saving">Saving...</span>}
+        {status === 'success' && <span className="save-indicator success">✓ Saved</span>}
+        {status === 'error' && <span className="save-indicator error">✗ Failed</span>}
       </div>
     </div>
   );
@@ -123,7 +138,7 @@ const groupChatsByDate = (chats) => {
       groupTitle = chatDateObj.toLocaleString('default', { month: 'long', year: 'numeric' });
       groupKey = `${chatDateObj.getFullYear()}-${String(chatDateObj.getMonth() + 1).padStart(2, '0')}`;
     } else {
-      groupTitle = 'Older'; groupKey = 'older'; // Fallback for chats with no/invalid date
+      groupTitle = 'Older'; groupKey = 'older';
     }
 
     if (groupKey !== currentGroupKey) {

@@ -41,9 +41,7 @@ export default function App() {
   const [displaySettings, setDisplaySettings] = useDisplaySettings();
   const [apiKey, setApiKey] = useState('');
   const [isApiKeyLoading, setIsApiKeyLoading] = useState(true);
-  // const [apiKeyError, setApiKeyError] = useState(null); // For displaying error if needed
 
-  // Memoized combined settings object for passing to other components/hooks
   const settings = useMemo(() => ({
     ...displaySettings,
     apiKey,
@@ -66,7 +64,6 @@ export default function App() {
     isCreatingChat,
   } = useChatSessionManager();
 
-  // Pass the reactive `settings.apiKey` (which comes from `apiKey` state)
   const {
     messages,
     isLoadingMessages,
@@ -108,16 +105,12 @@ export default function App() {
     scrollToBottom,
   } = useScrollNavigation();
 
-  // Fetch API key on initial mount
   useEffect(() => {
     const fetchApiKey = async () => {
       setIsApiKeyLoading(true);
-      // setApiKeyError(null);
       try {
         const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
         if (sessionError || !sessionData.session) {
-          // User not logged in, AuthGate will handle this. API key remains empty.
-          // console.log("No session, API key not fetched by App.jsx.");
           setIsApiKeyLoading(false);
           return;
         }
@@ -130,24 +123,22 @@ export default function App() {
         
         if (data && typeof data.apiKey === 'string') {
           setApiKey(data.apiKey);
-        } else if (data && data.error) { // Error from within the function's JSON response
+        } else if (data && data.error) {
             throw new Error(data.error);
         }
       } catch (err) {
         console.error('Failed to fetch API key:', err);
-        // setApiKeyError(err.message || 'Failed to load API key.');
         Toast(`Error fetching API key: ${err.message}`, 5000);
       } finally {
         setIsApiKeyLoading(false);
       }
     };
     fetchApiKey();
-  }, []); // Empty dependency array ensures this runs once on mount
+  }, []);
 
-  // Save API key to Supabase Edge Function
   const handleApiKeyChangeAndSave = async (newApiKey) => {
     const oldApiKey = apiKey;
-    setApiKey(newApiKey); // Optimistic UI update
+    setApiKey(newApiKey);
 
     try {
       const { error: invokeError, data:responseData } = await supabase.functions.invoke('manage-api-key', {
@@ -161,9 +152,8 @@ export default function App() {
       Toast('API key saved!', 3000);
     } catch (err) {
       console.error('Failed to save API key:', err);
-      setApiKey(oldApiKey); // Revert on error
+      setApiKey(oldApiKey);
       Toast(`Error saving API key: ${err.message}`, 5000);
-      // setApiKeyError(err.message || 'Failed to save API key.');
     }
   };
 
@@ -195,7 +185,7 @@ export default function App() {
   );
 
   const callWorkerForTotalTokenCount = useCallback(
-    (currentItemsForApi, currentApiKey, model) => { // Added currentApiKey
+    (currentItemsForApi, currentApiKey, model) => {
       const currentVersion = ++tokenCountVersionRef.current;
       if (!currentApiKey || String(currentApiKey).trim() === "" || !currentItemsForApi || currentItemsForApi.length === 0) {
         if (tokenCountVersionRef.current === currentVersion) {
@@ -207,7 +197,7 @@ export default function App() {
       if (tokenCountVersionRef.current === currentVersion) setIsCountingApiTokens(true);
       else return;
 
-      countTokensWithGemini(currentApiKey, model, currentItemsForApi) // Pass currentApiKey
+      countTokensWithGemini(currentApiKey, model, currentItemsForApi)
         .then(count => {
           if (tokenCountVersionRef.current === currentVersion) setTotalApiTokenCount(count);
         })
@@ -224,10 +214,10 @@ export default function App() {
 
   useEffect(() => {
     if (!debouncedApiCallRef.current) {
-      debouncedApiCallRef.current = debounce(callWorkerForTotalTokenCount, 1500);
+      debouncedApiCallRef.current = debounce(callWorkerForTotalTokenCount, 500);
     }
     const modelToUse = settings.model || GEMINI_MODEL_NAME;
-    debouncedApiCallRef.current(itemsForApiCount, settings.apiKey, modelToUse); // Pass settings.apiKey
+    debouncedApiCallRef.current(itemsForApiCount, settings.apiKey, modelToUse);
   }, [itemsForApiCount, settings.apiKey, settings.model, callWorkerForTotalTokenCount]);
 
 
@@ -259,7 +249,7 @@ export default function App() {
   );
 
   const globalBusy = useMemo(
-    () => isLoadingSession || isSwitchingChat || isAppGloballySending || isApiKeyLoading, // Added isApiKeyLoading
+    () => isLoadingSession || isSwitchingChat || isAppGloballySending || isApiKeyLoading,
     [isLoadingSession, isSwitchingChat, isAppGloballySending, isApiKeyLoading]
   );
 
@@ -280,14 +270,14 @@ export default function App() {
       if (isResendingMessage) return { text: 'Resending…', disabled: true };
       return { text: 'Processing…', disabled: true };
     }
-    if (isApiKeyLoading) return { text: 'Loading Key...', disabled: true }; // NEW
+    if (isApiKeyLoading) return { text: 'Loading Key...', disabled: true };
     if (!settings.apiKey) return { text: 'Set API Key', disabled: false };
     if (!currentChatId) return { text: 'Select Task', disabled: false };
     if (isHardTokenLimitReached) return { text: 'Memory Limit Exceeded', disabled: true };
     return { text: 'Send', disabled: false };
   }, [
     isAppGloballySending, isSendingMessage, isSavingEdit, isResendingMessage,
-    settings.apiKey, currentChatId, isHardTokenLimitReached, isApiKeyLoading, // Added isApiKeyLoading
+    settings.apiKey, currentChatId, isHardTokenLimitReached, isApiKeyLoading,
   ]);
 
   const finalSendButtonDisabled = sendButtonDisplayInfo.disabled || globalBusy;
@@ -334,12 +324,12 @@ export default function App() {
     if (!currentChatId) { Toast('Please select or create a task first.', 3000); return; }
     
     if (!settings.apiKey || String(settings.apiKey).trim() === '') {
-      if (isApiKeyLoading) { // Check if key is still loading
+      if (isApiKeyLoading) {
         Toast('API Key is still loading. Please wait.', 3000);
         return;
       }
       Toast('Gemini API Key missing. Please set it in settings.', 5000);
-      setDisplaySettings((s) => ({ ...s, showSettings: true })); // Use setDisplaySettings
+      setDisplaySettings((s) => ({ ...s, showSettings: true }));
       return;
     }
 
@@ -369,7 +359,20 @@ export default function App() {
     const txt = messages.map((m) => { const blocks = Array.isArray(m.content) ? m.content : [{ type: 'text', text: String(m.content ?? '') }]; return blocks.filter((b) => b.type === 'text').map((b) => b.text).join('\n'); }).join('\n\n');
     navigator.clipboard.writeText(txt).then(() => Toast('Copied all text!', 2000)).catch(() => Toast('Copy failed.', 4000));
   };
-  const handleUpdateChatTitleTrigger = useCallback((id, title) => { if (isAppGloballySending) { Toast("Cannot update title while an operation is in progress.", 3000); return; } if (!id) { console.error('handleUpdateChatTitleTrigger called with undefined id'); Toast('Error: Could not update title.', 4000); return; } updateChatTitle({ id, title }); }, [updateChatTitle, isAppGloballySending]);
+  
+  const handleUpdateChatTitleTrigger = useCallback(async (id, title) => {
+    if (isAppGloballySending) {
+      Toast("Cannot update title while an operation is in progress.", 3000);
+      return Promise.reject(new Error("Operation in progress"));
+    }
+    if (!id) {
+      console.error('handleUpdateChatTitleTrigger called with undefined id');
+      Toast('Error: Could not update title.', 4000);
+      return Promise.reject(new Error("Invalid ID"));
+    }
+    return updateChatTitle({ id, title });
+  }, [updateChatTitle, isAppGloballySending]);
+
   const handleNewChatTrigger = useCallback(() => { if (isAppGloballySending) { Toast("Cannot create new task while an operation is in progress.", 3000); return; } createChat(); }, [createChat, isAppGloballySending]);
   const handleDeleteChatTrigger = useCallback((chatId) => { if (isAppGloballySending) { Toast("Cannot delete task while an operation is in progress.", 3000); return; } deleteChat(chatId); }, [deleteChat, isAppGloballySending]);
 
@@ -423,8 +426,8 @@ export default function App() {
                 id="apiKeyInputApp" 
                 className="form-input" 
                 type="password" 
-                value={apiKey} // Use apiKey state
-                onInput={(e) => handleApiKeyChangeAndSave(e.target.value)} // Use new handler
+                value={apiKey}
+                onInput={(e) => handleApiKeyChangeAndSave(e.target.value)}
                 placeholder={isApiKeyLoading ? "Loading API Key..." : "Enter your Gemini API Key"}
                 disabled={isApiKeyLoading}
               />
@@ -459,7 +462,7 @@ export default function App() {
               handleSend={handleSend} showToast={Toast}
               imagePreviews={pendingImages} pdfPreviews={pendingPDFs}
               onRemoveImage={removePendingImage} onAddImage={addPendingImage} onAddPDF={addPendingPDF}
-              settings={settings} // Pass combined settings (includes apiKey state)
+              settings={settings}
               hasLastSendFailed={hasLastSendFailed}
               importedCodeFiles={stagedCodeFiles}
               onCodeFilesChange={setStagedCodeFiles}

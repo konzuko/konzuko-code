@@ -6,9 +6,11 @@ import { asciiTree } from '../lib/textUtils.js';
 
 const safeTrim = (val) => (val ?? '').trim();
 
-const AUTO_INPUT_STRING_FOR_RETURN_FORMAT = "return the complete refactored code for the respective changed files in FULL with NO OMISSIONS so that i can paste it directly into my ide";
+const AUTO_INPUT_STRING_FOR_RETURN_FORMAT = "If code is required, return the complete refactored code for the respective changed files in FULL with NO OMISSIONS so that i can paste it directly into my ide";
+const PROMPT_SECTION_SEPARATOR = '\n\n';
 
-function buildNewUserPromptText(currentForm, currentMode, currentImportedCodeFiles, projectRootName) {
+// Builds the text from the form fields. This is fast.
+function buildFormSection(currentForm, currentMode) {
   if (currentMode === 'DEVELOP') {
     const out = ['## MODE # DEVELOP'];
 
@@ -35,27 +37,10 @@ function buildNewUserPromptText(currentForm, currentMode, currentImportedCodeFil
     if (safeTrim(currentForm.developWarnings)) {
       out.push(`THINGS TO REMEMBER/WARNINGS: ${safeTrim(currentForm.developWarnings)}`);
     }
-
-    const treePaths = (currentImportedCodeFiles || []).filter(f => f.insideProject).map(f => f.fullPath);
-    if (projectRootName && treePaths.length > 0) {
-      out.push(`${projectRootName}/`);
-      out.push(asciiTree(treePaths));
-    }
-
-    (currentImportedCodeFiles || []).forEach(f => {
-      out.push('```yaml');
-      out.push(`file: ${f.fullPath}`);
-      // if (f.note) out.push(`# ${f.note}`); // 'note' field not currently on StagedFile
-      out.push('```');
-      out.push('```');
-      out.push(f.text);
-      out.push('```');
-    });
-
     return out.join('\n');
   }
 
-  if (currentMode === 'COMMIT') { /* ... (unchanged) ... */
+  if (currentMode === 'COMMIT') {
     return (
       '## MODE # COMMIT\n' +
       'Identify the last commit done in this chat, then identify everything ' +
@@ -65,24 +50,47 @@ function buildNewUserPromptText(currentForm, currentMode, currentImportedCodeFil
       'of this chat. Be detailed and comprehensive'
     );
   }
-  if (currentMode === 'CODE CHECK') { /* ... (unchanged) ... */
+  if (currentMode === 'CODE CHECK') {
     return (
       '## MODE # CODE CHECK\n' +
       "Analyze the provided code (and relevant context from our conversation) for potential issues. Systematically check against each of the following categories:\n\n" +
-      "1. is the current implementation the best smartest most efficient and logical way to do this. weigh the best 3 options with pros & cons and justify your choice\n" +
-      "2.  If the code implementation works as intended, and there are no issues that can arise from the current implementation.\n" +
-      "3.  Logical Errors: Pinpoint flaws in the code's logic or if it deviates from intended behavior.\n" +
-      "4.  Runtime Errors (Exceptions): Foresee potential crashes or exceptions during execution.\n" +
-      "5.  Concurrency Issues: (If applicable) Detect race conditions, deadlocks, or other multi-threading/asynchronous problems.\n" +
-      "6.  Semantic Errors: Check for incorrect use of language features or if the code's meaning is flawed.\n" +
-      "7.  Performance Issues: Identify bottlenecks, inefficient algorithms, excessive resource usage, or areas for optimization.\n" +
-      "8.  Security Issues: Uncover vulnerabilities such as injection, XSS, insecure data handling, auth/authz flaws, etc.\n" +
-      "9.  Code Quality & Maintainability Issues: Evaluate clarity, readability, structure, complexity, adherence to best practices (naming, comments, DRY, SOLID principles if applicable).\n" +
-      "\nReturn in order of High and Low Severity, provide specific findings, examples where possible, and explain the potential impact. For any cateogories you don't find errors, just let us know that you don't find any errors at the end."
+      "0.  If the code implementation works as intended, and there are no issues that can arise from the current implementation.\n" +
+      "1.  Logical Errors: Pinpoint flaws in the code's logic or if it deviates from intended behavior.\n" +
+      "2.  Runtime Errors (Exceptions): Foresee potential crashes or exceptions during execution.\n" +
+      "3.  Concurrency Issues: (If applicable) Detect race conditions, deadlocks, or other multi-threading/asynchronous problems.\n" +
+      "4.  Semantic Errors: Check for incorrect use of language features or if the code's meaning is flawed.\n" +
+      "5.  Performance Issues: Identify bottlenecks, inefficient algorithms, excessive resource usage, or areas for optimization.\n" +
+      "6.  Security Issues: Uncover vulnerabilities such as injection, XSS, insecure data handling, auth/authz flaws, etc.\n" +
+      "7.  Code Quality & Maintainability Issues: Evaluate clarity, readability, structure, complexity, adherence to best practices (naming, comments, DRY, SOLID principles if applicable).\n" +
+      "\nReturn in order of High and Low Severity, provide specific findings, examples where possible, and explain the potential impact. For any cateogries you don't find any errors, just let us know that you don't find any errors at the end."
     );
   }
   return '';
 }
+
+// Builds the text from imported files. This can be slow and is memoized separately.
+function buildFilesSection(currentImportedCodeFiles, projectRootName) {
+    if (!currentImportedCodeFiles || currentImportedCodeFiles.length === 0) return '';
+    
+    const out = [];
+    const treePaths = (currentImportedCodeFiles || []).filter(f => f.insideProject).map(f => f.fullPath);
+    if (projectRootName && treePaths.length > 0) {
+      out.push(`${projectRootName}/`);
+      out.push(asciiTree(treePaths));
+    }
+
+    (currentImportedCodeFiles || []).forEach(f => {
+      out.push('```yaml');
+      out.push(`file: ${f.fullPath}`);
+      out.push('```');
+      out.push('```');
+      out.push(f.text);
+      out.push('```');
+    });
+
+    return out.join('\n');
+}
+
 
 const revokeOnce = obj => {
   if (obj?.revoke) {
@@ -104,12 +112,20 @@ export function usePromptBuilder(importedCodeFiles = []) {
     return () => { imagesToRevoke.forEach(revokeOnce); };
   }, [pendingImages]);
 
-  const userPromptText = useMemo(() => buildNewUserPromptText(
-    form,
-    mode,
-    importedCodeFiles,
-    currentProjectRootName
-  ), [form, mode, importedCodeFiles, currentProjectRootName]);
+  // Memoize the fast part (form inputs)
+  const formText = useMemo(() => buildFormSection(form, mode), [form, mode]);
+  
+  // Memoize the slow part (file processing)
+  const fileText = useMemo(() => buildFilesSection(importedCodeFiles, currentProjectRootName), [importedCodeFiles, currentProjectRootName]);
+
+  // The final combined text is now cheap to compute because its dependencies are memoized.
+  const userPromptText = useMemo(() => {
+    if (mode !== 'DEVELOP' || !fileText) {
+        return formText;
+    }
+    // Conditionally join to avoid extra newlines when fileText is empty.
+    return [formText, fileText].join(PROMPT_SECTION_SEPARATOR);
+  }, [formText, fileText, mode]);
 
 
   const addPendingImage = useCallback(img => { setPendingImages(prev => [...prev, img]); }, []);
@@ -134,11 +150,11 @@ export function usePromptBuilder(importedCodeFiles = []) {
 
   return {
     form, setForm, mode, setMode,
-    pendingImages, addPendingImage, removePendingImage, // FIX: Removed setPendingImages
-    pendingPDFs, addPendingPDF,                         // FIX: Removed setPendingPDFs
+    pendingImages, addPendingImage, removePendingImage,
+    pendingPDFs, addPendingPDF,
     currentProjectRootName,
     handleProjectRootChange,
-    userPromptText,
+    userPromptText, // The final, combined text for sending and token counting
     resetPrompt
   };
 }
