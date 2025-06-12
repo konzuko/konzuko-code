@@ -12,7 +12,7 @@ import {
     // HarmBlockThreshold, // Not directly used as string values are used
 } from "@google/genai";
 
-export const GEMINI_MODEL_NAME = "gemini-2.5-pro-preview-05-06";
+export const GEMINI_MODEL_NAME = "gemini-2.5-pro-preview-06-05";
 export const CHATS_PAGE_LIMIT = 20;
 
 const isoNow = () => new Date().toISOString()

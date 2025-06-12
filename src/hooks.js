@@ -14,7 +14,7 @@ import { isTextLike, isImage }   from './lib/fileTypeGuards.js';
 
 /* ───────────────────────── constants ────────────────────────── */
 const MAX_TOTAL_DROPPED_FILES = 2000;
-const TARGET_GEMINI_MODEL = "gemini-2.5-pro-preview-05-06";
+const TARGET_GEMINI_MODEL = "gemini-2.5-pro-preview-06-05";
 
 // Define the initial structure for the form data
 export const INITIAL_FORM_DATA = {

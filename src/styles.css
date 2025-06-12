@@ -663,6 +663,14 @@ html, body {
   }
 }
 
+.send-button {
+  width: 100%;
+  background-color: var(--accent);
+  color: #fff;
+}
+.send-button:hover:not(:disabled) {
+  background-color: var(--accent-hover);
+}
 .send-button.send-button--error {
   background-color: var(--error);
   color: white;
