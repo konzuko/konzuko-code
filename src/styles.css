@@ -466,6 +466,53 @@ html, body {
   min-height: 60px;
 }
 
+/* Composite input styles for vertical layout */
+.input-with-prefix-container {
+  display: flex;
+  flex-direction: column; /* Stack label and textarea vertically */
+  align-items: flex-start;
+  padding: var(--space-sm);
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  width: 100%;
+  cursor: text;
+  transition: border-color var(--transition), background-color var(--transition);
+}
+.input-with-prefix-container:focus-within {
+  border-color: var(--accent);
+  background-color: #2a2a2e;
+}
+.input-prefix {
+  font-weight: bold;
+  text-transform: uppercase;
+  color: var(--text-primary);
+  margin-bottom: var(--space-sm); /* Space between label and textarea */
+  user-select: none;
+  flex-shrink: 0;
+}
+.input-textarea-naked {
+  flex-grow: 1;
+  width: 100%;
+  background: transparent;
+  border: none;
+  outline: none;
+  padding: 0;
+  margin: 0;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  resize: none;
+  overflow-y: hidden;
+  min-height: 60px; /* UPDATED: Set a baseline min-height to prevent layout flash before JS resizes. */
+}
+.input-textarea-naked::placeholder {
+  color: var(--text-secondary);
+  opacity: 0.7;
+}
+
+
 .editing-textarea {
   width: 100%;
   font-size: 0.95rem;

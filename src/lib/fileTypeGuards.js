@@ -2,7 +2,7 @@
 // Central gate deciding which files count as “inline text / code”.
 
 export const MAX_TEXT_FILE_SIZE = 300 * 1024;   // 300 KB
-export const MAX_CHAR_LEN       = 200_000;      // 200,000 characters
+export const MAX_CHAR_LEN       = 400_000;      // 400,000 characters
 
 /* ── binary helpers ─────────────────────────────────────────────── */
 export function isImage(file) {

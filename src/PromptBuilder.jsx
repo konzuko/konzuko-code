@@ -3,11 +3,17 @@
    `onCodeFilesChange` is passed to CodebaseImporter as `onFilesChange`.
 */
 import { useEffect, useRef, useMemo } from 'preact/hooks';
-// import { del } from 'idb-keyval'; // FIX: Removed obsolete del('devCtx')
 import CodebaseImporter from './CodebaseImporter.jsx';
 import { autoResizeTextarea } from './lib/domUtils.js';
 
 const MAX_PROMPT_TEXTAREA_HEIGHT = 250;
+
+const placeholders = {
+  developGoal: '', // No example for goal
+  developFeatures: 'e.g. frameworks, required API endpoints or response schemas, state changes',
+  developReturnFormat_custom: 'e.g. newline delimited, bullet points, markdown, yaml, json, java, ptx',
+  developWarnings: 'E.g. dependencies, limitations, software versions',
+};
 
 export default function PromptBuilder({
   mode,
@@ -56,13 +62,10 @@ export default function PromptBuilder({
     };
   }, []);
 
-  // FIX: Removed obsolete del('devCtx') useEffect
-  // useEffect(() => { del('devCtx').catch(() => {}); }, []);
-
   const fields = useMemo(
     () => [
       ['GOAL', 'developGoal', 2],
-      ['FEATURES', 'developFeatures', 2],
+      ['REQUIREMENTS', 'developFeatures', 2],
       ['RETURN FORMAT', 'developReturnFormat_custom', 2],
       ['THINGS TO REMEMBER/WARNINGS', 'developWarnings', 2],
     ],
@@ -105,8 +108,7 @@ export default function PromptBuilder({
           if (key === 'developReturnFormat_custom') {
             return (
               <div key={key} className="form-group">
-                <div style={{ display: 'flex', alignItems: 'center', gap: '15px', marginBottom: '6px' }}>
-                  <label htmlFor={key} style={{ fontWeight: 'normal' }}>{label}</label>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginBottom: '6px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                     <strong style={{ fontSize: '0.9em', color: 'var(--text-primary)', userSelect: 'none' }}>Complete Codeblocks</strong>
                     <div
@@ -128,37 +130,45 @@ export default function PromptBuilder({
                     </div>
                   </div>
                 </div>
+                <label htmlFor={key} className="input-with-prefix-container">
+                  {/* UPDATED: Removed colon from label */}
+                  <strong className="input-prefix">{label}</strong>
+                  <textarea
+                    id={key}
+                    ref={(el) => (textareaRefs.current[key] = el)}
+                    rows={rows}
+                    className="input-textarea-naked"
+                    style={{ maxHeight: `${MAX_PROMPT_TEXTAREA_HEIGHT}px` }}
+                    value={form[key]}
+                    onInput={(e) => {
+                      setForm((f) => ({ ...f, [key]: e.target.value }));
+                      autoResizeTextarea(e.target, MAX_PROMPT_TEXTAREA_HEIGHT);
+                    }}
+                    placeholder={placeholders[key]}
+                  />
+                </label>
+              </div>
+            );
+          }
+          return (
+            <div key={key} className="form-group">
+              <label htmlFor={key} className="input-with-prefix-container">
+                {/* UPDATED: Removed colon from label */}
+                <strong className="input-prefix">{label}</strong>
                 <textarea
                   id={key}
                   ref={(el) => (textareaRefs.current[key] = el)}
                   rows={rows}
-                  className="form-textarea"
+                  className="input-textarea-naked"
                   style={{ maxHeight: `${MAX_PROMPT_TEXTAREA_HEIGHT}px` }}
                   value={form[key]}
                   onInput={(e) => {
                     setForm((f) => ({ ...f, [key]: e.target.value }));
                     autoResizeTextarea(e.target, MAX_PROMPT_TEXTAREA_HEIGHT);
                   }}
-                  placeholder="Add custom return format instructions here (optional)"
+                  placeholder={placeholders[key]}
                 />
-              </div>
-            );
-          }
-          return (
-            <div key={key} className="form-group">
-              <label htmlFor={key}>{label}</label>
-              <textarea
-                id={key}
-                ref={(el) => (textareaRefs.current[key] = el)}
-                rows={rows}
-                className="form-textarea"
-                style={{ maxHeight: `${MAX_PROMPT_TEXTAREA_HEIGHT}px` }}
-                value={form[key]}
-                onInput={(e) => {
-                  setForm((f) => ({ ...f, [key]: e.target.value }));
-                  autoResizeTextarea(e.target, MAX_PROMPT_TEXTAREA_HEIGHT);
-                }}
-              />
+              </label>
             </div>
           );
         })}

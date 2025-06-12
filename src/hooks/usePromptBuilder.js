@@ -18,7 +18,8 @@ function buildFormSection(currentForm, currentMode) {
       out.push(`GOAL: ${safeTrim(currentForm.developGoal)}`);
     }
     if (safeTrim(currentForm.developFeatures)) {
-      out.push(`FEATURES: ${safeTrim(currentForm.developFeatures)}`);
+      // UPDATED: Renamed FEATURES to REQUIREMENTS in the output prompt
+      out.push(`REQUIREMENTS: ${safeTrim(currentForm.developFeatures)}`);
     }
 
     let effectiveDevelopReturnFormat = safeTrim(currentForm.developReturnFormat_custom);
