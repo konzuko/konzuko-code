@@ -543,7 +543,7 @@ html, body {
 }
 .message-actions .button.icon-button {
     padding: 2px 4px;
-    font-size: 0.75rem;
+    font-size: 0.95rem; /* MODIFIED */
     min-width: auto;
 }
 
@@ -597,7 +597,7 @@ html, body {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 3px 8px;
-  font-size: 0.6rem;
+  font-size: 0.8rem; /* MODIFIED */
   opacity: 0.6;
   cursor: pointer;
   transition: opacity var(--transition), background-color var(--transition), color var(--transition);
@@ -629,7 +629,7 @@ html, body {
 }
 .resend-button-bottom {
   padding: 4px 8px;
-  font-size: 0.8rem;
+  font-size: 1.0rem; /* MODIFIED */
 }
 
 /* Visual Switch Toggle Styles */
