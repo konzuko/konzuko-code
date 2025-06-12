@@ -101,12 +101,12 @@ html, body {
   gap: var(--space-sm);
 }
 .chat-item-title {
-  white-space: nowrap;
-  overflow: hidden; /* DO NOT CHANGE */
-  text-overflow: ellipsis;
+  white-space: normal; /* Allows text to wrap to a new line - DO NOT CHANGE THIS*/
+  word-break: break-word; /* Helps break long words if needed - DO NOT CHANGE THIS*/
   flex-grow: 1;
-  font-size: 0.8rem;
+  font-size: 0.9rem;
 }
+
 .chat-item-input {
   width: 100%;
   background: var(--bg-primary);
