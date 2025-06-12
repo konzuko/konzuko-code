@@ -305,12 +305,17 @@ html, body {
   position: relative;
   width: 50%;
   display: flex;
-  flex-direction: column;
-  overflow-y: auto;
-  padding: var(--space-md);
+  overflow: hidden;
   border-right: 1px solid var(--border);
   background-color: var(--bg-primary);
 }
+
+.chat-messages-scroll-area {
+  flex-grow: 1;
+  overflow-y: auto;
+  padding: var(--space-md);
+}
+
 .chat-loading-placeholder, .chat-empty-placeholder {
     display: flex;
     flex-grow: 1;
@@ -322,16 +327,15 @@ html, body {
 }
 
 .chat-nav-rail {
-  position: sticky;
+  position: absolute;
   top: 50%;
-  right: var(--space-md);
+  right: var(--space-sm);
   transform: translateY(-50%);
   display: flex;
   flex-direction: column;
   gap: var(--space-xs);
   z-index: 30;
   width: 32px;
-  float: right; /* Keep float for layout context, sticky positioning will override */
 }
 .chat-nav-rail .button {
   padding: var(--space-xs);
@@ -947,6 +951,7 @@ html, body {
   background-color: var(--text-secondary);
   border-radius: 6px;
   border: 3px solid var(--bg-tertiary);
+  min-height: 80px;
 }
 
 ::-webkit-scrollbar-thumb:hover {

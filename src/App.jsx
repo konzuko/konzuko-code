@@ -452,19 +452,21 @@ export default function App() {
         )}
 
         <div className="content-container">
-          <div className="chat-container" ref={scrollContainerRef}>
+          <div className="chat-container">
+            <div className="chat-messages-scroll-area" ref={scrollContainerRef}>
+              {currentChatId ? (
+                <ChatArea
+                  key={currentChatId} messages={messages} isLoading={isLoadingMessages} forceLoading={isSwitchingChat}
+                  editingId={editingId} editText={editText} loadingSend={isProcessing} savingEdit={isSavingEdit}
+                  setEditText={setEditText} handleSaveEdit={saveEdit} handleCancelEdit={cancelEdit} handleStartEdit={startEdit}
+                  handleResendMessage={resendMessage} handleDeleteMessage={deleteMessage} actionsDisabled={chatAreaActionsDisabled}
+                />
+              ) : ( <div className="chat-empty-placeholder"> Select or create a task to begin. </div> )}
+            </div>
             <div className="chat-nav-rail">
               <button className="button icon-button" onClick={scrollToPrev} title="Scroll Up" disabled={navRailDisabled} > ↑ </button>
               <button className="button icon-button" onClick={scrollToNext} title="Scroll Down" disabled={navRailDisabled} > ↓ </button>
             </div>
-            {currentChatId ? (
-              <ChatArea
-                key={currentChatId} messages={messages} isLoading={isLoadingMessages} forceLoading={isSwitchingChat}
-                editingId={editingId} editText={editText} loadingSend={isProcessing} savingEdit={isSavingEdit}
-                setEditText={setEditText} handleSaveEdit={saveEdit} handleCancelEdit={cancelEdit} handleStartEdit={startEdit}
-                handleResendMessage={resendMessage} handleDeleteMessage={deleteMessage} actionsDisabled={chatAreaActionsDisabled}
-              />
-            ) : ( <div className="chat-empty-placeholder"> Select or create a task to begin. </div> )}
           </div>
 
           <div className="prompt-builder-area">
