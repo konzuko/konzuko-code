@@ -69,14 +69,15 @@ function buildNewUserPromptText(currentForm, currentMode, currentImportedCodeFil
     return (
       '## MODE # CODE CHECK\n' +
       "Analyze the provided code (and relevant context from our conversation) for potential issues. Systematically check against each of the following categories:\n\n" +
-      "0.  If the code implementation works as intended, and there are no issues that can arise from the current implementation.\n" +
-      "1.  Logical Errors: Pinpoint flaws in the code's logic or if it deviates from intended behavior.\n" +
-      "2.  Runtime Errors (Exceptions): Foresee potential crashes or exceptions during execution.\n" +
-      "3.  Concurrency Issues: (If applicable) Detect race conditions, deadlocks, or other multi-threading/asynchronous problems.\n" +
-      "4.  Semantic Errors: Check for incorrect use of language features or if the code's meaning is flawed.\n" +
-      "5.  Performance Issues: Identify bottlenecks, inefficient algorithms, excessive resource usage, or areas for optimization.\n" +
-      "6.  Security Issues: Uncover vulnerabilities such as injection, XSS, insecure data handling, auth/authz flaws, etc.\n" +
-      "7.  Code Quality & Maintainability Issues: Evaluate clarity, readability, structure, complexity, adherence to best practices (naming, comments, DRY, SOLID principles if applicable).\n" +
+      "1. is the current implementation the best smartest most efficient and logical way to do this. weigh the best 3 options with pros & cons and justify your choice\n" +
+      "2.  If the code implementation works as intended, and there are no issues that can arise from the current implementation.\n" +
+      "3.  Logical Errors: Pinpoint flaws in the code's logic or if it deviates from intended behavior.\n" +
+      "4.  Runtime Errors (Exceptions): Foresee potential crashes or exceptions during execution.\n" +
+      "5.  Concurrency Issues: (If applicable) Detect race conditions, deadlocks, or other multi-threading/asynchronous problems.\n" +
+      "6.  Semantic Errors: Check for incorrect use of language features or if the code's meaning is flawed.\n" +
+      "7.  Performance Issues: Identify bottlenecks, inefficient algorithms, excessive resource usage, or areas for optimization.\n" +
+      "8.  Security Issues: Uncover vulnerabilities such as injection, XSS, insecure data handling, auth/authz flaws, etc.\n" +
+      "9.  Code Quality & Maintainability Issues: Evaluate clarity, readability, structure, complexity, adherence to best practices (naming, comments, DRY, SOLID principles if applicable).\n" +
       "\nReturn in order of High and Low Severity, provide specific findings, examples where possible, and explain the potential impact. For any cateogories you don't find errors, just let us know that you don't find any errors at the end."
     );
   }

@@ -2,30 +2,43 @@
 // Ensure all props are correctly received and used.
 import { useState, useMemo, useEffect, useRef, useCallback } from 'preact/hooks';
 
+const DEFAULT_TITLE = "Untitled Task";
+
+// This component uses local state (`currentTitle`) for its title display.
+// This provides an instant visual update for the user, decoupling the UI
+// from the slower database save operation, which is handled in the background.
 function ChatItem({ chat, isActive, onSelectChat, onTitleUpdate, onDeleteChat, disabled }) {
   const [editing, setEditing] = useState(false);
-  const [title, setTitle]     = useState(chat.title || "Untitled Task"); // Default title
+  const [currentTitle, setCurrentTitle] = useState(chat.title || DEFAULT_TITLE);
 
+  // This effect syncs the local title with the parent prop.
+  // CRITICAL: It does NOT run while editing, to prevent a race condition
+  // where a background data refresh could wipe out the user's input.
   useEffect(() => {
-    setTitle(chat.title || "Untitled Task");
-  }, [chat.title]);
+    if (!editing) {
+      setCurrentTitle(chat.title || DEFAULT_TITLE);
+    }
+  }, [chat.title, editing]);
 
-  const ts    = chat.started ? new Date(chat.started) : new Date(); // Handle undefined started
+  const ts    = chat.started ? new Date(chat.started) : new Date();
   const date  = ts.toLocaleDateString([], { day: 'numeric', month: 'short'});
   const time  = ts.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
   const finishEdit = () => {
     setEditing(false);
-    const trimmedTitle = title.trim();
-    if (trimmedTitle && trimmedTitle !== (chat.title || "Untitled Task")) {
+    const trimmedTitle = currentTitle.trim();
+    // Only call the update function if the title has actually changed and is not empty.
+    if (trimmedTitle && trimmedTitle !== (chat.title || DEFAULT_TITLE)) {
+      // The UI has already updated visually. Now, trigger the background save.
       onTitleUpdate(chat.id, trimmedTitle);
     } else {
-      setTitle(chat.title || "Untitled Task"); 
+      // If the title is empty or unchanged, revert local state to match the prop.
+      setCurrentTitle(chat.title || DEFAULT_TITLE); 
     }
   };
   
   const handleDoubleClick = () => {
-    if (!disabled && onTitleUpdate) setEditing(true); // Only allow edit if onTitleUpdate is provided
+    if (!disabled && onTitleUpdate) setEditing(true);
   };
 
   const handleDelete = (e) => {
@@ -44,8 +57,8 @@ function ChatItem({ chat, isActive, onSelectChat, onTitleUpdate, onDeleteChat, d
         {editing ? (
           <input
             className="chat-item-input"
-            value={title}
-            onInput={e => setTitle(e.target.value)}
+            value={currentTitle}
+            onInput={e => setCurrentTitle(e.target.value)}
             onBlur={finishEdit}
             onKeyPress={e => e.key === 'Enter' && finishEdit()}
             onClick={e => e.stopPropagation()}
@@ -56,12 +69,12 @@ function ChatItem({ chat, isActive, onSelectChat, onTitleUpdate, onDeleteChat, d
           <span 
             className="chat-item-title" 
             onDblClick={handleDoubleClick} 
-            title={chat.title || "Untitled Task"}
+            title={currentTitle}
           >
-            {chat.title || "Untitled Task"}
+            {currentTitle}
           </span>
         )}
-        {onDeleteChat && ( // Only show delete button if handler is provided
+        {onDeleteChat && (
             <button
               className="button icon-button chat-item-delete"
               onClick={handleDelete}
@@ -136,8 +149,6 @@ export default function ChatPaneLayout({
 }) {
   const [collapsed, setCollapsed] = useState(false);
 
-  // Chats should already be sorted by `useInfiniteQuery` (newest first from API)
-  // `groupChatsByDate` will handle the display grouping.
   const groupedItems = useMemo(() => groupChatsByDate(chats), [chats]);
 
   const observer = useRef();
@@ -161,7 +172,7 @@ export default function ChatPaneLayout({
         >
           {collapsed ? '»' : '«'}
         </button>
-        {!collapsed && onNewChat && ( // Only show if handler is provided
+        {!collapsed && onNewChat && (
           <button className="button new-chat-button" onClick={onNewChat} disabled={disabled}>
             New Task
           </button>
@@ -179,8 +190,8 @@ export default function ChatPaneLayout({
               chat         ={item.chat}
               isActive     ={item.chat.id === currentChatId}
               onSelectChat ={onSelectChat}
-              onTitleUpdate={onTitleUpdate} // Pass down if implemented
-              onDeleteChat ={onDeleteChat}   // Pass down
+              onTitleUpdate={onTitleUpdate}
+              onDeleteChat ={onDeleteChat}
               disabled     ={disabled}
             />
           );
@@ -193,7 +204,7 @@ export default function ChatPaneLayout({
         {!collapsed && !isLoadingMoreChats && !hasMoreChatsToFetch && chats?.length > 0 && (
             <div className="all-chats-loaded-indicator">All tasks loaded.</div>
         )}
-        {!collapsed && !isLoadingMoreChats && chats?.length === 0 && ( // Check for chats.length
+        {!collapsed && !isLoadingMoreChats && chats?.length === 0 && (
             <div className="no-chats-indicator">No tasks yet. Create one!</div>
         )}
       </div>
