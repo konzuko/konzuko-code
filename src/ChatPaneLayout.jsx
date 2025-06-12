@@ -4,10 +4,10 @@ import { useState, useMemo, useEffect, useRef, useCallback } from 'preact/hooks'
 
 function ChatItem({ chat, isActive, onSelectChat, onTitleUpdate, onDeleteChat, disabled }) {
   const [editing, setEditing] = useState(false);
-  const [title, setTitle]     = useState(chat.title || "Untitled Chat"); // Default title
+  const [title, setTitle]     = useState(chat.title || "Untitled Task"); // Default title
 
   useEffect(() => {
-    setTitle(chat.title || "Untitled Chat");
+    setTitle(chat.title || "Untitled Task");
   }, [chat.title]);
 
   const ts    = chat.started ? new Date(chat.started) : new Date(); // Handle undefined started
@@ -17,10 +17,10 @@ function ChatItem({ chat, isActive, onSelectChat, onTitleUpdate, onDeleteChat, d
   const finishEdit = () => {
     setEditing(false);
     const trimmedTitle = title.trim();
-    if (trimmedTitle && trimmedTitle !== (chat.title || "Untitled Chat")) {
+    if (trimmedTitle && trimmedTitle !== (chat.title || "Untitled Task")) {
       onTitleUpdate(chat.id, trimmedTitle);
     } else {
-      setTitle(chat.title || "Untitled Chat"); 
+      setTitle(chat.title || "Untitled Task"); 
     }
   };
   
@@ -56,16 +56,16 @@ function ChatItem({ chat, isActive, onSelectChat, onTitleUpdate, onDeleteChat, d
           <span 
             className="chat-item-title" 
             onDblClick={handleDoubleClick} 
-            title={chat.title || "Untitled Chat"}
+            title={chat.title || "Untitled Task"}
           >
-            {chat.title || "Untitled Chat"}
+            {chat.title || "Untitled Task"}
           </span>
         )}
         {onDeleteChat && ( // Only show delete button if handler is provided
             <button
               className="button icon-button chat-item-delete"
               onClick={handleDelete}
-              title="Delete Chat"
+              title="Delete Task"
               disabled={disabled}
             >
               Del
@@ -163,7 +163,7 @@ export default function ChatPaneLayout({
         </button>
         {!collapsed && onNewChat && ( // Only show if handler is provided
           <button className="button new-chat-button" onClick={onNewChat} disabled={disabled}>
-            New Chat
+            New Task
           </button>
         )}
       </div>
@@ -191,10 +191,10 @@ export default function ChatPaneLayout({
           </div>
         )}
         {!collapsed && !isLoadingMoreChats && !hasMoreChatsToFetch && chats?.length > 0 && (
-            <div className="all-chats-loaded-indicator">All chats loaded.</div>
+            <div className="all-chats-loaded-indicator">All tasks loaded.</div>
         )}
         {!collapsed && !isLoadingMoreChats && chats?.length === 0 && ( // Check for chats.length
-            <div className="no-chats-indicator">No chats yet. Create one!</div>
+            <div className="no-chats-indicator">No tasks yet. Create one!</div>
         )}
       </div>
     </div>

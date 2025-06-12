@@ -48,17 +48,17 @@ export function useChatSessionManager() {
   // based on the primary ['chats'] useInfiniteQuery.
 
   const createChatMutation = useMutation({
+    mutationKey: ['createChat'],
     mutationFn: (newChatData) => createChat(newChatData),
     onSuccess: (newlyCreatedChat) => {
       queryClient.invalidateQueries({ queryKey: ['chats'] });
-      // queryClient.invalidateQueries({ queryKey: ['chatsInitialCheck'] }); // No longer needed
       if (newlyCreatedChat && newlyCreatedChat.id) {
         setCurrentChatId(newlyCreatedChat.id); // This will also save to localStorage
       }
-      Toast('New chat created!', 2000);
+      Toast('New task created!', 2000);
     },
     onError: (error) => {
-      Toast('Failed to create chat: ' + error.message, 5000);
+      Toast('Failed to create task: ' + error.message, 5000);
     },
   });
 
@@ -66,10 +66,10 @@ export function useChatSessionManager() {
     mutationFn: (chatId) => undoDeleteChat(chatId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['chats'] });
-      Toast('Chat restored.', 2000);
+      Toast('Task restored.', 2000);
     },
     onError: (error) => {
-      Toast('Failed to restore chat: ' + error.message, 5000);
+      Toast('Failed to restore task: ' + error.message, 5000);
     },
   });
 
@@ -92,8 +92,7 @@ export function useChatSessionManager() {
       if (currentChatId === chatId) {
         setCurrentChatId(null); // Clear currentChatId if it was deleted, also removes from localStorage
       }
-      // queryClient.invalidateQueries({ queryKey: ['chatsInitialCheck'] }); // No longer needed
-      Toast('Chat deleted.', 15000, () => {
+      Toast('Task deleted.', 15000, () => {
         undoDeleteChatMutation.mutate(chatId);
       });
     },
@@ -101,7 +100,7 @@ export function useChatSessionManager() {
       if (context?.previousChatsData) {
         queryClient.setQueryData(['chats'], context.previousChatsData);
       }
-      Toast('Failed to delete chat: ' + err.message, 5000);
+      Toast('Failed to delete task: ' + err.message, 5000);
     },
   });
 
@@ -138,12 +137,12 @@ export function useChatSessionManager() {
 
   const handleCreateChat = useCallback((data = {}) => {
     if (createChatMutation.isPending) return;
-    createChatMutation.mutate({ title: data.title || 'New Chat', model: data.model || GEMINI_MODEL_NAME });
+    createChatMutation.mutate({ title: data.title || 'New Task', model: data.model || GEMINI_MODEL_NAME });
   }, [createChatMutation]);
 
   const handleDeleteChat = useCallback((chatId) => {
     if (internalDeleteChatMutation.isPending || undoDeleteChatMutation.isPending) return;
-    if (window.confirm('Are you sure you want to delete this chat? This action can be undone from the notification.')) {
+    if (window.confirm('Are you sure you want to delete this task? This action can be undone from the notification.')) {
       internalDeleteChatMutation.mutate(chatId);
     }
   }, [internalDeleteChatMutation, undoDeleteChatMutation]);

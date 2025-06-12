@@ -52,7 +52,7 @@ export default function ChatList({
           if (!storedChatExists) {
             // This log indicates that the currentChatId (likely from localStorage or a recent set)
             // isn't in the fully loaded, settled list of chats. This is a valid scenario to correct.
-            console.warn(`[ChatList] Chat ID ${currentChatId} not found in the current fully loaded list. Selecting newest chat.`);
+            console.warn(`[ChatList] Chat ID ${currentChatId} not found in the current fully loaded list. Selecting newest task.`);
             onSelectChat(allChats[0].id); // Select the first (newest) chat
           }
           // If storedChatExists, currentChatId is valid and already set.
@@ -67,10 +67,10 @@ export default function ChatList({
         const totalChatsInQuery = chatsQueryData?.data?.pages?.[0]?.totalCount ?? 0;
         const noChatsInData = chatsQueryData?.data?.pages?.every(p => p.chats.length === 0) ?? false;
 
-        // If no chat creation is pending and the settled query data confirms no chats, trigger "First Chat".
+        // If no chat creation is pending and the settled query data confirms no chats, trigger "First Task".
         if (!existingChatCreation && (totalChatsInQuery === 0 || (totalChatsInQuery > 0 && noChatsInData))) {
           if (onNewChatTrigger) {
-              onNewChatTrigger({ title: 'First Chat', model: GEMINI_MODEL_NAME });
+              onNewChatTrigger({ title: 'First Task', model: GEMINI_MODEL_NAME });
           }
         }
       }
@@ -93,11 +93,11 @@ export default function ChatList({
 
   // For initial loading UI, we can still use `isFetching` and check if pages exist
   if (isFetching && (!data || data.pages.length === 0)) {
-    return <div style={{ padding: '1rem', textAlign: 'center', color: 'var(--text-secondary)' }}>Loading chats...</div>;
+    return <div style={{ padding: '1rem', textAlign: 'center', color: 'var(--text-secondary)' }}>Loading tasks...</div>;
   }
 
   if (chatsError) {
-    return <div style={{ padding: '1rem', color: 'var(--error)' }}>Error loading chats: {chatsError.message}</div>;
+    return <div style={{ padding: '1rem', color: 'var(--error)' }}>Error loading tasks: {chatsError.message}</div>;
   }
 
   return (

@@ -309,7 +309,7 @@ export default function CodebaseImporter({
     }
   }, [toastFn, onProjectRootChange, impState.root, impState.tag]);
 
-  const handleCheckboxChange = useCallback((event, path) => { /* ... (no change from previous) ... */
+  const handleCheckboxChange = useCallback((event, path) => {
     if (impState.tag !== 'FILTER') return;
     const currentIndex = impState.tops.findIndex(t => t.name === path);
     const desiredState = event.target.checked;
@@ -330,7 +330,7 @@ export default function CodebaseImporter({
     }
   }, [impState.tag, impState.tops]);
 
-  const beginStagingAndReadTexts = useCallback(async () => { /* ... (no change from previous) ... */
+  const beginStagingAndReadTexts = useCallback(async () => {
     if (impState.tag !== 'FILTER') return;
     dispatch({ type: 'BEGIN_STAGING' });
     setAdding(true);
@@ -348,14 +348,14 @@ export default function CodebaseImporter({
     }
   }, [impState, toastFn]);
 
-  const clearAllStatesAndNotifyParent = useCallback(() => { /* ... (no change from previous) ... */
+  const clearAllStatesAndNotifyParent = useCallback(() => {
     if (!confirm('Remove all selected files and clear project root?')) return;
     if(impState.root) clearIDBRoot().catch(err => console.error("Error clearing root from IDB:", err));
     dispatch({ type: 'CLEAR_ALL' });
     onProjectRootChange?.(null);
   }, [onProjectRootChange, impState.root]);
 
-  const pickTextFilesAndDispatch = useCallback(async () => { /* ... (no change from previous) ... */
+  const pickTextFilesAndDispatch = useCallback(async () => {
     if (!window.showOpenFilePicker) { toastFn?.('File picker not supported.', 4000); return; }
     setAdding(true);
     const rejectionStats = { tooLarge: 0, tooLong: 0, unsupportedType: 0, limitReached: 0, readError: 0 };
@@ -389,7 +389,7 @@ export default function CodebaseImporter({
     finally { setAdding(false); }
   }, [toastFn, impState.tag, impState.files]);
 
-  const handleAddImages = useCallback(async () => { /* ... (no change from previous) ... */
+  const handleAddImages = useCallback(async () => {
     if (!window.showOpenFilePicker) { toastFn?.('File picker not supported.', 4000); return; }
     setAdding(true);
     let handles;
@@ -415,7 +415,7 @@ export default function CodebaseImporter({
     setAdding(false);
   }, [onAddImage, toastFn]);
 
-  const handlePasteImage = useCallback(async () => { /* ... (no change from previous) ... */
+  const handlePasteImage = useCallback(async () => {
     if(!navigator.clipboard?.read){ toastFn?.('Clipboard API not supported or permission denied.',4000); return; }
     setAdding(true);
     try{
@@ -444,7 +444,7 @@ export default function CodebaseImporter({
     setAdding(false);
   }, [onAddImage, toastFn]);
 
-  const handleAddPDF = useCallback(async () => { /* ... (no change from previous) ... */
+  const handleAddPDF = useCallback(async () => {
     if (!settings?.apiKey || String(settings.apiKey).trim() === "") { toastFn?.('Gemini API Key not set.', 5000); return; }
     if (!window.showOpenFilePicker) { toastFn?.('File picker not supported.', 4000); return; }
     setAdding(true);
@@ -503,21 +503,26 @@ export default function CodebaseImporter({
   const currentRootName = impState.root ? impState.root.name : null;
   const isLoadingOperation = adding || phase === 'SCANNING' || phase === 'STAGING';
 
-  return ( /* ... JSX remains largely the same ... */
+  return (
     <div className="file-pane-container">
       <h2>Codebase Importer</h2>
       {currentRootName && ( <div style={{ marginBottom: 8, fontSize: '0.85rem', opacity: 0.8 }}> Root: <code>{currentRootName}</code> </div> )}
-      <div style={{ display: 'flex', gap: 8, marginBottom: '1rem', flexWrap: 'wrap' }}>
-        <button className="button" onClick={pickTextFilesAndDispatch} disabled={isLoadingOperation}>+ Add Files</button>
+      
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', marginBottom: '1rem' }}>
+        {/* Top Row */}
         <button className="button" onClick={pickFolder} disabled={isLoadingOperation}>+ Add Folder</button>
-        <button className="button" onClick={handleAddImages} disabled={adding}>+ Add Images</button>
-        <button className="button" onClick={handlePasteImage} disabled={adding}>Paste Image</button>
-        <button className="button" onClick={handleAddPDF} disabled={adding}>+ Add PDF</button>
+        <button className="button" onClick={pickTextFilesAndDispatch} disabled={isLoadingOperation}>+ Add Files</button>
         <button className="button" onClick={clearAllStatesAndNotifyParent}
           disabled={isLoadingOperation || phase === 'IDLE'}
           style={(phase !== 'IDLE') ? { background: '#b71c1c', color: '#fff' } : {}} > Clear List
         </button>
+        
+        {/* Bottom Row */}
+        <button className="button" onClick={handleAddImages} disabled={adding}>+ Add Images</button>
+        <button className="button" onClick={handlePasteImage} disabled={adding}>Paste Image</button>
+        <button className="button" onClick={handleAddPDF} disabled={adding}>+ Add PDF</button>
       </div>
+
       {(phase === 'SCANNING' || phase === 'STAGING') && (
          <div className="analysing-animation-container">
             <span className="analysing-text">{phase === 'SCANNING' ? 'Scanning folder (metadata)...' : 'Processing selected files...'}</span>

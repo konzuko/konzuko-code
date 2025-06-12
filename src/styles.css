@@ -102,9 +102,10 @@ html, body {
 }
 .chat-item-title {
   white-space: nowrap;
-  overflow: hidden;
+  overflow: hidden; /* DO NOT CHANGE */
   text-overflow: ellipsis;
   flex-grow: 1;
+  font-size: 0.8rem;
 }
 .chat-item-input {
   width: 100%;

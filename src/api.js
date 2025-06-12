@@ -304,7 +304,7 @@ export async function fetchChats({ pageParam = 1 }) {
   };
 }
 
-export async function createChat({ title = 'New Chat', model = GEMINI_MODEL_NAME }) {
+export async function createChat({ title = 'New Task', model = GEMINI_MODEL_NAME }) {
   const user = await getCurrentUser();
   const { data, error } = await supabase
     .from('chats')
