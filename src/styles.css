@@ -175,7 +175,62 @@ html, body {
   display: flex;
   align-items: center;
   flex-shrink: 0;
+  position: relative; /* For loading indicator positioning */
+  overflow: hidden;   /* To clip the glow animation */
 }
+
+/* NEW: Loading animation styles */
+.top-bar-loading-indicator {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  width: 100%; /* Use full width for transform */
+  background-color: var(--accent);
+  transform: scaleX(0); /* Animate scale instead of width */
+  transform-origin: left;
+  transition: transform 0.5s ease-out; /* Slower ease-out */
+  z-index: 0;
+}
+
+.top-bar-loading-indicator.active {
+  transform: scaleX(1);
+}
+
+.top-bar-loading-indicator.active::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    to right,
+    transparent 0%,
+    rgba(255, 255, 255, 0.25) 50%,
+    transparent 100%
+  );
+  transform: translateX(-100%);
+  animation: loading-glow 1.8s ease-in-out infinite;
+  animation-delay: 0.5s; /* Start glow after fill is complete */
+}
+
+@keyframes loading-glow {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+/* Ensure top-bar content is visible above the loading bar */
+/* Use :not() to exclude the indicator from this rule */
+.top-bar > *:not(.top-bar-loading-indicator) {
+    position: relative;
+    z-index: 1;
+}
+
 .token-count-display {
   padding: var(--space-xs) var(--space-md);
   background: var(--accent);

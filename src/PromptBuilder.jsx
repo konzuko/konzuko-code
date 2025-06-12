@@ -103,12 +103,12 @@ export default function PromptBuilder({
       {mode === 'DEVELOP' &&
         fields.map(([label, key, rows]) => {
           if (key === 'developReturnFormat_custom') {
-            return ( /* ... (Return Format JSX unchanged) ... */
+            return (
               <div key={key} className="form-group">
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '15px', marginBottom: '6px' }}>
                   <label htmlFor={key} style={{ fontWeight: 'normal' }}>{label}</label>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <span style={{ fontSize: '0.9em', color: 'var(--text-primary)', userSelect: 'none' }}>Complete Codeblocks</span>
+                    <strong style={{ fontSize: '0.9em', color: 'var(--text-primary)', userSelect: 'none' }}>Complete Codeblocks</strong>
                     <div
                       className={`visual-switch ${form.developReturnFormat_autoIncludeDefault ? 'is-on' : 'is-off'}`}
                       onClick={() => setForm(f => ({ ...f, developReturnFormat_autoIncludeDefault: !f.developReturnFormat_autoIncludeDefault }))}
@@ -144,7 +144,7 @@ export default function PromptBuilder({
               </div>
             );
           }
-          return ( /* ... (Other fields JSX unchanged) ... */
+          return (
             <div key={key} className="form-group">
               <label htmlFor={key}>{label}</label>
               <textarea
@@ -175,7 +175,7 @@ export default function PromptBuilder({
         />
       )}
 
-      {imagePreviews.length > 0 && ( /* ... (Image previews JSX unchanged) ... */
+      {imagePreviews.length > 0 && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, margin: '8px 0' }}>
           {imagePreviews.map((img, i) => (
             <div key={`${img.url}-${i}`} style={{ position: 'relative' }}>
@@ -187,7 +187,7 @@ export default function PromptBuilder({
         </div>
       )}
 
-      {pdfPreviews.length > 0 && ( /* ... (PDF previews JSX unchanged) ... */
+      {pdfPreviews.length > 0 && (
         <div style={{ margin: '8px 0' }}>
           <strong>PDFs:</strong>
           <ul style={{ margin: '4px 0 0 16px', paddingLeft: 0, listStylePosition: 'inside', }} >

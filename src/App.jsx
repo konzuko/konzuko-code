@@ -385,6 +385,9 @@ export default function App() {
       />
       <div className="main-content">
         <div className="top-bar">
+          <div 
+            className={`top-bar-loading-indicator ${isAppGloballySending ? 'active' : ''}`} 
+          />
           <button className="button" onClick={() => setDisplaySettings((s) => ({ ...s, showSettings: !s.showSettings }))} disabled={globalBusy} >
             {displaySettings.showSettings ? 'Close Settings' : 'Open Settings'}
           </button>
