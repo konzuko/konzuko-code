@@ -282,8 +282,8 @@ export default function App() {
     }
     if (isApiKeyLoading) return { text: 'Loading Key...', disabled: true }; // NEW
     if (!settings.apiKey) return { text: 'Set API Key', disabled: false };
-    if (!currentChatId) return { text: 'Select Chat', disabled: false };
-    if (isHardTokenLimitReached) return { text: 'Token Limit Exceeded', disabled: true };
+    if (!currentChatId) return { text: 'Select Task', disabled: false };
+    if (isHardTokenLimitReached) return { text: 'Memory Limit Exceeded', disabled: true };
     return { text: 'Send', disabled: false };
   }, [
     isAppGloballySending, isSendingMessage, isSavingEdit, isResendingMessage,
@@ -330,8 +330,8 @@ export default function App() {
 
   function handleSend() {
     if (isAppGloballySending) { Toast("An operation is already in progress.", 3000); return; }
-    if (isHardTokenLimitReached) { Toast(`Prompt too large (max ${MAX_ABSOLUTE_TOKEN_LIMIT.toLocaleString()} tokens).`, 8000); return; }
-    if (!currentChatId) { Toast('Please select or create a chat first.', 3000); return; }
+    if (isHardTokenLimitReached) { Toast(`Memory limit exceeded (max ${MAX_ABSOLUTE_TOKEN_LIMIT.toLocaleString()}).`, 8000); return; }
+    if (!currentChatId) { Toast('Please select or create a task first.', 3000); return; }
     
     if (!settings.apiKey || String(settings.apiKey).trim() === '') {
       if (isApiKeyLoading) { // Check if key is still loading
@@ -370,8 +370,8 @@ export default function App() {
     navigator.clipboard.writeText(txt).then(() => Toast('Copied all text!', 2000)).catch(() => Toast('Copy failed.', 4000));
   };
   const handleUpdateChatTitleTrigger = useCallback((id, title) => { if (isAppGloballySending) { Toast("Cannot update title while an operation is in progress.", 3000); return; } if (!id) { console.error('handleUpdateChatTitleTrigger called with undefined id'); Toast('Error: Could not update title.', 4000); return; } updateChatTitle({ id, title }); }, [updateChatTitle, isAppGloballySending]);
-  const handleNewChatTrigger = useCallback(() => { if (isAppGloballySending) { Toast("Cannot create new chat while an operation is in progress.", 3000); return; } createChat(); }, [createChat, isAppGloballySending]);
-  const handleDeleteChatTrigger = useCallback((chatId) => { if (isAppGloballySending) { Toast("Cannot delete chat while an operation is in progress.", 3000); return; } deleteChat(chatId); }, [deleteChat, isAppGloballySending]);
+  const handleNewChatTrigger = useCallback(() => { if (isAppGloballySending) { Toast("Cannot create new task while an operation is in progress.", 3000); return; } createChat(); }, [createChat, isAppGloballySending]);
+  const handleDeleteChatTrigger = useCallback((chatId) => { if (isAppGloballySending) { Toast("Cannot delete task while an operation is in progress.", 3000); return; } deleteChat(chatId); }, [deleteChat, isAppGloballySending]);
 
   return (
     <div className="app-container">
@@ -397,13 +397,17 @@ export default function App() {
           <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.5em', alignItems: 'center', }} >
             {isSoftMemoryLimitReached && (
               <div style={{ color: isHardTokenLimitReached ? 'var(--error)' : 'var(--warning)', fontWeight: 'bold', padding: 'var(--space-xs) var(--space-sm)', border: `1px solid ${ isHardTokenLimitReached ? 'var(--error)' : 'var(--warning)' }`, borderRadius: 'var(--radius)', marginRight: 'var(--space-sm)', }} >
-                {isHardTokenLimitReached ? 'MAX\u00A0TOKENS\u00A0REACHED' : 'MEMORY\u00A0AT\u00A0LIMIT'}
+                {isHardTokenLimitReached ? 'MAX\u00A0MEMORY\u00A0REACHED' : 'MEMORY\u00A0AT\u00A0LIMIT'}
               </div>
             )}
             <div className="token-count-display" style={ isHardTokenLimitReached ? { color: 'var(--error)', fontWeight: 'bold', border: '1px solid var(--error)', } : {} } >
-              Tokens:&nbsp; {currentTotalPromptTokens.toLocaleString()} /{' '} {USER_FACING_TOKEN_LIMIT.toLocaleString()}
+              <strong style={{marginRight: '0.5em'}}>MEMORY</strong>
+              {currentTotalPromptTokens.toLocaleString()}
+              <span className={isCountingApiTokens ? 'token-count-loader' : 'token-count-separator'}>
+                {isCountingApiTokens ? '' : '/'}
+              </span>
+              {USER_FACING_TOKEN_LIMIT.toLocaleString()}
               {isHardTokenLimitReached && ( <span style={{ marginLeft: 4 }}> {' '} (Max&nbsp; {MAX_ABSOLUTE_TOKEN_LIMIT.toLocaleString()}) </span> )}
-              {isCountingApiTokens && ( <span style={{ marginLeft: 5, fontStyle: 'italic' }}> (...) </span> )}
             </div>
             <button className="button" onClick={handleCopyAll} disabled={ !messages || messages.length === 0 || globalBusy || isLoadingMessageOps } >
               Copy All Text
@@ -445,7 +449,7 @@ export default function App() {
                 setEditText={setEditText} handleSaveEdit={saveEdit} handleCancelEdit={cancelEdit} handleStartEdit={startEdit}
                 handleResendMessage={resendMessage} handleDeleteMessage={deleteMessage} actionsDisabled={chatAreaActionsDisabled}
               />
-            ) : ( <div className="chat-empty-placeholder"> Select or create a chat to begin. </div> )}
+            ) : ( <div className="chat-empty-placeholder"> Select or create a task to begin. </div> )}
           </div>
 
           <div className="prompt-builder-area">

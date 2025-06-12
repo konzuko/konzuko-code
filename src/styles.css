@@ -101,12 +101,11 @@ html, body {
   gap: var(--space-sm);
 }
 .chat-item-title {
-  white-space: normal; /* Allows text to wrap to a new line - DO NOT CHANGE THIS*/
-  word-break: break-word; /* Helps break long words if needed - DO NOT CHANGE THIS*/
+  white-space: normal; /* Allows text to wrap to a new line */
+  word-break: break-word; /* Helps break long words if needed */
   flex-grow: 1;
-  font-size: 0.9rem;
+  font-size: 0.8rem;
 }
-
 .chat-item-input {
   width: 100%;
   background: var(--bg-primary);
@@ -241,6 +240,28 @@ html, body {
   min-height: calc(1.5em + 8px);
   display: flex;
   align-items: center;
+}
+
+.token-count-separator {
+  margin: 0 0.25em;
+}
+
+.token-count-loader {
+  margin: 0 0.25em;
+  width: 1ch; /* Reserve space for character */
+  display: inline-block;
+  text-align: center;
+}
+
+.token-count-loader::before {
+  content: '/';
+  animation: slash-flicker 1s steps(2) infinite;
+}
+
+@keyframes slash-flicker {
+  50% {
+    content: '\\';
+  }
 }
 
 .settings-panel {
