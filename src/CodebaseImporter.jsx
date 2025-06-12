@@ -514,7 +514,7 @@ export default function CodebaseImporter({
         <button className="button" onClick={pickTextFilesAndDispatch} disabled={isLoadingOperation}>+ Add Files</button>
         <button className="button" onClick={clearAllStatesAndNotifyParent}
           disabled={isLoadingOperation || phase === 'IDLE'}
-          style={(phase !== 'IDLE') ? { background: '#b71c1c', color: '#fff' } : {}} > Clear List
+          style={(phase !== 'IDLE') ? { background: '#b71c1c', color: '#fff' } : {}} > Clear Files
         </button>
         
         {/* Bottom Row */}
