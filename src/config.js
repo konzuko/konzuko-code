@@ -7,3 +7,9 @@ export const IMAGE_TOKEN_ESTIMATE  = 258;              // Estimated token count 
 // NEW: Token limit constants
 export const USER_FACING_TOKEN_LIMIT = 350000;    // Soft warning limit
 export const MAX_ABSOLUTE_TOKEN_LIMIT = 1000000;  // Hard limit for sending
+
+// NEW: LocalStorage Keys
+export const LOCALSTORAGE_FORM_KEY = 'konzuko-form-data';
+export const LOCALSTORAGE_SETTINGS_KEY = 'konzuko-display-settings';
+export const LOCALSTORAGE_MODE_KEY = 'konzuko-mode';
+export const LOCALSTORAGE_LAST_CHAT_ID_KEY = 'konzuko-lastChatId';

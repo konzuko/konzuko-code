@@ -5,6 +5,7 @@
 import { useEffect, useRef, useMemo } from 'preact/hooks';
 import CodebaseImporter from './CodebaseImporter.jsx';
 import { autoResizeTextarea } from './lib/domUtils.js';
+import { LOCALSTORAGE_FORM_KEY } from './config.js';
 
 const MAX_PROMPT_TEXTAREA_HEIGHT = 250;
 
@@ -48,8 +49,8 @@ export default function PromptBuilder({
     function flush() {
       try {
         const next = JSON.stringify(formRef.current);
-        if (localStorage.getItem('konzuko-form-data') !== next) {
-          localStorage.setItem('konzuko-form-data', next);
+        if (localStorage.getItem(LOCALSTORAGE_FORM_KEY) !== next) {
+          localStorage.setItem(LOCALSTORAGE_FORM_KEY, next);
         }
       } catch {}
     }
@@ -103,12 +104,28 @@ export default function PromptBuilder({
         ))}
       </div>
 
+      {mode === 'COMMIT' && (
+        <div style={{
+          padding: 'var(--space-md)',
+          margin: 'var(--space-md) 0',
+          background: 'var(--bg-tertiary)',
+          border: '1px solid var(--border)',
+          borderRadius: 'var(--radius)',
+          color: 'var(--text-secondary)',
+          textAlign: 'center',
+          fontSize: '0.9em',
+          lineHeight: '1.4'
+        }}>
+          Start a New Task once you've committed - it keeps your code History clean and tidy.
+        </div>
+      )}
+
       {mode === 'DEVELOP' &&
         fields.map(([label, key, rows]) => {
           if (key === 'developReturnFormat_custom') {
             return (
               <div key={key} className="form-group">
-                <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginBottom: '6px' }}>
+                <div style={{ display: 'flex', justifyContent: 'flex-start', alignItems: 'center', marginBottom: '6px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                     <strong style={{ fontSize: '0.9em', color: 'var(--text-primary)', userSelect: 'none' }}>Complete Codeblocks</strong>
                     <div

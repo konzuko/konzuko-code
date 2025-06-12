@@ -170,6 +170,11 @@ export default function CodebaseImporter({
   const initialLoadAttemptedRef = useRef(false);
   const lastNotifiedFilesIdHashRef = useRef('');
   const scanInProgressRef = useRef(false);
+  const stateRef = useRef(impState);
+
+  useEffect(() => {
+    stateRef.current = impState;
+  }, [impState]);
 
   const performScan = useCallback(async (handleToScan, context) => {
     if (!handleToScan) {
@@ -183,23 +188,25 @@ export default function CodebaseImporter({
     console.log(`[performScan] Starting scan for ${handleToScan.name} due to ${context}`);
     try {
         const { tops, meta, rejectionStats } = await scanDirectoryForMinimalMetadata(handleToScan);
-        if (impState.root?.name === handleToScan.name && impState.tag === 'SCANNING') { // Check if still relevant
+        const { root, tag } = stateRef.current;
+        if (root?.name === handleToScan.name && tag === 'SCANNING') { // Check if still relevant
             dispatch({ type: 'SCAN_DONE', tops, meta });
             const msg = formatRejectionMessage(rejectionStats, `folder scan on ${context}`);
             if (msg) toastFn?.(msg, 15000);
         } else {
-            console.log(`[performScan] Scan for ${handleToScan.name} completed, but state/root changed. Discarding. State: ${impState.tag}, Root: ${impState.root?.name}`);
+            console.log(`[performScan] Scan for ${handleToScan.name} completed, but state/root changed. Discarding. State: ${tag}, Root: ${root?.name}`);
         }
     } catch (err) {
         console.error(`[performScan] Error during scan for ${handleToScan.name} (context: ${context}):`, err);
-        if (impState.root?.name === handleToScan.name) {
+        const { root } = stateRef.current;
+        if (root?.name === handleToScan.name) {
             dispatch({ type: 'CLEAR_ALL' }); onProjectRootChange?.(null); clearIDBRoot().catch(console.warn);
         }
         toastFn?.(`Error scanning directory (${context}): ` + err.message, 5000);
     } finally {
         scanInProgressRef.current = false;
     }
-  }, [toastFn, onProjectRootChange, impState.root, impState.tag]); // impState.root and .tag are critical
+  }, [toastFn, onProjectRootChange]);
 
   useEffect(() => { // SyncEffect
     const currentEffectRootName = impState.root?.name;

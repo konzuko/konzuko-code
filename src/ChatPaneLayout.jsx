@@ -7,7 +7,7 @@ const STATUS_INDICATOR_DURATION_MS = 2000; // Duration for the save/error indica
 
 function ChatItem({ chat, isActive, onSelectChat, onTitleUpdate, onDeleteChat, disabled }) {
   const [editing, setEditing] = useState(false);
-  const [status, setStatus] = useState('idle'); // 'idle', 'saving', 'success', 'error'
+  const [status, setStatus] = useState('idle'); // 'idle', 'processing', 'success', 'error'
   const [currentTitle, setCurrentTitle] = useState(chat.title || DEFAULT_TITLE);
   const inputRef = useRef(null);
 
@@ -27,7 +27,7 @@ function ChatItem({ chat, isActive, onSelectChat, onTitleUpdate, onDeleteChat, d
     const trimmedTitle = currentTitle.trim();
     
     if (trimmedTitle && trimmedTitle !== originalTitle) {
-      setStatus('saving');
+      setStatus('processing');
       try {
         await onTitleUpdate(chat.id, trimmedTitle);
         setStatus('success');
@@ -99,7 +99,7 @@ function ChatItem({ chat, isActive, onSelectChat, onTitleUpdate, onDeleteChat, d
       </div>
       <div className="chat-item-meta">
         {status === 'idle' && <>{date} {time}</>}
-        {status === 'saving' && <span className="save-indicator saving">Saving...</span>}
+        {status === 'processing' && <span className="save-indicator saving">Processing...</span>}
         {status === 'success' && <span className="save-indicator success">✓ Saved</span>}
         {status === 'error' && <span className="save-indicator error">✗ Failed</span>}
       </div>

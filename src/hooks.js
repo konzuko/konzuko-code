@@ -9,7 +9,12 @@ import {
   useCallback,
 } from 'preact/hooks';
 
-import { LOCALSTORAGE_DEBOUNCE } from './config.js';
+import {
+  LOCALSTORAGE_DEBOUNCE,
+  LOCALSTORAGE_FORM_KEY,
+  LOCALSTORAGE_SETTINGS_KEY,
+  LOCALSTORAGE_MODE_KEY
+} from './config.js';
 import { isTextLike, isImage }   from './lib/fileTypeGuards.js';
 
 /* ───────────────────────── constants ────────────────────────── */
@@ -36,7 +41,7 @@ function useDebouncedLocalStorage(key, initial, delay = LOCALSTORAGE_DEBOUNCE) {
       if (storedValue !== null) {
         let parsed = JSON.parse(storedValue);
         // Special handling for 'konzuko-form-data' (merging)
-        if (key === 'konzuko-form-data') {
+        if (key === LOCALSTORAGE_FORM_KEY) {
             parsed = { ...initial, ...parsed };
         }
         // Special handling for 'konzuko-display-settings' (model enforcement)
@@ -74,7 +79,7 @@ function useDebouncedLocalStorage(key, initial, delay = LOCALSTORAGE_DEBOUNCE) {
 // Manages display-related settings (model, showSettings), persisted to localStorage.
 // API key is NOT managed here anymore.
 export function useDisplaySettings() {
-  const [displaySettings, setDisplaySettings] = useDebouncedLocalStorage('konzuko-display-settings', {
+  const [displaySettings, setDisplaySettings] = useDebouncedLocalStorage(LOCALSTORAGE_SETTINGS_KEY, {
     model        : TARGET_GEMINI_MODEL, // Default model
     showSettings : false                 // Default for showing settings panel
     // apiKey is intentionally removed from here
@@ -92,7 +97,7 @@ export function useDisplaySettings() {
 
 
 export function useFormData() {
-  return useDebouncedLocalStorage('konzuko-form-data', INITIAL_FORM_DATA);
+  return useDebouncedLocalStorage(LOCALSTORAGE_FORM_KEY, INITIAL_FORM_DATA);
 }
 
 /* ───────────────────── BFS dir scanning ───────────────────────── */
@@ -224,12 +229,12 @@ export function useFileDrop(onText, onImage) {
 /* ───────────────────── useMode + Undoable delete ─────────────── */
 export function useMode() {
   const ALLOWED = ['DEVELOP', 'COMMIT', 'CODE CHECK'];
-  const stored  = localStorage.getItem('konzuko-mode');
+  const stored  = localStorage.getItem(LOCALSTORAGE_MODE_KEY);
   const initial = ALLOWED.includes(stored) ? stored : 'DEVELOP';
   const [mode, _setMode] = useState(initial);
 
   useEffect(() => {
-    localStorage.setItem('konzuko-mode', mode);
+    localStorage.setItem(LOCALSTORAGE_MODE_KEY, mode);
   }, [mode]);
 
   const setMode = val => ALLOWED.includes(val) && _setMode(val);

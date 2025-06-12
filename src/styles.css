@@ -324,14 +324,14 @@ html, body {
 .chat-nav-rail {
   position: sticky;
   top: 50%;
-  float: right;
-  margin-right: -40px;
+  right: var(--space-md);
   transform: translateY(-50%);
   display: flex;
   flex-direction: column;
   gap: var(--space-xs);
   z-index: 30;
   width: 32px;
+  float: right; /* Keep float for layout context, sticky positioning will override */
 }
 .chat-nav-rail .button {
   padding: var(--space-xs);
@@ -548,7 +548,7 @@ html, body {
   min-width: 80%;
 }
 .message-assistant {
-  background: #2c3e50;
+  background: #0f2540;
   margin-right: auto;
   float: left;
   border-top-left-radius: 0;
@@ -567,16 +567,23 @@ html, body {
   font-size: 0.75rem;
   text-transform: uppercase;
   display: flex;
-  align-items: baseline;
+  align-items: center;
 }
 .message-user .message-role { color: #ff8a80; }
 .message-assistant .message-role { color: var(--text-secondary); }
+
 .assistant-message-number {
-  font-size: 1rem;
+  font-size: 1.3rem;
   font-weight: bold;
-  color: var(--accent);
-  margin-right: 0.3em;
+  color: #ffffff;
+  background-color: #000000;
+  margin-right: 0.6em;
   line-height: 1;
+  padding: 2px 6px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  display: inline-block;
+  vertical-align: middle;
 }
 
 .message-actions {
@@ -924,4 +931,24 @@ html, body {
   }
    .visual-switch-text-on { left: 7px; }
    .visual-switch-text-off { right: 6px; }
+}
+
+/* Scrollbar Styles */
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-tertiary);
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: var(--text-secondary);
+  border-radius: 6px;
+  border: 3px solid var(--bg-tertiary);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--text-primary);
 }

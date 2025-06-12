@@ -92,7 +92,7 @@ function ChatArea({
                       disabled={savingEdit || actionsDisabled}
                       onClick={handleSaveEdit}
                     >
-                      {savingEdit ? 'Saving…' : 'Save'}
+                      {savingEdit ? 'Processing…' : 'Save'}
                     </button>
                     <button
                       className="button"
