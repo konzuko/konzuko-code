@@ -31,7 +31,7 @@ function formatRejectionMessage(rejectionStats, context = "folder scan") {
   if (tooLarge > 0) { lines.push(`- ${tooLarge} file(s) skipped (over ${MAX_TEXT_FILE_SIZE / 1024}KB).`); hasSkipsOrErrors = true; }
   if (tooLong > 0) { lines.push(`- ${tooLong} file(s) skipped (over ${MAX_CHAR_LEN / 1000}k chars).`); hasSkipsOrErrors = true; }
   if (unsupportedType > 0) { lines.push(`- ${unsupportedType} file(s) skipped (not text/code).`); hasSkipsOrErrors = true; }
-  if (limitReached > 0) { const item = context === "folder scan" ? "entries during scan" : "files"; lines.push(`- ${limitReached} ${item} skipped (limit ${context === "folder scan" ? FILE_LIMIT * 4 : FILE_LIMIT} reached).`); hasSkipsOrErrors = true; }
+  if (limitReached > 0) { const item = context === "folder scan" ? "entries during scan" : "files"; lines.push(`- ${limitReached} ${item} skipped (limit ${context === "folder scan" ? "discovery cap" : FILE_LIMIT} reached).`); hasSkipsOrErrors = true; }
   if (permissionDenied > 0) { lines.push(`- ${permissionDenied} item(s) SKIPPED DUE TO PERMISSION ERROR.`); hasSkipsOrErrors = true; }
   if (readError > 0) { lines.push(`- ${readError} file(s) SKIPPED DUE TO READ ERROR.`); hasSkipsOrErrors = true; }
   if (!hasSkipsOrErrors) return null;
@@ -55,24 +55,14 @@ async function scanDirectoryForMinimalMetadata(rootHandle) {
   }
   console.log('[scanMinimalMetadata] Top entries:', tops.map(t => t.name));
 
-  const DISCOVERY_CAP = FILE_LIMIT * 4;
   const queue = [{ handle: rootHandle, pathPrefix: '' }];
-  let processedEntries = 0;
 
   while (queue.length > 0) {
     const current = queue.shift();
     if (!current || !current.handle) continue;
-    processedEntries++;
-    if (processedEntries > DISCOVERY_CAP * 2) {
-        console.warn('[scanMinimalMetadata] Exceeded max processed entries.');
-        rejectionStats.limitReached += (queue.length +1) ;
-        break;
-    }
+    
     try {
       for await (const [name, childHandle] of current.handle.entries()) {
-        if (preliminaryMeta.length >= DISCOVERY_CAP) {
-            rejectionStats.limitReached++; break;
-        }
         const relativePath = current.pathPrefix ? `${current.pathPrefix}/${name}` : name;
         try {
           preliminaryMeta.push({ path: relativePath, kind: childHandle.kind });
@@ -84,7 +74,6 @@ async function scanDirectoryForMinimalMetadata(rootHandle) {
           rejectionStats.readError++;
         }
       }
-       if (preliminaryMeta.length >= DISCOVERY_CAP) break;
     } catch (dirError) {
         if (dirError.name === 'NotAllowedError') rejectionStats.permissionDenied++;
         else rejectionStats.readError++;
@@ -95,19 +84,22 @@ async function scanDirectoryForMinimalMetadata(rootHandle) {
   return { tops, meta: preliminaryMeta, rejectionStats };
 }
 
-async function processAndStageSelectedFiles(state) {
-  const { root, meta: preliminaryMetaFromState, selected } = state;
+async function processAndStageSelectedFiles(state, isSecondary = false) {
+  const root = isSecondary ? state.secondaryRoot : state.root;
+  const meta = isSecondary ? state.secondaryMeta : state.meta;
+  const selected = isSecondary ? state.secondarySelected : state.selected;
+  
   const out = [];
   const rejectionStats = { tooLarge: 0, tooLong: 0, unsupportedType: 0, readError: 0, permissionDenied: 0, limitReached: 0 };
   let filesProcessedCount = 0;
 
-  if (!root || !preliminaryMetaFromState || !selected) return { stagedFiles: out, rejectionStats };
+  if (!root || !meta || !selected) return { stagedFiles: out, rejectionStats };
   console.log('[processAndStage] Processing selected top-level items:', Array.from(selected));
 
   const processingQueue = [];
 
   for (const topLevelName of selected) {
-    const topLevelMetaItem = preliminaryMetaFromState.find(pm => pm.path === topLevelName);
+    const topLevelMetaItem = meta.find(pm => pm.path === topLevelName);
     if (topLevelMetaItem) {
       try {
         if (topLevelMetaItem.kind === 'file') {
@@ -141,7 +133,7 @@ async function processAndStageSelectedFiles(state) {
         const text = await file.text();
         if (text.length > MAX_CHAR_LEN) { rejectionStats.tooLong++; continue; }
         const fileName = currentItemPath.substring(currentItemPath.lastIndexOf('/') + 1);
-        out.push(makeStagedFile(currentItemPath, file.size, file.type, text, true, fileName));
+        out.push(makeStagedFile(currentItemPath, file.size, file.type, text, !isSecondary, fileName, root.name));
       } else if (currentItemKind === 'directory') {
         for await (const entry of currentHandle.values()) {
           const entryPath = `${currentItemPath}/${entry.name}`;
@@ -176,7 +168,7 @@ export default function CodebaseImporter({
     stateRef.current = impState;
   }, [impState]);
 
-  const performScan = useCallback(async (handleToScan, context) => {
+  const performScan = useCallback(async (handleToScan, context, isSecondary = false) => {
     if (!handleToScan) {
         console.warn(`[performScan] Called without a valid handle. Context: ${context}`);
         dispatch({ type: 'CLEAR_ALL' }); return;
@@ -188,13 +180,15 @@ export default function CodebaseImporter({
     console.log(`[performScan] Starting scan for ${handleToScan.name} due to ${context}`);
     try {
         const { tops, meta, rejectionStats } = await scanDirectoryForMinimalMetadata(handleToScan);
-        const { root, tag } = stateRef.current;
-        if (root?.name === handleToScan.name && tag === 'SCANNING') { // Check if still relevant
+        const { root, secondaryRoot, tag } = stateRef.current;
+        const currentRoot = isSecondary ? secondaryRoot : root;
+
+        if (currentRoot?.name === handleToScan.name && (tag === 'SCANNING' || tag === 'SCANNING_SECONDARY')) {
             dispatch({ type: 'SCAN_DONE', tops, meta });
             const msg = formatRejectionMessage(rejectionStats, `folder scan on ${context}`);
             if (msg) toastFn?.(msg, 15000);
         } else {
-            console.log(`[performScan] Scan for ${handleToScan.name} completed, but state/root changed. Discarding. State: ${tag}, Root: ${root?.name}`);
+            console.log(`[performScan] Scan for ${handleToScan.name} completed, but state/root changed. Discarding. State: ${tag}, Root: ${currentRoot?.name}`);
         }
     } catch (err) {
         console.error(`[performScan] Error during scan for ${handleToScan.name} (context: ${context}):`, err);
@@ -214,18 +208,13 @@ export default function CodebaseImporter({
 
     // Scenario 1: Parent indicates no project root is active
     if (currentProjectRootNameFromBuilder === null) {
-      // FIX: Refined condition for clearing
-      if (impState.root) { // If there *was* an active project root, clear it.
+      if (impState.root) {
         console.log('[SyncEffect] SCENARIO 1A: Parent cleared project root. Resetting importer.');
         clearIDBRoot().catch(console.warn);
         dispatch({ type: 'CLEAR_ALL' });
-      } else if (!impState.root && (impState.tag === 'FILTER' || impState.tag === 'SCANNING' || impState.tag === 'STAGING')) {
-        // No project root, but state implies one was expected (e.g., mid-scan/filter for a now-gone root)
+      } else if (!impState.root && (impState.tag !== 'IDLE' && impState.tag !== 'STAGED')) {
         console.log('[SyncEffect] SCENARIO 1B: Parent wants no root, and importer is in a root-dependent intermediate state. Resetting.');
         dispatch({ type: 'CLEAR_ALL' });
-      } else {
-        // Parent wants no root, and importer is IDLE or STAGED (with individual files, no root). This is fine.
-        console.log('[SyncEffect] SCENARIO 1C: ParentRoot is null, and importer is IDLE or STAGED without a root. No change needed.');
       }
       initialLoadAttemptedRef.current = true;
       return;
@@ -233,14 +222,12 @@ export default function CodebaseImporter({
 
     // Scenario 2: Parent specifies a root name
     if (currentProjectRootNameFromBuilder) {
-      // Condition 2A: Importer already has this exact root and is in a stable state (FILTER or STAGED). Do nothing.
       if (currentEffectRootName === currentProjectRootNameFromBuilder && (impState.tag === 'FILTER' || impState.tag === 'STAGED')) {
         console.log('[SyncEffect] SCENARIO 2A: Importer already has correct root and stable state.');
         initialLoadAttemptedRef.current = true;
         return;
       }
 
-      // Condition 2B: Importer needs to establish or re-establish this root, or is already scanning it.
       if (impState.tag === 'SCANNING' && currentEffectRootName === currentProjectRootNameFromBuilder) {
           console.log('[SyncEffect] SCENARIO 2B: State is SCANNING for the target root. Triggering performScan if not already in progress.');
           if (impState.root) performScan(impState.root, "SyncEffect - state was SCANNING");
@@ -253,7 +240,7 @@ export default function CodebaseImporter({
         loadRoot().then(handleFromIDB => {
           if (handleFromIDB?.name === currentProjectRootNameFromBuilder) {
             console.log('[SyncEffect] SCENARIO 2C: Loaded matching root from IDB:', handleFromIDB.name);
-            dispatch({ type: 'PICK_ROOT', handle: handleFromIDB }); // SyncEffect will re-run, hit 2B, then call performScan
+            dispatch({ type: 'PICK_ROOT', handle: handleFromIDB });
           } else {
             console.log('[SyncEffect] SCENARIO 2C: No matching root in IDB for', currentProjectRootNameFromBuilder, '. Importer to IDLE.');
             if (handleFromIDB) clearIDBRoot().catch(console.warn);
@@ -283,70 +270,48 @@ export default function CodebaseImporter({
   }, [currentProjectRootNameFromBuilder, onProjectRootChange, toastFn, impState.tag, impState.root?.name, performScan]);
 
   useEffect(() => {
-    if (impState.tag === 'FILTER') {
+    if (impState.tag === 'FILTER' || impState.tag === 'FILTER_SECONDARY') {
         lastCheckedIndexRef.current = null;
     }
-  }, [impState.tag, impState.tops]);
+  }, [impState.tag]);
 
   const pickFolder = useCallback(async () => {
     if (!window.showDirectoryPicker) { toastFn?.('Directory picker not supported.', 4000); return; }
     setAdding(true);
     try {
       const dirHandle = await window.showDirectoryPicker();
-      console.log('[pickFolder] User selected folder:', dirHandle.name);
-      await saveRoot(dirHandle);
       
-      if (impState.root?.name === dirHandle.name && (impState.tag === 'FILTER' || impState.tag === 'STAGED')) {
-        console.log('[pickFolder] Re-picking same folder name. Dispatching RESCAN_ROOT.');
-        dispatch({ type: 'RESCAN_ROOT' }); // SyncEffect will see SCANNING state and call performScan
+      if (impState.tag === 'STAGED' && impState.files.length > 0) {
+        dispatch({ type: 'PICK_SECONDARY_ROOT', handle: dirHandle });
+        performScan(dirHandle, `secondary scan of ${dirHandle.name}`, true);
       } else {
-        onProjectRootChange?.(dirHandle.name); // For new/different folder, let SyncEffect handle PICK_ROOT and scan
+        await saveRoot(dirHandle);
+        if (impState.root?.name === dirHandle.name && (impState.tag === 'FILTER' || impState.tag === 'STAGED')) {
+          dispatch({ type: 'RESCAN_ROOT' });
+        } else {
+          onProjectRootChange?.(dirHandle.name);
+        }
       }
     } catch (e) {
       if (e.name !== 'AbortError') toastFn?.('Folder pick error: ' + e.message, 4000);
-      if (impState.root?.name && (!currentProjectRootNameFromBuilder || currentProjectRootNameFromBuilder === impState.root.name)) {
-          // If picking failed but we had a root that parent still knows about (or doesn't know about yet)
-          // tell parent there's no root now due to failure.
-          onProjectRootChange?.(null);
-      } else if (impState.tag !== 'IDLE') {
-          dispatch({type: 'CLEAR_ALL'});
-      }
     } finally {
       setAdding(false);
     }
-  }, [toastFn, onProjectRootChange, impState.root, impState.tag]);
+  }, [toastFn, onProjectRootChange, impState, performScan]);
 
   const handleCheckboxChange = useCallback((event, path) => {
-    if (impState.tag !== 'FILTER') return;
-    const currentIndex = impState.tops.findIndex(t => t.name === path);
-    const desiredState = event.target.checked;
-
-    if (event.shiftKey && lastCheckedIndexRef.current !== null && currentIndex !== -1 && lastCheckedIndexRef.current !== currentIndex) {
-        const start = Math.min(lastCheckedIndexRef.current, currentIndex);
-        const end = Math.max(lastCheckedIndexRef.current, currentIndex);
-        const pathsToToggle = [];
-        for (let i = start; i <= end; i++) {
-            if (impState.tops[i]) pathsToToggle.push(impState.tops[i].name);
-        }
-        dispatch({ type: 'BULK_SELECT', paths: pathsToToggle, select: desiredState });
-    } else {
-        dispatch({ type: 'TOGGLE_SELECT', path: path, desiredState: desiredState });
-    }
-    if (currentIndex !== -1) {
-        lastCheckedIndexRef.current = currentIndex;
-    }
-  }, [impState.tag, impState.tops]);
+    dispatch({ type: 'TOGGLE_SELECT', path: path, desiredState: event.target.checked });
+  }, []);
 
   const beginStagingAndReadTexts = useCallback(async () => {
-    if (impState.tag !== 'FILTER') return;
+    const isSecondary = impState.tag === 'FILTER_SECONDARY';
     dispatch({ type: 'BEGIN_STAGING' });
     setAdding(true);
     try {
-      const {stagedFiles, rejectionStats} = await processAndStageSelectedFiles(impState);
+      const {stagedFiles, rejectionStats} = await processAndStageSelectedFiles(impState, isSecondary);
       dispatch({ type: 'STAGING_DONE', files: stagedFiles });
       const msg = formatRejectionMessage(rejectionStats, "file staging");
       if (msg) toastFn?.(msg, 15000);
-
     } catch (e) {
       toastFn?.('Error reading file contents: ' + e.message, 5000);
       dispatch({ type: 'CLEAR_ALL' });
@@ -382,7 +347,7 @@ export default function CodebaseImporter({
                 const textContent = await file.text();
                 if (textContent.length > MAX_CHAR_LEN) { rejectionStats.tooLong++; currentFileRejected = true; }
                 if (!currentFileRejected) {
-                    newFilesPayload.push(makeStagedFile(file.name, file.size, file.type, textContent, false, file.name));
+                    newFilesPayload.push(makeStagedFile(file.name, file.size, file.type, textContent, false, file.name, null));
                     filesAddedCount++;
                 }
             }
@@ -487,7 +452,8 @@ export default function CodebaseImporter({
           fullPath: f.path,
           text: f.text,
           insideProject: f.insideProject,
-          name: f.name
+          name: f.name,
+          rootName: f.rootName
       }));
       const currentHash = filesToParent.map(f => f.id).sort().join(',');
       if (currentHash !== lastNotifiedFilesIdHashRef.current) {
@@ -507,18 +473,26 @@ export default function CodebaseImporter({
   }, [impState, onFilesChange]);
 
   const phase = impState.tag;
-  const currentRootName = impState.root ? impState.root.name : null;
-  const isLoadingOperation = adding || phase === 'SCANNING' || phase === 'STAGING';
+  const isLoadingOperation = adding || phase === 'SCANNING' || phase === 'STAGING' || phase === 'SCANNING_SECONDARY' || phase === 'STAGING_SECONDARY';
+  const allRoots = (phase === 'STAGED' && impState.files) ? [...new Set(impState.files.map(f => f.rootName).filter(Boolean))] : [];
+
+  const isFiltering = phase === 'FILTER' || phase === 'FILTER_SECONDARY';
+  const currentFilterTops = phase === 'FILTER' ? impState.tops : (phase === 'FILTER_SECONDARY' ? impState.secondaryTops : []);
+  const currentFilterSelected = phase === 'FILTER' ? impState.selected : (phase === 'FILTER_SECONDARY' ? impState.secondarySelected : new Set());
+  const currentFilterRootName = phase === 'FILTER' ? impState.root?.name : (phase === 'FILTER_SECONDARY' ? impState.secondaryRoot?.name : '');
 
   return (
     <div className="file-pane-container">
       <h2>Codebase Importer</h2>
-      {currentRootName && ( <div style={{ marginBottom: 8, fontSize: '0.85rem', opacity: 0.8 }}> Root: <code>{currentRootName}</code> </div> )}
       
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', marginBottom: '1rem' }}>
         {/* Top Row */}
-        <button className="button" onClick={pickFolder} disabled={isLoadingOperation}>+ Add Folder</button>
-        <button className="button" onClick={pickTextFilesAndDispatch} disabled={isLoadingOperation}>+ Add Files</button>
+        <button className="button" onClick={pickFolder} disabled={isLoadingOperation}>
+          {phase === 'STAGED' && impState.files.length > 0 ? '+ Add More Folders' : '+ Add Folder'}
+        </button>
+        <button className="button" onClick={pickTextFilesAndDispatch} disabled={isLoadingOperation}>
+          {phase === 'STAGED' && impState.files.length > 0 ? '+ Add More Files' : '+ Add Files'}
+        </button>
         <button className="button" onClick={clearAllStatesAndNotifyParent}
           disabled={isLoadingOperation || phase === 'IDLE'}
           style={(phase !== 'IDLE') ? { background: '#b71c1c', color: '#fff' } : {}} > Clear Files
@@ -530,45 +504,60 @@ export default function CodebaseImporter({
         <button className="button" onClick={handleAddPDF} disabled={adding}>+ Add PDF</button>
       </div>
 
-      {(phase === 'SCANNING' || phase === 'STAGING') && (
+      {(phase === 'SCANNING' || phase === 'STAGING' || phase === 'SCANNING_SECONDARY' || phase === 'STAGING_SECONDARY') && (
          <div className="analysing-animation-container">
-            <span className="analysing-text">{phase === 'SCANNING' ? 'Scanning folder (metadata)...' : 'Processing selected files...'}</span>
+            <span className="analysing-text">{phase.startsWith('SCANNING') ? 'Scanning folder (metadata)...' : 'Processing selected files...'}</span>
             <div className="analysing-dots"><span></span><span></span><span></span></div>
         </div>
       )}
-      {phase === 'FILTER' && impState.tops && (
+      {isFiltering && (
         <>
-          <h3>Select entries to include from '{currentRootName}'</h3>
+          <h3>Select entries to include from '{currentFilterRootName}'</h3>
           <div style={{ maxHeight: '200px', overflowY: 'auto', padding: '4px 0', border: '1px solid var(--border)', borderRadius: '4px', marginBottom: '8px' }}>
-            {impState.tops.map((t, index) => (
+            {currentFilterTops.map((t) => (
               <label key={t.name} style={{ display: 'block', margin: '4px 8px', cursor: 'pointer' }}>
-                <input type="checkbox" checked={impState.selected.has(t.name)}
+                <input type="checkbox" checked={currentFilterSelected.has(t.name)}
                   onChange={e => handleCheckboxChange(e, t.name)}
                   style={{ marginRight: '8px' }} disabled={isLoadingOperation} />
                 {t.kind === 'directory' ? '📁' : '📄'} <strong>{t.name}</strong>
               </label>
             ))}
           </div>
-          <button className="button button-accent button-glow" style={{ marginTop: 8 }}
-            disabled={isLoadingOperation || !impState.selected || impState.selected.size === 0}
-            onClick={beginStagingAndReadTexts} > Pick these Files
-          </button>
+          <div style={{display: 'flex', gap: '8px', marginTop: '8px'}}>
+            <button className="button button-accent button-glow"
+              disabled={isLoadingOperation || currentFilterSelected.size === 0}
+              onClick={beginStagingAndReadTexts} > Pick these Files
+            </button>
+            <button className="button" style={{background: '#000', color: '#fff'}}
+              disabled={isLoadingOperation}
+              onClick={() => dispatch({ type: 'BULK_SELECT', paths: currentFilterTops.map(t => t.name), select: true })}
+            > Select All </button>
+            <button className="button" style={{background: '#000', color: '#fff'}}
+              disabled={isLoadingOperation}
+              onClick={() => dispatch({ type: 'BULK_SELECT', paths: currentFilterTops.map(t => t.name), select: false })}
+            > Deselect All </button>
+          </div>
         </>
       )}
       {phase === 'STAGED' && impState.files && (
         <>
+          {allRoots.length > 0 && (
+            <div style={{ marginBottom: 8, fontSize: '0.85rem', opacity: 0.8 }}>
+              <strong>Sources:</strong>
+              {allRoots.map(root => (
+                <div key={root} style={{ marginLeft: '1em', display: 'flex', alignItems: 'center', gap: '0.5em' }}>
+                  <span>📁</span>
+                  <code>{root}</code>
+                </div>
+              ))}
+            </div>
+          )}
           <p style={{ marginBottom: '8px', fontSize: '0.9em' }}> {impState.files.length} text file(s) staged. </p>
           {impState.files.length > 0 && (
             <ul className="file-pane-filelist">
               {impState.files.map((f) => (
                 <li key={f.id} title={f.path}> 
                   {f.path.length > 50 ? `...${f.path.slice(-47)}` : f.path}
-                  {/* Example Remove Button:
-                  <button
-                    onClick={() => dispatch({type: 'REMOVE_STAGED_FILE', id: f.id})}
-                    style={{ marginLeft: '10px', cursor: 'pointer', color: 'red', background: 'none', border: 'none'}}
-                  > × </button>
-                  */}
                 </li>
               ))}
             </ul>
