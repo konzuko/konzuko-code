@@ -556,8 +556,26 @@ export default function CodebaseImporter({
           {impState.files.length > 0 && (
             <ul className="file-pane-filelist">
               {impState.files.map((f) => (
-                <li key={f.id} title={f.path}> 
-                  {f.path.length > 50 ? `...${f.path.slice(-47)}` : f.path}
+                <li key={f.id} title={f.path} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}> 
+                  <span>
+                    {f.path.length > 50 ? `...${f.path.slice(-47)}` : f.path}
+                  </span>
+                  <button
+                    onClick={() => dispatch({type: 'REMOVE_STAGED_FILE', id: f.id})}
+                    title={`Remove ${f.name}`}
+                    style={{ 
+                      marginLeft: '10px', 
+                      cursor: 'pointer', 
+                      color: 'var(--error)', 
+                      background: 'none', 
+                      border: 'none',
+                      fontSize: '1.2rem',
+                      lineHeight: '1',
+                      padding: '0 4px'
+                    }}
+                  >
+                    &times;
+                  </button>
                 </li>
               ))}
             </ul>
