@@ -55,7 +55,7 @@ function buildFormSection(currentForm, currentMode) {
     return (
       '## MODE # CODE CHECK\n' +
       "Analyze the provided code (and relevant context from our conversation) for potential issues. Systematically check against each of the following categories:\n\n" +
-      "0.  If the code implementation works as intended, and there are no issues that can arise from the current implementation.\n" +
+      "0.  If the code implementation works as intended, there are no issues that can arise from the current implementation, and that it's the best, most logical, simple, and effective implementation possible for the given problem.\n" +
       "1.  Logical Errors: Pinpoint flaws in the code's logic or if it deviates from intended behavior.\n" +
       "2.  Runtime Errors (Exceptions): Foresee potential crashes or exceptions during execution.\n" +
       "3.  Concurrency Issues: (If applicable) Detect race conditions, deadlocks, or other multi-threading/asynchronous problems.\n" +
