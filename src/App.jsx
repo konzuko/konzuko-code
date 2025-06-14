@@ -329,7 +329,7 @@ function MainLayout() {
             {displaySettings.showSettings ? 'Close Settings' : 'Open Settings'}
           </button>
           <span style={{ margin: '0 1em', fontWeight: 'bold' }}>
-            Konzuko&nbsp;AI {isAwaitingApiResponse && "(Processing...)"}
+            KonzukoCode {isAwaitingApiResponse && "Processing..."}
           </span>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.5em', alignItems: 'center', }} >
             {isAwaitingApiResponse && (
