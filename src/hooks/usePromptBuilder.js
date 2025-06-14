@@ -1,3 +1,4 @@
+/* src/hooks/usePromptBuilder.js */
 // src/hooks/usePromptBuilder.js
 
 import { useState, useEffect, useCallback, useMemo } from 'preact/hooks';
@@ -18,7 +19,6 @@ function buildFormSection(currentForm, currentMode) {
       out.push(`GOAL: ${safeTrim(currentForm.developGoal)}`);
     }
     if (safeTrim(currentForm.developFeatures)) {
-      // UPDATED: Renamed FEATURES to REQUIREMENTS in the output prompt
       out.push(`REQUIREMENTS: ${safeTrim(currentForm.developFeatures)}`);
     }
 
@@ -106,19 +106,14 @@ export function usePromptBuilder(importedCodeFiles = []) {
     return () => { imagesToRevoke.forEach(revokeOnce); };
   }, [pendingImages]);
 
-  // Memoize the fast part (form inputs)
   const formText = useMemo(() => buildFormSection(form, mode), [form, mode]);
-  
-  // Memoize the slow part (file processing)
   const fileText = useMemo(() => buildFilesSection(importedCodeFiles, currentProjectRootName), [importedCodeFiles, currentProjectRootName]);
 
-  // The final combined text is now cheap to compute because its dependencies are memoized.
   const userPromptText = useMemo(() => {
     if (mode !== 'DEVELOP' || !fileText) {
         return formText;
     }
-    // Conditionally join to avoid extra newlines when fileText is empty.
-    return [formText, fileText].join(PROMPT_SECTION_SEPARATOR);
+    return [formText, fileText].filter(Boolean).join(PROMPT_SECTION_SEPARATOR);
   }, [formText, fileText, mode]);
 
 
@@ -135,7 +130,7 @@ export function usePromptBuilder(importedCodeFiles = []) {
   const resetPrompt = useCallback(() => {
     setPendingImages([]);
     setPendingPDFs([]);
-    handleProjectRootChange(null); // Signals CodebaseImporter (via App) to clear its root
+    handleProjectRootChange(null);
     setForm(prevForm => ({
       ...INITIAL_FORM_DATA,
       developReturnFormat_autoIncludeDefault: prevForm.developReturnFormat_autoIncludeDefault,
@@ -148,7 +143,9 @@ export function usePromptBuilder(importedCodeFiles = []) {
     pendingPDFs, addPendingPDF,
     currentProjectRootName,
     handleProjectRootChange,
-    userPromptText, // The final, combined text for sending and token counting
+    formText,
+    fileText,
+    userPromptText,
     resetPrompt
   };
 }

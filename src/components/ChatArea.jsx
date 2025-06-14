@@ -1,9 +1,9 @@
+/* src/components/ChatArea.jsx */
 // src/components/ChatArea.jsx
 import { memo } from 'preact/compat';
 import { useEffect, useRef } from 'preact/hooks';
 import MessageItem from './MessageItem.jsx';
 import useCopyToClipboard from '../hooks/useCopyToClipboard.js';
-import { getChecksum } from '../lib/checksumCache.js';
 import { autoResizeTextarea } from '../lib/domUtils.js';
 
 const flatten = c =>
@@ -14,7 +14,7 @@ const flatten = c =>
 function ChatArea({
   messages = [],
   isLoading,
-  forceLoading, // New prop: If true, always show loading state initially
+  forceLoading,
   editingId,
   editText,
   loadingSend,
@@ -32,7 +32,6 @@ function ChatArea({
   let assistantMessageCounter = 0;
 
   const MAX_EDIT_TEXTAREA_HEIGHT = 200; // px
-  // Determine if the "thinking" spinner should be shown
   const showThinkingSpinner = loadingSend && messages.length > 0 && messages[messages.length - 1].role === 'user' && !editingId;
 
   useEffect(() => {
@@ -41,7 +40,7 @@ function ChatArea({
     }
   }, [editingId, editText]);
 
-  if (forceLoading || isLoading) { // Prioritize forceLoading
+  if (forceLoading || isLoading) {
     return <div className="chat-loading-placeholder">Loading messages...</div>;
   }
 
@@ -188,36 +187,4 @@ function ChatArea({
   );
 }
 
-function areEqual(prev, next) {
-  if (prev.forceLoading !== next.forceLoading) return false;
-  if (prev.isLoading !== next.isLoading) return false;
-  if (prev.editingId   !== next.editingId)   return false;
-  if (prev.editText    !== next.editText)    return false;
-  if (prev.loadingSend !== next.loadingSend) return false;
-  if (prev.savingEdit  !== next.savingEdit)  return false;
-  if (prev.actionsDisabled !== next.actionsDisabled) return false;
-
-  if (next.forceLoading || next.isLoading) {
-    return prev.forceLoading === next.forceLoading &&
-           prev.isLoading === next.isLoading &&
-           prev.editingId === next.editingId &&
-           prev.editText === next.editText &&
-           prev.loadingSend === next.loadingSend &&
-           prev.savingEdit === next.savingEdit &&
-           prev.actionsDisabled === next.actionsDisabled;
-  }
-
-  if (prev.messages === next.messages) return true;
-  if (!prev.messages && !next.messages) return true;
-  if (!prev.messages || !next.messages) return false;
-  if (prev.messages.length !== next.messages.length) return false;
-  if (prev.messages.length === 0 && next.messages.length === 0) return true;
-
-  for (let i = 0; i < prev.messages.length; i++) {
-    if (prev.messages[i].id !== next.messages[i].id) return false;
-    if (getChecksum(prev.messages[i]) !== getChecksum(next.messages[i])) return false;
-  }
-  return true;
-}
-
-export default memo(ChatArea, areEqual);
+export default memo(ChatArea);

@@ -1,3 +1,4 @@
+/* src/hooks/useMessageManager.js */
 // src/hooks/useMessageManager.js
 import { useState, useCallback } from 'preact/hooks';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -12,7 +13,7 @@ import {
 } from '../api.js';
 import Toast from '../components/Toast.jsx';
 
-export function useMessageManager(currentChatId, apiKey, setHasLastSendFailed) {
+export function useMessageManager(currentChatId, setHasLastSendFailed) {
   const queryClient = useQueryClient();
   const [editingId, setEditingId] = useState(null);
   const [editText, setEditText] = useState('');
@@ -30,14 +31,15 @@ export function useMessageManager(currentChatId, apiKey, setHasLastSendFailed) {
 
   const sendMessageMutation = useMutation({
     mutationFn: async (payload) => {
+      const { userMessageContentBlocks, existingMessages, apiKey } = payload;
       const userRow = await createMessage({
         chat_id: currentChatId,
         role: 'user',
-        content: payload.userMessageContentBlocks,
+        content: userMessageContentBlocks,
       });
       queryClient.setQueryData(['messages', currentChatId], (oldMessages = []) => [...oldMessages, userRow]);
 
-      const messagesForApi = [...payload.existingMessages, userRow];
+      const messagesForApi = [...existingMessages, userRow];
       const { content: assistantContent } = await callApiForText({
         apiKey: apiKey,
         messages: messagesForApi,
@@ -51,25 +53,23 @@ export function useMessageManager(currentChatId, apiKey, setHasLastSendFailed) {
       return {
         userRow,
         assistantRow,
-        onSendSuccess: payload.onSendSuccess,
       };
     },
     onMutate: async () => {
-      setHasLastSendFailed?.(false); // Reset error state on new attempt
+      setHasLastSendFailed?.(false);
     },
-    onSuccess: (data) => {
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['messages', currentChatId] });
-      data.onSendSuccess?.();
     },
     onError: (error) => {
       Toast(`Error sending message: ${error.message}`, 8000);
       queryClient.invalidateQueries({ queryKey: ['messages', currentChatId] });
-      setHasLastSendFailed?.(true); // Set error state on failure
+      setHasLastSendFailed?.(true);
     },
   });
 
   const editMessageMutation = useMutation({
-    mutationFn: async ({ messageId, newContentArray, originalMessages }) => {
+    mutationFn: async ({ messageId, newContentArray, originalMessages, apiKey }) => {
       const editedMessage = await updateMessage(messageId, newContentArray);
       await archiveMessagesAfter(currentChatId, editedMessage.created_at);
 
@@ -89,7 +89,7 @@ export function useMessageManager(currentChatId, apiKey, setHasLastSendFailed) {
       return { editedMessageId: messageId };
     },
     onMutate: async ({ messageId, newContentArray }) => {
-      setHasLastSendFailed?.(false); // Reset
+      setHasLastSendFailed?.(false);
       const queryKey = ['messages', currentChatId];
       await queryClient.cancelQueries({ queryKey });
       const previousMessages = queryClient.getQueryData(queryKey);
@@ -121,12 +121,12 @@ export function useMessageManager(currentChatId, apiKey, setHasLastSendFailed) {
       }
       Toast('Failed to edit message: ' + error.message, 5000);
       queryClient.invalidateQueries({ queryKey: ['messages', currentChatId] });
-      setHasLastSendFailed?.(true); // Set on failure
+      setHasLastSendFailed?.(true);
     },
   });
 
   const resendMessageMutation = useMutation({
-    mutationFn: async ({ messageId, originalMessages }) => {
+    mutationFn: async ({ messageId, originalMessages, apiKey }) => {
       const anchorMessage = originalMessages.find(m => m.id === messageId);
       if (!anchorMessage) throw new Error("Anchor message for resend not found.");
       const anchorMsgIndex = originalMessages.findIndex(m => m.id === messageId);
@@ -144,7 +144,7 @@ export function useMessageManager(currentChatId, apiKey, setHasLastSendFailed) {
       return { resentMessageId: messageId };
     },
     onMutate: async () => {
-        setHasLastSendFailed?.(false); // Reset
+        setHasLastSendFailed?.(false);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['messages', currentChatId] });
@@ -153,7 +153,7 @@ export function useMessageManager(currentChatId, apiKey, setHasLastSendFailed) {
     onError: (error) => {
       Toast('Failed to resend message: ' + error.message, 5000);
       queryClient.invalidateQueries({ queryKey: ['messages', currentChatId] });
-      setHasLastSendFailed?.(true); // Set on failure
+      setHasLastSendFailed?.(true);
     },
   });
 
@@ -204,7 +204,7 @@ export function useMessageManager(currentChatId, apiKey, setHasLastSendFailed) {
     setEditText('');
   }, []);
 
-  const handleSaveEdit = useCallback(() => {
+  const handleSaveEdit = useCallback((apiKey) => {
     if (!editingId || !currentChatId || editMessageMutation.isPending) return;
     if (!apiKey || String(apiKey).trim() === "") {
       Toast("API Key not set. Cannot save edit.", 4000); return;
@@ -234,16 +234,17 @@ export function useMessageManager(currentChatId, apiKey, setHasLastSendFailed) {
       messageId: editingId,
       newContentArray: newContentArray,
       originalMessages: messages,
+      apiKey: apiKey,
     });
-  }, [editingId, editText, currentChatId, messages, editMessageMutation, apiKey, handleCancelEdit]);
+  }, [editingId, editText, currentChatId, messages, editMessageMutation, handleCancelEdit]);
 
-  const handleResendMessage = useCallback((messageId) => {
+  const handleResendMessage = useCallback((messageId, apiKey) => {
     if (!currentChatId || resendMessageMutation.isPending) return;
     if (!apiKey || String(apiKey).trim() === "") {
       Toast("API Key not set. Cannot resend.", 4000); return;
     }
-    resendMessageMutation.mutate({ messageId, originalMessages: messages });
-  }, [currentChatId, messages, resendMessageMutation, apiKey]);
+    resendMessageMutation.mutate({ messageId, originalMessages: messages, apiKey: apiKey });
+  }, [currentChatId, messages, resendMessageMutation]);
 
   const handleDeleteMessage = useCallback((messageId) => {
     if (deleteMessageMutation.isPending || !currentChatId) return;

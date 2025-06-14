@@ -1,13 +1,14 @@
+/* src/ChatPaneLayout.jsx */
 // src/ChatPaneLayout.jsx
-// Ensure all props are correctly received and used.
 import { useState, useMemo, useEffect, useRef, useCallback } from 'preact/hooks';
+import { useVirtualizer } from '@tanstack/react-virtual';
 
 const DEFAULT_TITLE = "Untitled Task";
-const STATUS_INDICATOR_DURATION_MS = 2000; // Duration for the save/error indicator
+const STATUS_INDICATOR_DURATION_MS = 2000;
 
 function ChatItem({ chat, isActive, onSelectChat, onTitleUpdate, onDeleteChat, disabled }) {
   const [editing, setEditing] = useState(false);
-  const [status, setStatus] = useState('idle'); // 'idle', 'processing', 'success', 'error'
+  const [status, setStatus] = useState('idle');
   const [currentTitle, setCurrentTitle] = useState(chat.title || DEFAULT_TITLE);
   const inputRef = useRef(null);
 
@@ -33,7 +34,7 @@ function ChatItem({ chat, isActive, onSelectChat, onTitleUpdate, onDeleteChat, d
         setStatus('success');
       } catch (error) {
         setStatus('error');
-        setCurrentTitle(originalTitle); // Revert on failure
+        setCurrentTitle(originalTitle);
       } finally {
         setTimeout(() => setStatus('idle'), STATUS_INDICATOR_DURATION_MS);
       }
@@ -163,25 +164,37 @@ export default function ChatPaneLayout({
   isLoadingMoreChats
 }) {
   const [collapsed, setCollapsed] = useState(false);
-
   const groupedItems = useMemo(() => groupChatsByDate(chats), [chats]);
+  
+  const parentRef = useRef(null);
 
-  const observer = useRef();
-  const loadMoreSentinelRef = useCallback(node => {
-    if (observer.current) observer.current.disconnect();
-    observer.current = new IntersectionObserver(entries => {
-      if (entries[0].isIntersecting && hasMoreChatsToFetch && !isLoadingMoreChats && !disabled) {
-        onLoadMoreChats();
-      }
-    });
-    if (node) observer.current.observe(node);
-  }, [hasMoreChatsToFetch, onLoadMoreChats, isLoadingMoreChats, disabled]);
+  const itemCount = hasMoreChatsToFetch || chats.length > 0 ? groupedItems.length + 1 : groupedItems.length;
+
+  const rowVirtualizer = useVirtualizer({
+    count: itemCount,
+    getScrollElement: () => parentRef.current,
+    estimateSize: (index) => {
+      if (index >= groupedItems.length) return 50; // Footer height
+      return groupedItems[index].type === 'header' ? 36 : 65;
+    },
+    overscan: 5,
+  });
+
+  const virtualItems = rowVirtualizer.getVirtualItems();
+  useEffect(() => {
+    const lastItem = virtualItems[virtualItems.length - 1];
+    if (!lastItem) return;
+
+    if (lastItem.index >= groupedItems.length - 1 && hasMoreChatsToFetch && !isLoadingMoreChats) {
+      onLoadMoreChats();
+    }
+  }, [virtualItems, hasMoreChatsToFetch, isLoadingMoreChats, onLoadMoreChats, groupedItems.length]);
 
   return (
     <div className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
       <div className="sidebar-header flex space-between align-center">
         <button
-          className="button icon-button sidebar-collapse-toggle"
+          className={`button icon-button sidebar-collapse-toggle ${!collapsed ? 'is-open' : ''}`}
           onClick={() => setCollapsed(!collapsed)}
           title={collapsed ? "Expand Sidebar" : "Collapse Sidebar"}
         >
@@ -194,32 +207,48 @@ export default function ChatPaneLayout({
         )}
       </div>
 
-      <div className="chat-list-scroll-area">
-        {!collapsed && groupedItems.map(item => {
-          if (item.type === 'header') {
-            return <div key={item.id} className="chat-group-header">{item.title}</div>;
-          }
-          return (
-            <ChatItem
-              key          ={item.chat.id}
-              chat         ={item.chat}
-              isActive     ={item.chat.id === currentChatId}
-              onSelectChat ={onSelectChat}
-              onTitleUpdate={onTitleUpdate}
-              onDeleteChat ={onDeleteChat}
-              disabled     ={disabled}
-            />
-          );
-        })}
-        {!collapsed && hasMoreChatsToFetch && (
-          <div ref={loadMoreSentinelRef} className="load-more-sentinel">
-            {isLoadingMoreChats && <span>Loading...</span>}
+      <div ref={parentRef} className="chat-list-scroll-area">
+        {!collapsed && itemCount > 0 && (
+          <div style={{ height: `${rowVirtualizer.getTotalSize()}px`, width: '100%', position: 'relative' }}>
+            {virtualItems.map((virtualItem) => {
+              const isLoaderRow = virtualItem.index >= groupedItems.length;
+              const item = isLoaderRow ? null : groupedItems[virtualItem.index];
+
+              return (
+                <div
+                  key={item ? item.id : 'loader-sentinel'}
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    height: `${virtualItem.size}px`,
+                    transform: `translateY(${virtualItem.start}px)`,
+                  }}
+                >
+                  {isLoaderRow ? (
+                    <div className="load-more-sentinel">
+                      {hasMoreChatsToFetch && (isLoadingMoreChats ? 'Loading...' : '')}
+                      {!hasMoreChatsToFetch && chats.length > 0 && <div className="all-chats-loaded-indicator">All tasks loaded.</div>}
+                    </div>
+                  ) : item.type === 'header' ? (
+                    <div className="chat-group-header">{item.title}</div>
+                  ) : (
+                    <ChatItem
+                      chat={item.chat}
+                      isActive={item.chat.id === currentChatId}
+                      onSelectChat={onSelectChat}
+                      onTitleUpdate={onTitleUpdate}
+                      onDeleteChat={onDeleteChat}
+                      disabled={disabled}
+                    />
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
-        {!collapsed && !isLoadingMoreChats && !hasMoreChatsToFetch && chats?.length > 0 && (
-            <div className="all-chats-loaded-indicator">All tasks loaded.</div>
-        )}
-        {!collapsed && !isLoadingMoreChats && chats?.length === 0 && (
+        {!collapsed && chats?.length === 0 && !isLoadingMoreChats && (
             <div className="no-chats-indicator">No tasks yet. Create one!</div>
         )}
       </div>

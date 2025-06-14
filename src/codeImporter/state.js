@@ -1,3 +1,4 @@
+/* src/codeImporter/state.js */
 // src/codeImporter/state.js
 
 const generateId = () => crypto.randomUUID();
@@ -5,7 +6,7 @@ const generateId = () => crypto.randomUUID();
 export function makeTopEntry(name, kind) { return { name, kind }; }
 
 export function makeStagedFile(path, size, mime, text, insideProject, name, rootName) {
-  return { id: generateId(), path, size, mime, text, insideProject, name, rootName };
+  return { id: generateId(), path, size, mime, text, insideProject, name, rootName, charCount: text.length };
 }
 
 export const initialState = { tag: 'IDLE' };

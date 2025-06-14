@@ -1,3 +1,4 @@
+/* src/App.jsx */
 // src/App.jsx
 import {
   useEffect,
@@ -10,7 +11,7 @@ import {
 import ChatList from './ChatList.jsx';
 import PromptBuilder from './PromptBuilder.jsx';
 import ChatArea from './components/ChatArea.jsx';
-import Toast from './components/Toast.jsx'; // Direct import for Toast
+import Toast from './components/Toast.jsx';
 
 import { GEMINI_MODEL_NAME } from './api.js';
 import {
@@ -19,7 +20,7 @@ import {
     MAX_ABSOLUTE_TOKEN_LIMIT
 } from './config.js';
 
-import { useDisplaySettings } from './hooks.js'; // UPDATED: Was useSettings
+import { useDisplaySettings } from './hooks.js';
 import { useChatSessionManager } from './hooks/useChatSessionManager.js';
 import { useMessageManager } from './hooks/useMessageManager.js';
 import { usePromptBuilder } from './hooks/usePromptBuilder.js';
@@ -27,7 +28,7 @@ import { useScrollNavigation } from './hooks/useScrollNavigation.js';
 
 import { useTokenizableContent } from './hooks/useTokenizableContent.js';
 import { countTokensWithGemini } from './lib/tokenWorkerClient.js';
-import { supabase } from './lib/supabase.js'; // NEW: For Edge Function calls
+import { supabase } from './lib/supabase.js';
 
 const debounce = (func, delay) => {
   let timeoutId;
@@ -59,7 +60,7 @@ export default function App() {
     createChat,
     deleteChat,
     updateChatTitle,
-    isLoadingSession,
+    isSessionBusy,
     isCreatingChat,
   } = useChatSessionManager();
 
@@ -79,7 +80,7 @@ export default function App() {
     isSendingMessage,
     isSavingEdit,
     isResendingMessage,
-  } = useMessageManager(currentChatId, settings.apiKey, setHasLastSendFailed);
+  } = useMessageManager(currentChatId, setHasLastSendFailed);
 
   const {
     form,
@@ -93,6 +94,8 @@ export default function App() {
     addPendingPDF,
     currentProjectRootName,
     handleProjectRootChange,
+    formText,
+    fileText,
     userPromptText,
     resetPrompt,
   } = usePromptBuilder(stagedCodeFiles);
@@ -156,20 +159,20 @@ export default function App() {
     }
   };
 
-  const isProcessing = isLoadingMessageOps || isLoadingSession;
+  const isAwaitingApiResponse = isSendingMessage || isSavingEdit || isResendingMessage;
 
   const handleSelectChat = useCallback(
     (newChatId) => {
       if (newChatId === currentChatId && !isSwitchingChat) return;
       if (isSwitchingChat && newChatId === currentChatId) return;
-      if (isProcessing) {
+      if (isLoadingMessageOps || isSessionBusy) {
         Toast("An operation is in progress. Please wait.", 3000);
         return;
       }
       setIsSwitchingChat(true);
       originalSetCurrentChatId(newChatId);
     },
-    [currentChatId, originalSetCurrentChatId, isSwitchingChat, isProcessing]
+    [currentChatId, originalSetCurrentChatId, isSwitchingChat, isLoadingMessageOps, isSessionBusy]
   );
 
   const [totalApiTokenCount, setTotalApiTokenCount] = useState(0);
@@ -179,9 +182,10 @@ export default function App() {
 
   const itemsForApiCount = useTokenizableContent(
     messages,
-    userPromptText,
+    formText,
+    fileText,
     pendingPDFs,
-    isProcessing
+    isAwaitingApiResponse
   );
 
   const callWorkerForTotalTokenCount = useCallback(
@@ -223,7 +227,7 @@ export default function App() {
 
   const currentTotalPromptTokens = useMemo(() => {
     let estimatedImageTokens = 0;
-    if (!isProcessing) {
+    if (!isAwaitingApiResponse) {
       estimatedImageTokens += pendingImages.length * IMAGE_TOKEN_ESTIMATE;
     }
     (messages || []).forEach(msg => {
@@ -237,35 +241,38 @@ export default function App() {
       });
     });
     return totalApiTokenCount + estimatedImageTokens;
-  }, [totalApiTokenCount, pendingImages, messages, isProcessing]);
+  }, [totalApiTokenCount, pendingImages, messages, isAwaitingApiResponse]);
 
 
   const isSoftMemoryLimitReached = currentTotalPromptTokens >= USER_FACING_TOKEN_LIMIT;
   const isHardTokenLimitReached = currentTotalPromptTokens >= MAX_ABSOLUTE_TOKEN_LIMIT;
 
   const chatListDisabled = useMemo(
-    () => isCreatingChat || isSwitchingChat || isProcessing,
-    [isCreatingChat, isSwitchingChat, isProcessing]
+    () => isCreatingChat || isSwitchingChat || isLoadingMessageOps || isSessionBusy,
+    [isCreatingChat, isSwitchingChat, isLoadingMessageOps, isSessionBusy]
   );
 
   const globalBusy = useMemo(
-    () => isProcessing || isSwitchingChat || isApiKeyLoading,
-    [isProcessing, isSwitchingChat, isApiKeyLoading]
+    () => isLoadingMessageOps || isSessionBusy || isSwitchingChat || isApiKeyLoading,
+    [isLoadingMessageOps, isSessionBusy, isSwitchingChat, isApiKeyLoading]
   );
 
   const navRailDisabled = useMemo(
-    () => isProcessing || isSwitchingChat,
-    [isProcessing, isSwitchingChat]
+    () => globalBusy,
+    [globalBusy]
   );
 
   const chatAreaActionsDisabled = useMemo(
-    () => isProcessing || isSwitchingChat,
-    [isProcessing, isSwitchingChat]
+    () => globalBusy,
+    [globalBusy]
   );
 
   const sendButtonDisplayInfo = useMemo(() => {
-    if (isProcessing) {
+    if (globalBusy) {
       if (isResendingMessage) return { text: 'Resending…', disabled: true };
+      if (isSendingMessage) return { text: 'Sending…', disabled: true };
+      if (isSavingEdit) return { text: 'Saving…', disabled: true };
+      if (isCreatingChat) return { text: 'Creating Task…', disabled: true };
       return { text: 'Processing…', disabled: true };
     }
     if (isApiKeyLoading) return { text: 'Loading Key...', disabled: true };
@@ -274,11 +281,9 @@ export default function App() {
     if (isHardTokenLimitReached) return { text: 'Memory Limit Exceeded', disabled: true };
     return { text: 'Send', disabled: false };
   }, [
-    isProcessing, isResendingMessage,
+    globalBusy, isResendingMessage, isSendingMessage, isSavingEdit, isCreatingChat,
     settings.apiKey, currentChatId, isHardTokenLimitReached, isApiKeyLoading,
   ]);
-
-  const finalSendButtonDisabled = sendButtonDisplayInfo.disabled || globalBusy;
 
   useEffect(() => {
     if (messages.length > 0 && currentChatId && !isSwitchingChat) {
@@ -317,7 +322,7 @@ export default function App() {
 
 
   function handleSend() {
-    if (isProcessing) { Toast("An operation is already in progress.", 3000); return; }
+    if (globalBusy) { Toast("An operation is already in progress.", 3000); return; }
     if (isHardTokenLimitReached) { Toast(`Memory limit exceeded (max ${MAX_ABSOLUTE_TOKEN_LIMIT.toLocaleString()}).`, 8000); return; }
     if (!currentChatId) { Toast('Please select or create a task first.', 3000); return; }
     
@@ -349,7 +354,7 @@ export default function App() {
     }
     if (userMessageContentBlocks.length === 0) { Toast('Cannot send an empty message.', 3000); return; }
 
-    sendMessage({ userMessageContentBlocks, existingMessages: messages });
+    sendMessage({ userMessageContentBlocks, existingMessages: messages, apiKey: settings.apiKey });
     resetPrompt();
   }
 
@@ -359,7 +364,7 @@ export default function App() {
   };
   
   const handleUpdateChatTitleTrigger = useCallback(async (id, title) => {
-    if (isProcessing) {
+    if (globalBusy) {
       Toast("Cannot update title while an operation is in progress.", 3000);
       return Promise.reject(new Error("Operation in progress"));
     }
@@ -369,10 +374,10 @@ export default function App() {
       return Promise.reject(new Error("Invalid ID"));
     }
     return updateChatTitle({ id, title });
-  }, [updateChatTitle, isProcessing]);
+  }, [updateChatTitle, globalBusy]);
 
-  const handleNewChatTrigger = useCallback(() => { if (isProcessing) { Toast("Cannot create new task while an operation is in progress.", 3000); return; } createChat(); }, [createChat, isProcessing]);
-  const handleDeleteChatTrigger = useCallback((chatId) => { if (isProcessing) { Toast("Cannot delete task while an operation is in progress.", 3000); return; } deleteChat(chatId); }, [deleteChat, isProcessing]);
+  const handleNewChatTrigger = useCallback(() => { if (globalBusy) { Toast("Cannot create new task while an operation is in progress.", 3000); return; } createChat(); }, [createChat, globalBusy]);
+  const handleDeleteChatTrigger = useCallback((chatId) => { if (globalBusy) { Toast("Cannot delete task while an operation is in progress.", 3000); return; } deleteChat(chatId); }, [deleteChat, globalBusy]);
 
   return (
     <div className="app-container">
@@ -387,16 +392,16 @@ export default function App() {
       <div className="main-content">
         <div className="top-bar">
           <div 
-            className={`top-bar-loading-indicator ${isProcessing ? 'active' : ''}`} 
+            className={`top-bar-loading-indicator ${isAwaitingApiResponse ? 'active' : ''}`} 
           />
           <button className="button" onClick={() => setDisplaySettings((s) => ({ ...s, showSettings: !s.showSettings }))} disabled={globalBusy} >
             {displaySettings.showSettings ? 'Close Settings' : 'Open Settings'}
           </button>
           <span style={{ margin: '0 1em', fontWeight: 'bold' }}>
-            Konzuko&nbsp;AI {isProcessing && "(Processing...)"}
+            Konzuko&nbsp;AI {isAwaitingApiResponse && "(Processing...)"}
           </span>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.5em', alignItems: 'center', }} >
-            {isProcessing && (
+            {isAwaitingApiResponse && (
               <div style={{
                   color: '#ffffff',
                   backgroundColor: '#000000',
@@ -424,7 +429,7 @@ export default function App() {
               {USER_FACING_TOKEN_LIMIT.toLocaleString()}
               {isHardTokenLimitReached && ( <span style={{ marginLeft: 4 }}> {' '} (Max&nbsp; {MAX_ABSOLUTE_TOKEN_LIMIT.toLocaleString()}) </span> )}
             </div>
-            <button className="button" onClick={handleCopyAll} disabled={ !messages || messages.length === 0 || globalBusy || isLoadingMessageOps } >
+            <button className="button" onClick={handleCopyAll} disabled={ !messages || messages.length === 0 || globalBusy } >
               Copy All Text
             </button>
           </div>
@@ -457,9 +462,9 @@ export default function App() {
               {currentChatId ? (
                 <ChatArea
                   key={currentChatId} messages={messages} isLoading={isLoadingMessages} forceLoading={isSwitchingChat}
-                  editingId={editingId} editText={editText} loadingSend={isProcessing} savingEdit={isSavingEdit}
-                  setEditText={setEditText} handleSaveEdit={saveEdit} handleCancelEdit={cancelEdit} handleStartEdit={startEdit}
-                  handleResendMessage={resendMessage} handleDeleteMessage={deleteMessage} actionsDisabled={chatAreaActionsDisabled}
+                  editingId={editingId} editText={editText} loadingSend={isAwaitingApiResponse} savingEdit={isSavingEdit}
+                  setEditText={setEditText} handleSaveEdit={() => saveEdit(settings.apiKey)} handleCancelEdit={cancelEdit} handleStartEdit={startEdit}
+                  handleResendMessage={(messageId) => resendMessage(messageId, settings.apiKey)} handleDeleteMessage={deleteMessage} actionsDisabled={chatAreaActionsDisabled}
                 />
               ) : ( <div className="chat-empty-placeholder"> Select or create a task to begin. </div> )}
             </div>
@@ -472,7 +477,7 @@ export default function App() {
           <div className="prompt-builder-area">
             <PromptBuilder
               mode={mode} setMode={setMode} form={form} setForm={setForm}
-              sendDisabled={finalSendButtonDisabled} sendButtonText={sendButtonDisplayInfo.text}
+              sendDisabled={sendButtonDisplayInfo.disabled} sendButtonText={sendButtonDisplayInfo.text}
               handleSend={handleSend} showToast={Toast}
               imagePreviews={pendingImages} pdfPreviews={pendingPDFs}
               onRemoveImage={removePendingImage} onAddImage={addPendingImage} onAddPDF={addPendingPDF}

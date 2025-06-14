@@ -1,3 +1,4 @@
+/* src/hooks/useChatSessionManager.js */
 // src/hooks/useChatSessionManager.js
 import { useState, useCallback } from 'preact/hooks';
 import { useQueryClient, useMutation } from '@tanstack/react-query';
@@ -89,6 +90,16 @@ export function useChatSessionManager() {
         undoDeleteChatMutation.mutate(chatId);
       });
     },
+    onSettled: () => {
+      const chatsData = queryClient.getQueryData(['chats']);
+      const totalChats = chatsData?.pages?.reduce((acc, page) => acc + (page.chats?.length || 0), 0) ?? 0;
+      
+      if (totalChats === 0 && !createChatMutation.isPending) {
+        createChatMutation.mutate({ title: 'First Task', model: GEMINI_MODEL_NAME });
+      }
+
+      queryClient.invalidateQueries({ queryKey: ['chats'] });
+    },
     onError: (err, chatId, context) => {
       if (context?.previousChatsData) {
         queryClient.setQueryData(['chats'], context.previousChatsData);
@@ -118,13 +129,11 @@ export function useChatSessionManager() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['chats'] });
-      // Toast is removed from here; feedback is now handled locally in ChatItem.
     },
     onError: (err, variables, context) => {
       if (context?.previousChatsData) {
         queryClient.setQueryData(['chats'], context.previousChatsData);
       }
-      // The component will handle the error visually. A toast is still good for details.
       Toast('Failed to update title: ' + err.message, 5000);
     },
   });
@@ -141,20 +150,20 @@ export function useChatSessionManager() {
     }
   }, [internalDeleteChatMutation, undoDeleteChatMutation]);
 
-  const isLoadingSession = createChatMutation.isPending ||
-                           internalDeleteChatMutation.isPending ||
-                           updateChatTitleMutation.isPending ||
-                           undoDeleteChatMutation.isPending;
+  const isSessionBusy = createChatMutation.isPending ||
+                        internalDeleteChatMutation.isPending ||
+                        undoDeleteChatMutation.isPending;
 
   return {
     currentChatId,
     setCurrentChatId,
     createChat: handleCreateChat,
     deleteChat: handleDeleteChat,
-    // Expose mutateAsync to allow components to await the result
     updateChatTitle: updateChatTitleMutation.mutateAsync,
     undoDeleteChat: undoDeleteChatMutation.mutate,
-    isLoadingSession,
+    isSessionBusy,
     isCreatingChat: createChatMutation.isPending,
+    isDeletingChat: internalDeleteChatMutation.isPending,
+    isUpdatingTitle: updateChatTitleMutation.isPending,
   };
 }

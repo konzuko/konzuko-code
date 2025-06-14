@@ -1,3 +1,4 @@
+/* src/CodebaseImporter.jsx */
 /*  src/CodebaseImporter.jsx  – Fix for "+ Add Files" working independently */
 import {
   useState, useCallback, useEffect, useReducer, useRef
@@ -506,8 +507,10 @@ export default function CodebaseImporter({
 
       {(phase === 'SCANNING' || phase === 'STAGING' || phase === 'SCANNING_SECONDARY' || phase === 'STAGING_SECONDARY') && (
          <div className="analysing-animation-container">
-            <span className="analysing-text">{phase.startsWith('SCANNING') ? 'Scanning folder (metadata)...' : 'Processing selected files...'}</span>
-            <div className="analysing-dots"><span></span><span></span><span></span></div>
+            <span className="analysing-text">{phase.startsWith('SCANNING') ? 'Scanning folder...' : 'Processing files...'}</span>
+            <div class="progress-bar-container">
+                <div class="progress-bar-fill"></div>
+            </div>
         </div>
       )}
       {isFiltering && (
@@ -556,9 +559,12 @@ export default function CodebaseImporter({
           {impState.files.length > 0 && (
             <ul className="file-pane-filelist">
               {impState.files.map((f) => (
-                <li key={f.id} title={f.path} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}> 
+                <li key={f.id} title={`${f.path} (${f.charCount.toLocaleString()} chars)`} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}> 
                   <span>
                     {f.path.length > 50 ? `...${f.path.slice(-47)}` : f.path}
+                    <span style={{ color: 'var(--text-secondary)', marginLeft: '8px', fontSize: '0.8em' }}>
+                      ({f.charCount.toLocaleString()}&nbsp;chars)
+                    </span>
                   </span>
                   <button
                     onClick={() => dispatch({type: 'REMOVE_STAGED_FILE', id: f.id})}
