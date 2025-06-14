@@ -1,3 +1,4 @@
+// file: src/hooks/useMessageManager.js
 /* src/hooks/useMessageManager.js */
 // src/hooks/useMessageManager.js
 import { useState, useCallback } from 'preact/hooks';
@@ -81,6 +82,30 @@ export function useMessageManager(currentChatId, setHasLastSendFailed) {
     }
   });
 
+  const updateMessageMutation = useMutation({
+    mutationFn: ({ messageId, newContentArray }) => updateMessage(messageId, newContentArray),
+    onMutate: async ({ messageId, newContentArray }) => {
+        await queryClient.cancelQueries({ queryKey: ['messages', currentChatId] });
+        const previousMessages = queryClient.getQueryData(['messages', currentChatId]);
+        queryClient.setQueryData(['messages', currentChatId], (old = []) =>
+            old.map(m => m.id === messageId ? { ...m, content: newContentArray, updated_at: new Date().toISOString() } : m)
+        );
+        return { previousMessages };
+    },
+    onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: ['messages', currentChatId] });
+        setEditingId(null);
+        setEditText('');
+        Toast('Message updated.', 3000);
+    },
+    onError: (err, variables, context) => {
+        if (context?.previousMessages) {
+            queryClient.setQueryData(['messages', currentChatId], context.previousMessages);
+        }
+        Toast(`Failed to update message: ${err.message}`, 5000);
+    },
+  });
+
   const forkConversationMutation = useMutation({
     mutationFn: async ({ messageId, newContentArray, originalMessages, apiKey }) => {
       const editedMessage = await updateMessage(messageId, newContentArray);
@@ -111,7 +136,11 @@ export function useMessageManager(currentChatId, setHasLastSendFailed) {
 
       queryClient.setQueryData(queryKey, (oldMessages = []) => {
         const originalEditedMessageIndex = oldMessages.findIndex(m => m.id === messageId);
-        if (originalEditedMessageIndex === -1) return oldMessages;
+        
+        if (originalEditedMessageIndex === -1) {
+            console.error("Optimistic update failed: message to edit not found.");
+            return oldMessages;
+        }
 
         const optimisticallyUpdatedMessage = {
           ...oldMessages[originalEditedMessageIndex],
@@ -227,7 +256,9 @@ export function useMessageManager(currentChatId, setHasLastSendFailed) {
   }, []);
 
   const handleSaveEdit = useCallback((apiKey) => {
-    if (!editingId || !currentChatId || forkConversationMutation.isPending) return;
+    if (!editingId || !currentChatId) return;
+    if (forkConversationMutation.isPending || updateMessageMutation.isPending) return;
+
     if (!apiKey || String(apiKey).trim() === "") {
       Toast("API Key not set. Cannot save edit.", 4000); return;
     }
@@ -237,6 +268,7 @@ export function useMessageManager(currentChatId, setHasLastSendFailed) {
       handleCancelEdit();
       return;
     }
+
     let newContentArray = [];
     if (Array.isArray(originalMessage.content)) {
       newContentArray = originalMessage.content.map(block =>
@@ -252,13 +284,22 @@ export function useMessageManager(currentChatId, setHasLastSendFailed) {
     if (newContentArray.length === 0) {
       Toast("Cannot save an empty message.", 3000); return;
     }
-    forkConversationMutation.mutate({
-      messageId: editingId,
-      newContentArray: newContentArray,
-      originalMessages: messages,
-      apiKey: apiKey,
-    });
-  }, [editingId, editText, currentChatId, messages, forkConversationMutation, handleCancelEdit]);
+
+    const isLastMessage = messages.length > 0 && messages[messages.length - 1].id === editingId;
+
+    if (isLastMessage) {
+      // It's a simple edit, not a fork.
+      updateMessageMutation.mutate({ messageId: editingId, newContentArray });
+    } else {
+      // It's a fork.
+      forkConversationMutation.mutate({
+        messageId: editingId,
+        newContentArray: newContentArray,
+        originalMessages: messages,
+        apiKey: apiKey,
+      });
+    }
+  }, [editingId, editText, currentChatId, messages, forkConversationMutation, updateMessageMutation, handleCancelEdit]);
 
   const handleResendMessage = useCallback((messageId, apiKey) => {
     if (!currentChatId || resendMessageMutation.isPending) return;
@@ -278,6 +319,7 @@ export function useMessageManager(currentChatId, setHasLastSendFailed) {
 
   const isLoadingOps = sendMessageMutation.isPending ||
                        forkConversationMutation.isPending ||
+                       updateMessageMutation.isPending ||
                        resendMessageMutation.isPending ||
                        deleteMessageMutation.isPending ||
                        undoDeleteMessageMutation.isPending;
