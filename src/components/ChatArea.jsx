@@ -1,8 +1,8 @@
 /* src/components/ChatArea.jsx */
 // src/components/ChatArea.jsx
-import { memo } from 'preact/compat';
-import { useEffect, useRef } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import MessageItem from './MessageItem.jsx';
+import ConfirmationModal from './ConfirmationModal.jsx';
 import useCopyToClipboard from '../hooks/useCopyToClipboard.js';
 import { autoResizeTextarea } from '../lib/domUtils.js';
 
@@ -29,6 +29,7 @@ function ChatArea({
 }) {
   const [copyMessage] = useCopyToClipboard();
   const editingTextareaRef = useRef(null);
+  const [forkingMessage, setForkingMessage] = useState(null);
   let assistantMessageCounter = 0;
 
   const MAX_EDIT_TEXTAREA_HEIGHT = 200; // px
@@ -48,9 +49,12 @@ function ChatArea({
     return <div className="chat-empty-placeholder">No messages in this chat yet. Send one!</div>;
   }
 
+  const lastUserMessageIndex = messages.map(m => m.role).lastIndexOf('user');
+
   return (
     <>
       {messages.map((m, idx) => {
+        const isUser = m.role === 'user';
         const isAsst = m.role === 'assistant';
         let currentAssistantNumber = 0;
 
@@ -59,10 +63,7 @@ function ChatArea({
           currentAssistantNumber = assistantMessageCounter;
         }
 
-        const isLastUser = m.role === 'user' &&
-                           idx === messages.length - 1 &&
-                           !editingId;
-
+        const isLastUserMessage = isUser && idx === lastUserMessageIndex;
         const doCopy = () => copyMessage(flatten(m.content));
         const currentMessageIsBeingEdited = m.id === editingId;
 
@@ -106,25 +107,41 @@ function ChatArea({
                     <button className="button icon-button" onClick={doCopy} title="Copy message text" disabled={actionsDisabled}>
                       Copy
                     </button>
-                    {isLastUser && (
+                    {isUser && (
                       <>
-                        <button
-                          className="button icon-button"
-                          disabled={loadingSend || actionsDisabled}
-                          onClick={() => handleStartEdit(m)}
-                          title="Edit message"
-                        >
-                          Edit
-                        </button>
-                        <button
-                          className="button icon-button"
-                          disabled={loadingSend || actionsDisabled}
-                          onClick={() => handleResendMessage(m.id)}
-                          title="Resend message"
-                        >
-                          Resend
-                        </button>
+                        {/* Only show Edit on the last user message */}
+                        {isLastUserMessage && (
+                          <button
+                            className="button icon-button"
+                            disabled={loadingSend || actionsDisabled}
+                            onClick={() => handleStartEdit(m)}
+                            title="Edit message"
+                          >
+                            Edit
+                          </button>
+                        )}
+                        {/* Show Fork on any user message that is NOT the last one */}
+                        {!isLastUserMessage && (
+                           <button
+                            className="button icon-button"
+                            disabled={loadingSend || actionsDisabled}
+                            onClick={() => setForkingMessage(m)}
+                            title="Fork conversation from this point"
+                          >
+                            Fork
+                          </button>
+                        )}
                       </>
+                    )}
+                    {isLastUserMessage && (
+                      <button
+                        className="button icon-button"
+                        disabled={loadingSend || actionsDisabled}
+                        onClick={() => handleResendMessage(m.id)}
+                        title="Resend message"
+                      >
+                        Resend
+                      </button>
                     )}
                     {handleDeleteMessage && (
                         <button
@@ -157,7 +174,7 @@ function ChatArea({
                 <MessageItem m={m} />
               )}
             </div>
-            {isLastUser && !currentMessageIsBeingEdited && (
+            {isLastUserMessage && !currentMessageIsBeingEdited && (
               <div className="message-bottom-actions">
                 <button
                   className="button icon-button resend-button-bottom"
@@ -183,8 +200,23 @@ function ChatArea({
           </div>
         </div>
       )}
+      <ConfirmationModal
+        isOpen={!!forkingMessage}
+        onClose={() => setForkingMessage(null)}
+        onConfirm={() => handleStartEdit(forkingMessage)}
+        title="Fork Conversation?"
+        confirmationText="fork"
+        confirmButtonText="Fork"
+      >
+        <p>
+          Forking will KEEP this current message but REMOVE all messages after it.
+        </p>
+        <p>
+          This action is destructive and can be undone for a short time via the notification that will appear.
+        </p>
+      </ConfirmationModal>
     </>
   );
 }
 
-export default memo(ChatArea);
+export default ChatArea;

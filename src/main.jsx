@@ -15,7 +15,7 @@ const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       staleTime: 1000 * 60 * 1, // Default stale time: 1 minute for most queries
-      gcTime: 1000 * 60 * 60 * 24 * 7, // 7 days GC time
+      gcTime: 1000 * 60 * 5, // 5 minutes. Data is persisted to IndexedDB, so long in-memory cache is unnecessary and causes memory bloat.
       refetchOnWindowFocus: false, // Personal preference, often set to false to reduce fetches
       refetchOnMount: true, // Refetch if stale on mount
       retry: 1, 

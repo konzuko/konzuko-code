@@ -9,6 +9,7 @@ import {
   deleteMessage,
   undoDeleteMessage,
   archiveMessagesAfter,
+  performUndoFork,
   callApiForText,
 } from '../api.js';
 import Toast from '../components/Toast.jsx';
@@ -68,7 +69,19 @@ export function useMessageManager(currentChatId, setHasLastSendFailed) {
     },
   });
 
-  const editMessageMutation = useMutation({
+  const undoEditMutation = useMutation({
+    mutationFn: performUndoFork,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['messages', currentChatId] });
+      Toast('Fork undone.', 3000);
+    },
+    onError: (error) => {
+      Toast(`Failed to undo fork: ${error.message}`, 5000);
+      queryClient.invalidateQueries({ queryKey: ['messages', currentChatId] });
+    }
+  });
+
+  const forkConversationMutation = useMutation({
     mutationFn: async ({ messageId, newContentArray, originalMessages, apiKey }) => {
       const editedMessage = await updateMessage(messageId, newContentArray);
       await archiveMessagesAfter(currentChatId, editedMessage.created_at);
@@ -94,32 +107,41 @@ export function useMessageManager(currentChatId, setHasLastSendFailed) {
       await queryClient.cancelQueries({ queryKey });
       const previousMessages = queryClient.getQueryData(queryKey);
 
+      const originalMessage = previousMessages.find(m => m.id === messageId);
+
       queryClient.setQueryData(queryKey, (oldMessages = []) => {
         const originalEditedMessageIndex = oldMessages.findIndex(m => m.id === messageId);
         if (originalEditedMessageIndex === -1) return oldMessages;
-        const originalEditedMessage = oldMessages[originalEditedMessageIndex];
+
         const optimisticallyUpdatedMessage = {
-          ...originalEditedMessage,
+          ...oldMessages[originalEditedMessageIndex],
           content: newContentArray,
           updated_at: new Date().toISOString(),
         };
-        return oldMessages
-          .map(msg => (msg.id === messageId ? optimisticallyUpdatedMessage : msg))
-          .filter(msg => new Date(msg.created_at) <= new Date(optimisticallyUpdatedMessage.created_at))
-          .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+        
+        return oldMessages.slice(0, originalEditedMessageIndex).concat(optimisticallyUpdatedMessage);
       });
-      return { previousMessages };
+      return { previousMessages, originalMessage };
     },
-    onSuccess: () => {
+    onSuccess: (data, variables, context) => {
       queryClient.invalidateQueries({ queryKey: ['messages', currentChatId] });
       setEditingId(null);
       setEditText('');
+      Toast('Fork successful. All subsequent messages removed.', 15000, () => {
+        queryClient.setQueryData(['messages', currentChatId], context.previousMessages);
+        undoEditMutation.mutate({
+          messageId: context.originalMessage.id,
+          originalContent: context.originalMessage.content,
+          chatId: currentChatId,
+          anchorCreatedAt: context.originalMessage.created_at,
+        });
+      });
     },
     onError: (error, variables, context) => {
       if (context?.previousMessages) {
         queryClient.setQueryData(['messages', currentChatId], context.previousMessages);
       }
-      Toast('Failed to edit message: ' + error.message, 5000);
+      Toast('Failed to fork: ' + error.message, 5000);
       queryClient.invalidateQueries({ queryKey: ['messages', currentChatId] });
       setHasLastSendFailed?.(true);
     },
@@ -205,7 +227,7 @@ export function useMessageManager(currentChatId, setHasLastSendFailed) {
   }, []);
 
   const handleSaveEdit = useCallback((apiKey) => {
-    if (!editingId || !currentChatId || editMessageMutation.isPending) return;
+    if (!editingId || !currentChatId || forkConversationMutation.isPending) return;
     if (!apiKey || String(apiKey).trim() === "") {
       Toast("API Key not set. Cannot save edit.", 4000); return;
     }
@@ -230,13 +252,13 @@ export function useMessageManager(currentChatId, setHasLastSendFailed) {
     if (newContentArray.length === 0) {
       Toast("Cannot save an empty message.", 3000); return;
     }
-    editMessageMutation.mutate({
+    forkConversationMutation.mutate({
       messageId: editingId,
       newContentArray: newContentArray,
       originalMessages: messages,
       apiKey: apiKey,
     });
-  }, [editingId, editText, currentChatId, messages, editMessageMutation, handleCancelEdit]);
+  }, [editingId, editText, currentChatId, messages, forkConversationMutation, handleCancelEdit]);
 
   const handleResendMessage = useCallback((messageId, apiKey) => {
     if (!currentChatId || resendMessageMutation.isPending) return;
@@ -255,7 +277,7 @@ export function useMessageManager(currentChatId, setHasLastSendFailed) {
 
 
   const isLoadingOps = sendMessageMutation.isPending ||
-                       editMessageMutation.isPending ||
+                       forkConversationMutation.isPending ||
                        resendMessageMutation.isPending ||
                        deleteMessageMutation.isPending ||
                        undoDeleteMessageMutation.isPending;
@@ -274,7 +296,7 @@ export function useMessageManager(currentChatId, setHasLastSendFailed) {
     deleteMessage: handleDeleteMessage,
     isLoadingOps,
     isSendingMessage: sendMessageMutation.isPending,
-    isSavingEdit: editMessageMutation.isPending,
+    isForking: forkConversationMutation.isPending,
     isResendingMessage: resendMessageMutation.isPending,
   };
 }

@@ -564,12 +564,12 @@ export default function CodebaseImporter({
           {impState.files.length > 0 && (
             <ul className="file-pane-filelist">
               {impState.files.map((f) => (
-                <li key={f.id} title={`${f.path} (${f.charCount.toLocaleString()} chars)`} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}> 
-                  <span>
+                <li key={f.id} title={`${f.path} (${f.charCount.toLocaleString()} chars)`} style={{ display: 'flex', alignItems: 'center' }}> 
+                  <span style={{ flex: '1 1 auto', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginRight: '1rem' }}>
                     {f.path.length > 50 ? `...${f.path.slice(-47)}` : f.path}
-                    <span style={{ color: 'var(--text-secondary)', marginLeft: '8px', fontSize: '0.8em' }}>
-                      ({f.charCount.toLocaleString()}&nbsp;chars)
-                    </span>
+                  </span>
+                  <span style={{ color: 'var(--text-secondary)', fontSize: '0.8em', flexShrink: 0 }}>
+                    {f.charCount.toLocaleString()}
                   </span>
                   <button
                     onClick={() => dispatch({type: 'REMOVE_STAGED_FILE', id: f.id})}

@@ -220,7 +220,7 @@ export default function ChatPaneLayout({
       </div>
 
       <div ref={parentRef} className="chat-list-scroll-area">
-        {!collapsed && itemCount > 0 && (
+        {itemCount > 0 && (
           <div style={{ height: `${rowVirtualizer.getTotalSize()}px`, width: '100%', position: 'relative' }}>
             {virtualItems.map((virtualItem) => {
               const isLoaderRow = virtualItem.index >= groupedItems.length;
@@ -262,7 +262,7 @@ export default function ChatPaneLayout({
             })}
           </div>
         )}
-        {!collapsed && chats?.length === 0 && !isLoadingMoreChats && (
+        {chats?.length === 0 && !isLoadingMoreChats && (
             <div className="no-chats-indicator">No tasks yet. Create one!</div>
         )}
       </div>

@@ -103,32 +103,42 @@ export async function callApiForText({
   console.log(`[API - callApiForText @ ${callTimestamp}] Processing ${messages.length} input messages.`);
 
   for (const msg of messages) {
-    const parts = [];
     const contentBlocks = Array.isArray(msg.content)
       ? msg.content
       : [{ type: 'text', text: String(msg.content ?? '') }];
-    for (const block of contentBlocks) {
-      if (block.type === 'text') {
-        parts.push({ text: block.text });
-      } else if (block.type === 'image_url' && block.image_url && block.image_url.url) {
-        parts.push(await convertImageUrlToPart(block));
-      } else if (block.type === 'file' && block.file?.file_id && block.file?.mime_type) {
-        parts.push({
-          fileData: {
-            mimeType: block.file.mime_type,
-            fileUri: block.file.file_id,
-          },
-        });
-      }
+
+    // Separate text/file parts from image parts
+    const textAndFileParts = contentBlocks.filter(b => b.type !== 'image_url');
+    const imagePartsToProcess = contentBlocks.filter(b => b.type === 'image_url' && b.image_url?.url);
+
+    // Process all images in parallel
+    const processedImageParts = await Promise.all(imagePartsToProcess.map(convertImageUrlToPart));
+
+    const parts = [];
+    for (const block of textAndFileParts) {
+        if (block.type === 'text') {
+            parts.push({ text: block.text });
+        } else if (block.type === 'file' && block.file?.file_id && block.file?.mime_type) {
+            parts.push({
+              fileData: {
+                mimeType: block.file.mime_type,
+                fileUri: block.file.file_id,
+              },
+            });
+        }
     }
-    if (parts.length > 0) {
+    
+    // Combine the processed parts
+    const finalParts = [...parts, ...processedImageParts];
+
+    if (finalParts.length > 0) {
       if (msg.role === 'system') {
-        const systemTextPart = parts.find(p => p.text);
+        const systemTextPart = finalParts.find(p => p.text);
         if (systemTextPart) systemInstructionTextFromMessages += (systemInstructionTextFromMessages ? "\n" : "") + systemTextPart.text;
       } else {
         historyContents.push({
           role: msg.role === 'assistant' ? 'model' : msg.role,
-          parts: parts,
+          parts: finalParts,
         });
       }
     }
@@ -357,6 +367,16 @@ export async function archiveMessagesAfter(chat_id, anchorCreatedAt) {
     .gt('created_at', anchorCreatedAt);
   if (error) throw error;
   return { success: true };
+}
+
+// NEW: Single function to call the atomic 'undo-fork' edge function
+export async function performUndoFork({ messageId, originalContent, chatId, anchorCreatedAt }) {
+  const { data, error } = await supabase.functions.invoke('undo-fork', {
+    body: { messageId, originalContent, chatId, anchorCreatedAt },
+  });
+  if (error) throw error;
+  if (data.error) throw new Error(data.error);
+  return data;
 }
 
 export async function deleteMessage(id) {

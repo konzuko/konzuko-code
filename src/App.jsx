@@ -78,7 +78,7 @@ export default function App() {
     deleteMessage,
     isLoadingOps: isLoadingMessageOps,
     isSendingMessage,
-    isSavingEdit,
+    isForking,
     isResendingMessage,
   } = useMessageManager(currentChatId, setHasLastSendFailed);
 
@@ -159,7 +159,7 @@ export default function App() {
     }
   };
 
-  const isAwaitingApiResponse = isSendingMessage || isSavingEdit || isResendingMessage;
+  const isAwaitingApiResponse = isSendingMessage || isForking || isResendingMessage;
 
   const handleSelectChat = useCallback(
     (newChatId) => {
@@ -271,7 +271,7 @@ export default function App() {
     if (globalBusy) {
       if (isResendingMessage) return { text: 'Resending…', disabled: true };
       if (isSendingMessage) return { text: 'Sending…', disabled: true };
-      if (isSavingEdit) return { text: 'Saving…', disabled: true };
+      if (isForking) return { text: 'Forking…', disabled: true };
       if (isCreatingChat) return { text: 'Creating Task…', disabled: true };
       return { text: 'Processing…', disabled: true };
     }
@@ -281,7 +281,7 @@ export default function App() {
     if (isHardTokenLimitReached) return { text: 'Memory Limit Exceeded', disabled: true };
     return { text: 'Send', disabled: false };
   }, [
-    globalBusy, isResendingMessage, isSendingMessage, isSavingEdit, isCreatingChat,
+    globalBusy, isResendingMessage, isSendingMessage, isForking, isCreatingChat,
     settings.apiKey, currentChatId, isHardTokenLimitReached, isApiKeyLoading,
   ]);
 
@@ -462,7 +462,7 @@ export default function App() {
               {currentChatId ? (
                 <ChatArea
                   key={currentChatId} messages={messages} isLoading={isLoadingMessages} forceLoading={isSwitchingChat}
-                  editingId={editingId} editText={editText} loadingSend={isAwaitingApiResponse} savingEdit={isSavingEdit}
+                  editingId={editingId} editText={editText} loadingSend={isAwaitingApiResponse} savingEdit={isForking}
                   setEditText={setEditText} handleSaveEdit={() => saveEdit(settings.apiKey)} handleCancelEdit={cancelEdit} handleStartEdit={startEdit}
                   handleResendMessage={(messageId) => resendMessage(messageId, settings.apiKey)} handleDeleteMessage={deleteMessage} actionsDisabled={chatAreaActionsDisabled}
                 />

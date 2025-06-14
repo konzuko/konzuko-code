@@ -80,6 +80,12 @@ html, body {
 .chat-list-scroll-area {
   flex-grow: 1;
   overflow-y: auto;
+  transition: opacity 0.15s linear;
+}
+.sidebar.collapsed .chat-list-scroll-area {
+  opacity: 0;
+  pointer-events: none;
+  overflow: hidden;
 }
 
 .chat-item {
@@ -626,7 +632,7 @@ html, body {
     display: block;
 }
 .message-content pre {
-  background: var(--bg-primary);
+  background: #000; /* UPDATED: Pure black for code blocks */
   padding: var(--space-sm) var(--space-md);
   border-radius: var(--radius);
   overflow-x: auto;
@@ -646,6 +652,11 @@ html, body {
   padding: 2px 5px;
   border-radius: 1px;
   font-size: 0.9em;
+}
+/* NEW: Add padding to lists inside messages */
+.message-content ul,
+.message-content ol {
+  padding-left: 24px;
 }
 
 .code-wrapper {
@@ -854,6 +865,63 @@ html, body {
     opacity: 1;
   }
 }
+
+/* NEW: Confirmation Modal Styles */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.75);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+  animation: modal-fade-in 0.2s ease-out;
+}
+
+@keyframes modal-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.modal-content {
+  background-color: var(--bg-secondary);
+  padding: var(--space-lg);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  width: 90%;
+  max-width: 500px;
+  box-shadow: 0 5px 15px rgba(0,0,0,0.5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.modal-title {
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.modal-body {
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.modal-confirmation-prompt {
+  margin-top: var(--space-md);
+  margin-bottom: var(--space-sm);
+  font-size: 0.9em;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+  margin-top: var(--space-md);
+}
+
 
 @media (max-width: 768px) {
   .sidebar {
