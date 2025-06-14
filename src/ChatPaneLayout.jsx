@@ -105,20 +105,18 @@ const ChatItem = memo(function ChatItem({ chat, isActive, onSelectChat, onTitleU
   );
 });
 
+// FIX: Optimized date grouping logic
 const groupChatsByDate = (chats) => {
   if (!chats || chats.length === 0) return [];
   
   const groups = [];
   const now = new Date();
+  
+  // Calculate date boundaries ONCE at the start
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  const yesterdayStart = new Date(new Date(todayStart).setDate(new Date(todayStart).getDate() - 1)).getTime();
-  const dayOfWeek = now.getDay();
-  const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek; 
-  const thisWeekStartDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + diffToMonday);
-  const thisWeekStart = thisWeekStartDate.getTime();
-  const lastWeekStartDate = new Date(thisWeekStartDate);
-  lastWeekStartDate.setDate(thisWeekStartDate.getDate() - 7);
-  const lastWeekStart = lastWeekStartDate.getTime();
+  const yesterdayStart = todayStart - 86400000; // 24 * 60 * 60 * 1000
+  const thisWeekStart = todayStart - ((now.getDay() + 6) % 7) * 86400000; // Monday is start of week
+  const lastWeekStart = thisWeekStart - 7 * 86400000;
   const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
   
   const monthFormatter = new Intl.DateTimeFormat('default', { month: 'long', year: 'numeric' });
@@ -173,7 +171,7 @@ export default function ChatPaneLayout({
     getScrollElement: () => parentRef.current,
     estimateSize: (index) => {
       if (index >= groupedItems.length) return 50;
-      return groupedItems[index].type === 'header' ? 48 : 70; // Adjusted estimates
+      return groupedItems[index].type === 'header' ? 48 : 70;
     },
     overscan: 5,
   });
@@ -218,8 +216,8 @@ export default function ChatPaneLayout({
                   left: 0,
                   width: '100%',
                   transform: `translateY(${virtualItem.start}px)`,
-                  padding: '0 8px', // Horizontal padding for all rows
-                  backgroundColor: 'var(--bg-secondary)', // Opaque background for all rows
+                  padding: '0 8px',
+                  backgroundColor: 'var(--bg-secondary)',
                 }}
               >
                 {isLoaderRow ? (

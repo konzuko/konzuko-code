@@ -10,7 +10,6 @@ const safeTrim = (val) => (val ?? '').trim();
 const AUTO_INPUT_STRING_FOR_RETURN_FORMAT = "If code is required, return the complete refactored code for the respective changed files in FULL with NO OMISSIONS so that i can paste it directly into my ide";
 const PROMPT_SECTION_SEPARATOR = '\n\n';
 
-// Builds the text from the form fields. This is fast.
 function buildFormSection(currentForm, currentMode) {
   if (currentMode === 'DEVELOP') {
     const out = ['## MODE # DEVELOP'];
@@ -65,7 +64,6 @@ function buildFormSection(currentForm, currentMode) {
   return '';
 }
 
-// Builds the text from imported files. This can be slow and is memoized separately.
 function buildFilesSection(currentImportedCodeFiles) {
     if (!currentImportedCodeFiles || currentImportedCodeFiles.length === 0) return '';
     
@@ -73,7 +71,7 @@ function buildFilesSection(currentImportedCodeFiles) {
     
     const filesByRoot = new Map();
     currentImportedCodeFiles.forEach(file => {
-        const rootName = file.rootName || null;
+        const rootName = file.rootName || 'INDIVIDUAL_FILES'; // Group individual files
         if (!filesByRoot.has(rootName)) {
             filesByRoot.set(rootName, []);
         }
@@ -81,8 +79,9 @@ function buildFilesSection(currentImportedCodeFiles) {
     });
 
     for (const [rootName, files] of filesByRoot.entries()) {
-        if (rootName) {
-            const treePaths = files.map(f => f.fullPath);
+        if (rootName !== 'INDIVIDUAL_FILES') {
+            // FIX: Use the correct property name 'path' instead of 'fullPath'
+            const treePaths = files.map(f => f.path);
             out.push(`${rootName}/`);
             out.push(asciiTree(treePaths));
             out.push('');
@@ -90,7 +89,8 @@ function buildFilesSection(currentImportedCodeFiles) {
         
         files.forEach(f => {
             out.push('```yaml');
-            out.push(`file: ${f.fullPath}`);
+            // FIX: Use the correct property name 'path' instead of 'fullPath'
+            out.push(`file: ${f.path}`);
             out.push('```');
             out.push('```');
             out.push(f.text);
@@ -115,7 +115,6 @@ export function usePromptBuilder(importedCodeFiles = []) {
 
   const [pendingImages, setPendingImages] = useState([]);
   const [pendingPDFs, setPendingPDFs] = useState([]);
-  const [currentProjectRootName, setCurrentProjectRootName] = useState(null);
 
   useEffect(() => {
     const imagesToRevoke = [...pendingImages];
@@ -139,26 +138,19 @@ export function usePromptBuilder(importedCodeFiles = []) {
   }, []);
   const addPendingPDF = useCallback(pdf => { setPendingPDFs(prev => [...prev, pdf]); }, []);
 
-  const handleProjectRootChange = useCallback(newRootName => {
-    setCurrentProjectRootName(newRootName);
-  }, []);
-
   const resetPrompt = useCallback(() => {
     setPendingImages([]);
     setPendingPDFs([]);
-    handleProjectRootChange(null);
     setForm(prevForm => ({
       ...INITIAL_FORM_DATA,
       developReturnFormat_autoIncludeDefault: prevForm.developReturnFormat_autoIncludeDefault,
     }));
-  }, [setForm, handleProjectRootChange]);
+  }, [setForm]);
 
   return {
     form, setForm, mode, setMode,
     pendingImages, addPendingImage, removePendingImage,
     pendingPDFs, addPendingPDF,
-    currentProjectRootName,
-    handleProjectRootChange,
     formText,
     fileText,
     userPromptText,

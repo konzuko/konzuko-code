@@ -1,110 +1,123 @@
 // file: src/CodebaseImporter.jsx
-import {
-  useState, useCallback, useEffect, useReducer, useRef
-} from 'preact/hooks';
+import { useState, useCallback, useEffect, useReducer } from 'preact/hooks';
+import { useQuery } from '@tanstack/react-query';
 import { GoogleGenAI } from '@google/genai';
 import { supabase } from './lib/supabase.js';
 import { isTextLike, MAX_TEXT_FILE_SIZE, MAX_CHAR_LEN } from './lib/fileTypeGuards.js';
 import { FILE_LIMIT } from './config.js';
 import { compressImageToWebP } from './lib/imageUtils.js';
 import { reducer, initialState, makeStagedFile } from './codeImporter/state.js';
-import { loadRoot, saveRoot, clearRoot as clearIDBRoot } from './lib/fsRoot.js';
+import { saveRoot, clearRoot as clearIDBRoot } from './lib/fsRoot.js';
 import {
   formatRejectionMessage,
   scanDirectoryForMinimalMetadata,
   processAndStageSelectedFiles
-} from './lib/fileSystem.js'; // <-- IMPORT MOVED
+} from './lib/fileSystem.js';
+
+// A separate component to handle the file selection UI, driven by query data.
+function DirectorySelector({ scanData, onStageFiles, onCancel, toastFn }) {
+  const [selected, setSelected] = useState(new Set());
+  const [isStaging, setIsStaging] = useState(false);
+
+  const handleCheckboxChange = (path, isChecked) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (isChecked) next.add(path);
+      else next.delete(path);
+      return next;
+    });
+  };
+
+  const handleBulkSelect = (shouldSelect) => {
+    if (shouldSelect) {
+      setSelected(new Set(scanData.tops.map(t => t.name)));
+    } else {
+      setSelected(new Set());
+    }
+  };
+
+  const handleStage = async () => {
+    setIsStaging(true);
+    try {
+      const { stagedFiles, rejectionStats } = await processAndStageSelectedFiles({
+        root: scanData.root,
+        meta: scanData.meta,
+        selected,
+      });
+      onStageFiles(stagedFiles, scanData.root);
+      const msg = formatRejectionMessage(rejectionStats, "file staging");
+      if (msg) toastFn?.(msg, 15000);
+    } catch (e) {
+      toastFn?.('Error reading file contents: ' + e.message, 5000);
+    } finally {
+      setIsStaging(false);
+    }
+  };
+
+  return (
+    <div style={{ border: '1px solid var(--border)', padding: 'var(--space-md)', borderRadius: 'var(--radius)', marginTop: '1rem' }}>
+      <h3>Select entries to include from '{scanData.root.name}'</h3>
+      <div style={{ maxHeight: '200px', overflowY: 'auto', padding: '4px 0', border: '1px solid var(--border)', borderRadius: '4px', marginBottom: '8px' }}>
+        {scanData.tops.map((t) => (
+          <label key={t.name} style={{ display: 'block', margin: '4px 8px', cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={selected.has(t.name)}
+              onChange={e => handleCheckboxChange(t.name, e.target.checked)}
+              style={{ marginRight: '8px' }}
+              disabled={isStaging}
+            />
+            {t.kind === 'directory' ? '📁' : '📄'} <strong>{t.name}</strong>
+          </label>
+        ))}
+      </div>
+      <div style={{display: 'flex', gap: '8px', marginTop: '8px'}}>
+        <button className="button button-accent button-glow" disabled={isStaging || selected.size === 0} onClick={handleStage}>
+          {isStaging ? 'Processing...' : 'Pick these Files'}
+        </button>
+        <button className="button" style={{background: '#000', color: '#fff'}} disabled={isStaging} onClick={() => handleBulkSelect(true)}>
+          Select All
+        </button>
+        <button className="button" style={{background: '#000', color: '#fff'}} disabled={isStaging} onClick={() => handleBulkSelect(false)}>
+          Deselect All
+        </button>
+        <button className="button" onClick={onCancel} disabled={isStaging}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
 
 export default function CodebaseImporter({
   onFilesChange, toastFn, onAddImage, onAddPDF, settings,
-  onProjectRootChange, currentProjectRootNameFromBuilder,
 }) {
   const [adding, setAdding] = useState(false);
   const [impState, dispatch] = useReducer(reducer, initialState);
-  const lastCheckedIndexRef = useRef(null);
-  const initialLoadAttemptedRef = useRef(false);
-  const lastNotifiedFilesIdHashRef = useRef('');
-  const scanInProgressRef = useRef(false);
-  const stateRef = useRef(impState);
+  const [directoryHandle, setDirectoryHandle] = useState(null);
 
   useEffect(() => {
-    stateRef.current = impState;
-  }, [impState]);
+    onFilesChange(impState.files);
+  }, [impState.files, onFilesChange]);
 
-  const performScan = useCallback(async (handleToScan, context) => {
-    if (!handleToScan) {
-        console.warn(`[performScan] Called without a valid handle. Context: ${context}`);
-        dispatch({ type: 'CLEAR_ALL' }); return;
-    }
-    if (scanInProgressRef.current) {
-        console.log(`[performScan] Scan already in progress for ${handleToScan.name}. Skipping for context: ${context}.`); return;
-    }
-    scanInProgressRef.current = true;
-    console.log(`[performScan] Starting scan for ${handleToScan.name} due to ${context}`);
-    try {
-        const { tops, meta, rejectionStats } = await scanDirectoryForMinimalMetadata(handleToScan);
-        
-        if (stateRef.current.root?.name === handleToScan.name) {
-            dispatch({ type: 'SCAN_DONE', tops, meta });
-            const msg = formatRejectionMessage(rejectionStats, `folder scan on ${context}`);
-            if (msg) toastFn?.(msg, 15000);
-        } else {
-            console.log(`[performScan] Scan for ${handleToScan.name} completed, but state/root changed. Discarding. Current Root: ${stateRef.current.root?.name}`);
-        }
-    } catch (err) {
-        console.error(`[performScan] Error during scan for ${handleToScan.name} (context: ${context}):`, err);
-        if (stateRef.current.root?.name === handleToScan.name) {
-            dispatch({ type: 'CLEAR_ALL' }); onProjectRootChange?.(null); clearIDBRoot().catch(console.warn);
-        }
-        toastFn?.(`Error scanning directory (${context}): ` + err.message, 5000);
-    } finally {
-        scanInProgressRef.current = false;
-    }
-  }, [toastFn, onProjectRootChange]);
-
-  useEffect(() => {
-    if (currentProjectRootNameFromBuilder === null) {
-      if (impState.root || impState.tag !== 'IDLE') {
-        dispatch({ type: 'CLEAR_ALL' });
-        clearIDBRoot().catch(console.warn);
-      }
-      return;
-    }
-  
-    if (currentProjectRootNameFromBuilder) {
-      if (impState.root?.name === currentProjectRootNameFromBuilder) {
-        return;
-      }
-  
-      loadRoot().then(handleFromIDB => {
-        if (handleFromIDB?.name === currentProjectRootNameFromBuilder) {
-          dispatch({ type: 'PICK_ROOT', handle: handleFromIDB });
-          performScan(handleFromIDB, "SyncEffect - root change");
-        } else {
-          onProjectRootChange?.(null);
-        }
-      }).catch(err => {
-        console.error('[SyncEffect] Error loading root from IDB:', err);
-        onProjectRootChange?.(null);
-      });
-      return;
-    }
-  
-    if (!currentProjectRootNameFromBuilder && !initialLoadAttemptedRef.current) {
-      initialLoadAttemptedRef.current = true;
-      loadRoot().then(handleFromIDB => {
-        if (handleFromIDB) {
-          onProjectRootChange?.(handleFromIDB.name);
-        }
-      }).catch(err => console.warn('[SyncEffect] Initial loadRoot error:', err));
-    }
-  }, [currentProjectRootNameFromBuilder, onProjectRootChange, performScan, impState.root, impState.tag]);
-
-  useEffect(() => {
-    if (impState.tag === 'FILTER') {
-        lastCheckedIndexRef.current = null;
-    }
-  }, [impState.tag]);
+  const {
+    data: scanData,
+    isLoading: isScanning,
+    isError: scanError,
+    error: scanErrorMessage,
+  } = useQuery({
+    queryKey: ['directoryScan', directoryHandle?.name],
+    queryFn: async () => {
+      toastFn?.(`Scanning '${directoryHandle.name}'...`, 2000);
+      const { tops, meta, rejectionStats } = await scanDirectoryForMinimalMetadata(directoryHandle);
+      const msg = formatRejectionMessage(rejectionStats, `folder scan`);
+      if (msg) toastFn?.(msg, 15000);
+      return { root: directoryHandle, tops, meta };
+    },
+    enabled: !!directoryHandle,
+    staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
 
   const pickFolder = useCallback(async () => {
     if (!window.showDirectoryPicker) { toastFn?.('Directory picker not supported.', 4000); return; }
@@ -112,56 +125,32 @@ export default function CodebaseImporter({
     try {
       const dirHandle = await window.showDirectoryPicker();
       await saveRoot(dirHandle);
-      onProjectRootChange?.(dirHandle.name);
+      setDirectoryHandle(dirHandle);
     } catch (e) {
       if (e.name !== 'AbortError') toastFn?.('Folder pick error: ' + e.message, 4000);
     } finally {
       setAdding(false);
     }
-  }, [toastFn, onProjectRootChange]);
+  }, [toastFn]);
 
-  const handleCheckboxChange = useCallback((event, path) => {
-    dispatch({ type: 'TOGGLE_SELECT', path: path, desiredState: event.target.checked });
+  const handleStageFiles = useCallback((files, root) => {
+    dispatch({ type: 'ADD_FILES', files, root });
+    setDirectoryHandle(null);
   }, []);
 
-  const beginStagingAndReadTexts = useCallback(async () => {
-    dispatch({ type: 'BEGIN_STAGING' });
-    setAdding(true);
-    try {
-      const {stagedFiles, rejectionStats} = await processAndStageSelectedFiles(impState);
-      dispatch({ type: 'STAGING_DONE', files: stagedFiles });
-      const msg = formatRejectionMessage(rejectionStats, "file staging");
-      if (msg) toastFn?.(msg, 15000);
-    } catch (e) {
-      toastFn?.('Error reading file contents: ' + e.message, 5000);
-      dispatch({ type: 'CLEAR_ALL' });
-    } finally {
-      setAdding(false);
-    }
-  }, [impState, toastFn]);
-
-  const phase = impState.tag;
-  const isLoadingOperation = adding || phase === 'SCANNING' || phase === 'STAGING';
-
-  const clearAllStatesAndNotifyParent = useCallback(() => {
+  const clearAllStates = useCallback(() => {
     if (!confirm('Remove all selected files and clear project root?')) return;
-
-    if (isLoadingOperation) {
-        toastFn?.('Cannot clear files while an operation is in progress.', 3000);
-        return;
-    }
-
-    if(impState.root) clearIDBRoot().catch(err => console.error("Error clearing root from IDB:", err));
     dispatch({ type: 'CLEAR_ALL' });
-    onProjectRootChange?.(null);
-  }, [onProjectRootChange, impState.root, isLoadingOperation, toastFn]);
+    setDirectoryHandle(null);
+    clearIDBRoot().catch(err => console.error("Error clearing root from IDB:", err));
+  }, []);
 
   const pickTextFilesAndDispatch = useCallback(async () => {
     if (!window.showOpenFilePicker) { toastFn?.('File picker not supported.', 4000); return; }
     setAdding(true);
     const rejectionStats = { tooLarge: 0, tooLong: 0, unsupportedType: 0, limitReached: 0, readError: 0 };
     let filesAddedCount = 0;
-    const currentFileCount = (impState.tag === 'STAGED' && impState.files) ? impState.files.length : 0;
+    const currentFileCount = impState.files.length;
     try {
       const handles = await window.showOpenFilePicker({ multiple: true });
       const newFilesPayload = [];
@@ -182,13 +171,13 @@ export default function CodebaseImporter({
             }
         } catch (fileError) { console.warn(`Error processing file ${h.name}:`, fileError); rejectionStats.readError++; }
       }
-      if (newFilesPayload.length > 0) dispatch({ type: 'FILES_ADDED', files: newFilesPayload });
+      if (newFilesPayload.length > 0) dispatch({ type: 'ADD_FILES', files: newFilesPayload, root: null });
       const msg = formatRejectionMessage(rejectionStats, "individual add");
       if (msg) toastFn?.(msg, 8000);
       else if (filesAddedCount > 0) toastFn?.(`${filesAddedCount} file(s) added.`, 3000);
     } catch (err) { if (err.name !== 'AbortError') toastFn?.('File pick error: ' + err.message, 5000); }
     finally { setAdding(false); }
-  }, [toastFn, impState.tag, impState.files]);
+  }, [toastFn, impState.files.length]);
 
   const handleAddImages = useCallback(async () => {
     if (!window.showOpenFilePicker) { toastFn?.('File picker not supported.', 4000); return; }
@@ -272,99 +261,52 @@ export default function CodebaseImporter({
     setAdding(false);
   }, [onAddPDF, settings, toastFn]);
 
-  useEffect(() => { // Effect to call onFilesChange
-    if (impState.tag === 'STAGED') {
-      const filesToParent = impState.files.map(f => ({
-          id: f.id,
-          fullPath: f.path,
-          text: f.text,
-          insideProject: f.insideProject,
-          name: f.name,
-          rootName: f.rootName
-      }));
-      const currentHash = filesToParent.map(f => f.id).sort().join(',');
-      if (currentHash !== lastNotifiedFilesIdHashRef.current) {
-          console.log('[onFilesChangeEffect] STAGED. Notifying parent with', filesToParent.length, 'files. UID Hash:', currentHash);
-          onFilesChange(filesToParent.slice(0, FILE_LIMIT));
-          lastNotifiedFilesIdHashRef.current = currentHash;
-      } else {
-          console.log('[onFilesChangeEffect] STAGED. File list (by ID) unchanged, not notifying parent. UID Hash:', currentHash);
-      }
-    } else if (impState.tag === 'IDLE') {
-      if (lastNotifiedFilesIdHashRef.current !== '') {
-          console.log('[onFilesChangeEffect] IDLE. Notifying parent with [].');
-          onFilesChange([]);
-          lastNotifiedFilesIdHashRef.current = '';
-      }
-    }
-  }, [impState, onFilesChange]);
-
-  const allRoots = (phase === 'STAGED' && impState.files) ? [...new Set(impState.files.map(f => f.rootName).filter(Boolean))] : [];
-  const hasContent = impState.root || (impState.files && impState.files.length > 0);
+  const allRoots = [...new Set(impState.files.map(f => f.rootName).filter(Boolean))];
+  const hasContent = allRoots.length > 0 || impState.files.length > 0;
+  const isLoading = adding || isScanning;
 
   return (
     <div className="file-pane-container">
       <h2>Codebase Importer</h2>
       
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '8px', marginBottom: '1rem' }}>
-        {/* Top Row */}
-        <button className="button" onClick={pickFolder} disabled={isLoadingOperation}>
-          {hasContent ? '+ Add More Folders' : '+ Add Folder'}
+        <button className="button" onClick={pickFolder} disabled={isLoading}>
+          + Add Project Folder
         </button>
-        <button className="button" onClick={pickTextFilesAndDispatch} disabled={isLoadingOperation}>
-          {hasContent ? '+ Add More Documents' : '+ Add Document'}
+        <button className="button" onClick={pickTextFilesAndDispatch} disabled={isLoading}>
+          + Add Files
         </button>
-        <button className="button" onClick={clearAllStatesAndNotifyParent}
-          disabled={isLoadingOperation || phase === 'IDLE'}
-          style={(phase !== 'IDLE') ? { background: '#b71c1c', color: '#fff' } : {}} > Clear Files
+        <button className="button" onClick={clearAllStates}
+          disabled={isLoading || !hasContent}
+          style={hasContent ? { background: '#b71c1c', color: '#fff' } : {}} > Clear All
         </button>
-        
-        {/* Bottom Row */}
         <button className="button" onClick={handleAddImages} disabled={adding}>+ Add Images</button>
         <button className="button" onClick={handlePasteImage} disabled={adding}>Paste Image</button>
         <button className="button" onClick={handleAddPDF} disabled={adding}>+ Add PDF</button>
       </div>
 
-      {(phase === 'SCANNING' || phase === 'STAGING') && (
+      {isScanning && (
          <div className="analysing-animation-container">
-            <span className="analysing-text">{phase === 'SCANNING' ? 'Scanning folder (metadata)...' : 'Processing selected files...'}</span>
+            <span className="analysing-text">Scanning folder...</span>
             <div className="analysing-dots"><span></span><span></span><span></span></div>
         </div>
       )}
-      {phase === 'FILTER' && (
-        <>
-          <h3>Select entries to include from '{impState.root?.name}'</h3>
-          <div style={{ maxHeight: '200px', overflowY: 'auto', padding: '4px 0', border: '1px solid var(--border)', borderRadius: '4px', marginBottom: '8px' }}>
-            {impState.tops.map((t) => (
-              <label key={t.name} style={{ display: 'block', margin: '4px 8px', cursor: 'pointer' }}>
-                <input type="checkbox" checked={impState.selected.has(t.name)}
-                  onChange={e => handleCheckboxChange(e, t.name)}
-                  style={{ marginRight: '8px' }} disabled={isLoadingOperation} />
-                {t.kind === 'directory' ? '📁' : '📄'} <strong>{t.name}</strong>
-              </label>
-            ))}
-          </div>
-          <div style={{display: 'flex', gap: '8px', marginTop: '8px'}}>
-            <button className="button button-accent button-glow"
-              disabled={isLoadingOperation || impState.selected.size === 0}
-              onClick={beginStagingAndReadTexts} > Pick these Files
-            </button>
-            <button className="button" style={{background: '#000', color: '#fff'}}
-              disabled={isLoadingOperation}
-              onClick={() => dispatch({ type: 'BULK_SELECT', paths: impState.tops.map(t => t.name), select: true })}
-            > Select All </button>
-            <button className="button" style={{background: '#000', color: '#fff'}}
-              disabled={isLoadingOperation}
-              onClick={() => dispatch({ type: 'BULK_SELECT', paths: impState.tops.map(t => t.name), select: false })}
-            > Deselect All </button>
-          </div>
-        </>
+
+      {scanError && (
+        <div style={{ color: 'var(--error)', padding: '8px', border: '1px solid var(--error)', borderRadius: '4px', marginTop: '1rem' }}>
+          <p><strong>Error scanning directory:</strong></p>
+          <p>{scanErrorMessage.message}</p>
+          <p style={{ fontSize: '0.8em', marginTop: '4px' }}>Please ensure you have granted file system permissions.</p>
+        </div>
       )}
-      {phase === 'STAGED' && impState.files && (
+
+      {scanData && <DirectorySelector scanData={scanData} onStageFiles={handleStageFiles} onCancel={() => setDirectoryHandle(null)} toastFn={toastFn} />}
+
+      {impState.files.length > 0 && (
         <>
           {allRoots.length > 0 && (
-            <div style={{ marginBottom: 8, fontSize: '0.85rem', opacity: 0.8 }}>
-              <strong>Sources:</strong>
+            <div style={{ marginTop: 16, marginBottom: 8, fontSize: '0.85rem', opacity: 0.8 }}>
+              <strong>Project Sources:</strong>
               {allRoots.map(root => (
                 <div key={root} style={{ marginLeft: '1em', display: 'flex', alignItems: 'center', gap: '0.5em' }}>
                   <span>📁</span>
@@ -373,41 +315,32 @@ export default function CodebaseImporter({
               ))}
             </div>
           )}
-          <p style={{ marginBottom: '8px', fontSize: '0.9em' }}> {impState.files.length} text file(s) staged. </p>
-          {impState.files.length > 0 && (
-            <ul className="file-pane-filelist">
-              {impState.files.map((f) => (
-                <li key={f.id} title={`${f.path} (${f.charCount.toLocaleString()} chars)`} style={{ display: 'flex', alignItems: 'center' }}> 
-                  <span style={{ flex: '1 1 auto', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginRight: '1rem' }}>
-                    {f.path.length > 50 ? `...${f.path.slice(-47)}` : f.path}
-                  </span>
-                  <span style={{ color: 'var(--text-secondary)', fontSize: '0.8em', flexShrink: 0 }}>
-                    {f.charCount.toLocaleString()}
-                  </span>
-                  <button
-                    onClick={() => dispatch({type: 'REMOVE_STAGED_FILE', id: f.id})}
-                    title={`Remove ${f.name}`}
-                    style={{ 
-                      marginLeft: '10px', 
-                      cursor: 'pointer', 
-                      color: 'var(--error)', 
-                      background: 'none', 
-                      border: 'none',
-                      fontSize: '1.2rem',
-                      lineHeight: '1',
-                      padding: '0 4px'
-                    }}
-                  >
-                    &times;
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-          {impState.files.length === 0 && ( <p style={{ color: 'var(--text-secondary)' }}></p> )}
+          <p style={{ marginBottom: '8px', fontSize: '0.9em' }}> {impState.files.length} file(s) staged for context. </p>
+          <ul className="file-pane-filelist">
+            {impState.files.map((f) => (
+              <li key={f.id} title={`${f.path} (${f.charCount.toLocaleString()} chars)`} style={{ display: 'flex', alignItems: 'center' }}> 
+                <span style={{ flex: '1 1 auto', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginRight: '1rem' }}>
+                  {f.path.length > 50 ? `...${f.path.slice(-47)}` : f.path}
+                </span>
+                <span style={{ color: 'var(--text-secondary)', fontSize: '0.8em', flexShrink: 0 }}>
+                  {f.charCount.toLocaleString()}
+                </span>
+                <button
+                  onClick={() => dispatch({type: 'REMOVE_STAGED_FILE', id: f.id})}
+                  title={`Remove ${f.name}`}
+                  style={{ 
+                    marginLeft: '10px', cursor: 'pointer', color: 'var(--error)', 
+                    background: 'none', border: 'none', fontSize: '1.2rem',
+                    lineHeight: '1', padding: '0 4px'
+                  }}
+                >
+                  &times;
+                </button>
+              </li>
+            ))}
+          </ul>
         </>
       )}
-      {phase === 'IDLE' && !isLoadingOperation && ( <p style={{ color: 'var(--text-secondary)' }}></p> )}
     </div>
   );
 }

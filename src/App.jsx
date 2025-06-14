@@ -83,8 +83,6 @@ function MainLayout() {
     removePendingImage,
     pendingPDFs,
     addPendingPDF,
-    currentProjectRootName,
-    handleProjectRootChange,
     userPromptText,
     resetPrompt,
   } = usePromptBuilder(stagedCodeFiles);
@@ -432,8 +430,6 @@ function MainLayout() {
               hasLastSendFailed={hasLastSendFailed}
               importedCodeFiles={stagedCodeFiles}
               onCodeFilesChange={setStagedCodeFiles}
-              onProjectRootChange={handleProjectRootChange}
-              promptBuilderRootName={currentProjectRootName}
               currentChatId={currentChatId}
             />
           </div>

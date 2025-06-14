@@ -45,8 +45,9 @@ export default function PromptBuilder({
   hasLastSendFailed,
   importedCodeFiles,
   onCodeFilesChange,
-  onProjectRootChange,
-  promptBuilderRootName,
+  // REMOVED: The complex root name props are no longer needed.
+  // onProjectRootChange,
+  // promptBuilderRootName,
   currentChatId,
 }) {
   const formRef = useRef(form);
@@ -206,8 +207,6 @@ export default function PromptBuilder({
           onAddImage={onAddImage}
           onAddPDF={onAddPDF}
           settings={settings}
-          onProjectRootChange={onProjectRootChange}
-          currentProjectRootNameFromBuilder={promptBuilderRootName}
         />
       )}
 
