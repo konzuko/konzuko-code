@@ -1,12 +1,9 @@
 // file: src/PromptBuilder.jsx
-/* src/PromptBuilder.jsx
-   STAGE 2: Receives `importedCodeFiles` and `onCodeFilesChange` from App.jsx.
-   `onCodeFilesChange` is passed to CodebaseImporter as `onFilesChange`.
-*/
 import { useEffect, useRef, useMemo } from 'preact/hooks';
 import CodebaseImporter from './CodebaseImporter.jsx';
 import { autoResizeTextarea } from './lib/domUtils.js';
 import { LOCALSTORAGE_FORM_KEY } from './config.js';
+import { useSignedUrl } from './hooks/useSignedUrl.js';
 
 const MAX_PROMPT_TEXTAREA_HEIGHT = 250;
 
@@ -16,6 +13,19 @@ const placeholders = {
   developReturnFormat_custom: 'e.g. newline delimited, bullet points, markdown, yaml, json, java, ptx',
   developWarnings: 'E.g. dependencies, limitations, software versions',
 };
+
+function ImagePreview({ image, onRemove }) {
+  const { url, isLoading } = useSignedUrl(image.path);
+
+  return (
+    <div style={{ position: 'relative' }}>
+      {isLoading && <div style={{ width: 100, height: 100, background: '#333', borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)' }}>...</div>}
+      {url && <img src={url} alt={image.name} style={{ width: 100, height: 100, objectFit: 'cover', borderRadius: 4 }} />}
+      <div onClick={onRemove} title="Remove image" style={{ position: 'absolute', top: 2, right: 2, width: 20, height: 20, borderRadius: '50%', background: 'rgba(0,0,0,0.65)', color: '#fff', textAlign: 'center', lineHeight: '20px', cursor: 'pointer', }} > × </div>
+      <div style={{ width: 100, marginTop: 2, fontSize: '0.7rem', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', textAlign: 'center', color: 'var(--text-secondary)', }} > {image.name} </div>
+    </div>
+  );
+}
 
 export default function PromptBuilder({
   mode,
@@ -38,6 +48,7 @@ export default function PromptBuilder({
   onProjectRootChange,
   promptBuilderRootName,
   currentChatId,
+  resetSignal,
 }) {
   const formRef = useRef(form);
   const textareaRefs = useRef({});
@@ -149,7 +160,6 @@ export default function PromptBuilder({
                   </div>
                 </div>
                 <label htmlFor={key} className="input-with-prefix-container">
-                  {/* UPDATED: Removed colon from label */}
                   <strong className="input-prefix">{label}</strong>
                   <textarea
                     id={key}
@@ -171,7 +181,6 @@ export default function PromptBuilder({
           return (
             <div key={key} className="form-group">
               <label htmlFor={key} className="input-with-prefix-container">
-                {/* UPDATED: Removed colon from label */}
                 <strong className="input-prefix">{label}</strong>
                 <textarea
                   id={key}
@@ -200,17 +209,14 @@ export default function PromptBuilder({
           settings={settings}
           onProjectRootChange={onProjectRootChange}
           currentProjectRootNameFromBuilder={promptBuilderRootName}
+          resetSignal={resetSignal}
         />
       )}
 
       {imagePreviews.length > 0 && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, margin: '8px 0' }}>
           {imagePreviews.map((img, i) => (
-            <div key={`${img.url}-${i}`} style={{ position: 'relative' }}>
-              <img src={img.url} alt={img.name} style={{ width: 100, borderRadius: 4 }} />
-              <div onClick={() => onRemoveImage(i)} title="Remove image" style={{ position: 'absolute', top: 2, right: 2, width: 20, height: 20, borderRadius: '50%', background: 'rgba(0,0,0,0.65)', color: '#fff', textAlign: 'center', lineHeight: '20px', cursor: 'pointer', }} > × </div>
-              <div style={{ width: 100, marginTop: 2, fontSize: '0.7rem', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', textAlign: 'center', color: 'var(--text-secondary)', }} > {img.name} </div>
-            </div>
+            <ImagePreview key={`${img.path}-${i}`} image={img} onRemove={() => onRemoveImage(i)} />
           ))}
         </div>
       )}

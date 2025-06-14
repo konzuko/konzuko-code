@@ -1,5 +1,5 @@
 // file: src/components/ChatArea.jsx
-import { useEffect, useRef, useState } from 'preact/hooks';
+import { useEffect, useRef, useState, useMemo } from 'preact/hooks';
 import MessageItem from './MessageItem.jsx';
 import ConfirmationModal from './ConfirmationModal.jsx';
 import useCopyToClipboard from '../hooks/useCopyToClipboard.js';
@@ -35,7 +35,6 @@ export default function ChatArea({ forceLoading, actionsDisabled }) {
   const [forkingMessage, setForkingMessage] = useState(null);
   const [highlightedId, setHighlightedId] = useState(null);
   const chatAreaRef = useRef(null);
-  let assistantMessageCounter = 0;
 
   const MAX_EDIT_TEXTAREA_HEIGHT = 200;
   const showThinkingSpinner = isSendingMessage && messages.length > 0 && messages[messages.length - 1].role === 'user' && !editingId;
@@ -70,19 +69,21 @@ export default function ChatArea({ forceLoading, actionsDisabled }) {
     return <div className="chat-empty-placeholder">No messages in this chat yet. Send one!</div>;
   }
 
+  const processedMessages = useMemo(() => {
+    let counter = 0;
+    return messages.map(m => ({
+      ...m,
+      assistantNumber: m.role === 'assistant' ? ++counter : 0,
+    }));
+  }, [messages]);
+
   const lastUserMessageIndex = messages.map(m => m.role).lastIndexOf('user');
 
   return (
     <div ref={chatAreaRef}>
-      {messages.map((m, idx) => {
+      {processedMessages.map((m, idx) => {
         const isUser = m.role === 'user';
         const isAsst = m.role === 'assistant';
-        let currentAssistantNumber = 0;
-
-        if (isAsst) {
-          assistantMessageCounter++;
-          currentAssistantNumber = assistantMessageCounter;
-        }
 
         const isLastUserMessage = isUser && idx === lastUserMessageIndex;
         const doCopy = (e) => {
@@ -106,7 +107,7 @@ export default function ChatArea({ forceLoading, actionsDisabled }) {
             </div>
             <div className="message-header">
               <span className="message-role">
-                {isAsst ? ( <><span className="assistant-message-number">#{currentAssistantNumber}</span> assistant</> ) : m.role }
+                {isAsst ? ( <><span className="assistant-message-number">#{m.assistantNumber}</span> assistant</> ) : m.role }
               </span>
               <div className="message-actions">
                 {currentMessageIsBeingEdited ? (

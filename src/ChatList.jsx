@@ -5,6 +5,7 @@ import { fetchChats, GEMINI_MODEL_NAME } from './api.js';
 import ChatPaneLayout from './ChatPaneLayout.jsx';
 import { useSettings } from './contexts/SettingsContext.jsx';
 import { useChat } from './contexts/ChatContext.jsx';
+import { LOCALSTORAGE_LAST_CHAT_ID_KEY } from './config.js';
 
 export default function ChatList({ appDisabled }) {
   const { collapsed, handleToggleCollapse } = useSettings();
@@ -40,12 +41,18 @@ export default function ChatList({ appDisabled }) {
       if (allChatsFlat.length === 0) {
         createChat({ title: 'First Task', model: GEMINI_MODEL_NAME });
       } else {
-        const valid = allChatsFlat.some(c => String(c.id) === String(currentChatId));
-        if (!valid) setCurrentChatId(allChatsFlat[0].id);
+        const lastChatId = localStorage.getItem(LOCALSTORAGE_LAST_CHAT_ID_KEY);
+        const lastChatIsValid = allChatsFlat.some(c => String(c.id) === lastChatId);
+        
+        if (lastChatIsValid) {
+          setCurrentChatId(lastChatId);
+        } else {
+          setCurrentChatId(allChatsFlat[0].id);
+        }
       }
       initialLogicRan.current = true;
     }
-  }, [isSuccess, data, currentChatId, createChat, setCurrentChatId]);
+  }, [isSuccess, data, createChat, setCurrentChatId]);
 
   const allChats = useMemo(() => {
     if (!data) return [];

@@ -3,23 +3,17 @@ import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { corsHeaders } from '../_shared/cors.ts';
 
-// This function requires admin privileges to modify the messages table reliably,
-// so we use the SERVICE_ROLE_KEY. This is different from manage-api-key, which
-// should run under the user's permissions.
 const supabaseAdmin: SupabaseClient = createClient(
   Deno.env.get('SUPABASE_URL')!,
   Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 );
 
 serve(async (req: Request): Promise<Response> => {
-  // Handle CORS preflight request
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
 
   try {
-    // First, ensure the user making the request is authenticated.
-    // We create a separate client for this using their JWT.
     const userClient = createClient(
         Deno.env.get('SUPABASE_URL')!,
         Deno.env.get('SUPABASE_ANON_KEY')!,
@@ -29,14 +23,28 @@ serve(async (req: Request): Promise<Response> => {
     if (authError) throw authError;
     if (!user) throw new Error("User not authenticated");
 
-    // Now, proceed with the admin operations.
     const { messageId, originalContent, chatId, anchorCreatedAt } = await req.json();
 
     if (!messageId || !originalContent || !chatId || !anchorCreatedAt) {
       throw new Error('Missing required parameters for undo-fork.');
     }
 
-    // Operation 1: Restore the original message content using the admin client
+    // CRITICAL FIX: Verify that the chat belongs to the authenticated user before proceeding.
+    const { data: chat, error: ownerError } = await supabaseAdmin
+      .from('chats')
+      .select('user_id')
+      .eq('id', chatId)
+      .single();
+
+    if (ownerError) throw ownerError;
+    if (chat?.user_id !== user.id) {
+      return new Response(JSON.stringify({ error: 'Forbidden' }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 403,
+      });
+    }
+    // END FIX
+
     const { error: updateError } = await supabaseAdmin
       .from('messages')
       .update({ content: originalContent, updated_at: new Date().toISOString() })
@@ -44,7 +52,6 @@ serve(async (req: Request): Promise<Response> => {
 
     if (updateError) throw updateError;
 
-    // Operation 2: Un-archive all subsequent messages using the admin client
     const { error: unarchiveError } = await supabaseAdmin
       .from('messages')
       .update({ deleted_at: null })

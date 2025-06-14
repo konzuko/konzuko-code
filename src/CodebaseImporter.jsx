@@ -1,6 +1,4 @@
 // file: src/CodebaseImporter.jsx
-/* src/CodebaseImporter.jsx */
-/*  src/CodebaseImporter.jsx  – Fix for "+ Add Files" working independently */
 import {
   useState, useCallback, useEffect, useReducer, useRef
 } from 'preact/hooks';
@@ -156,7 +154,8 @@ async function processAndStageSelectedFiles(state, isSecondary = false) {
 
 export default function CodebaseImporter({
   onFilesChange, toastFn, onAddImage, onAddPDF, settings,
-  onProjectRootChange, currentProjectRootNameFromBuilder
+  onProjectRootChange, currentProjectRootNameFromBuilder,
+  resetSignal,
 }) {
   const [adding, setAdding] = useState(false);
   const [impState, dispatch] = useReducer(reducer, initialState);
@@ -165,6 +164,13 @@ export default function CodebaseImporter({
   const lastNotifiedFilesIdHashRef = useRef('');
   const scanInProgressRef = useRef(false);
   const stateRef = useRef(impState);
+
+  useEffect(() => {
+    if (resetSignal > 0) {
+      console.log('[CodebaseImporter] Received reset signal. Clearing state.');
+      dispatch({ type: 'CLEAR_ALL' });
+    }
+  }, [resetSignal]);
 
   useEffect(() => {
     stateRef.current = impState;
@@ -374,12 +380,11 @@ export default function CodebaseImporter({
         try{
             const file = await h.getFile();
             const blob = await compressImageToWebP(file);
-            const path = `public/images/${crypto.randomUUID()}.webp`;
+            const path = `protected/${crypto.randomUUID()}.webp`;
             const {error:upErr} = await supabase.storage.from('images').upload(path,blob,{contentType:'image/webp', upsert:false});
             if(upErr) throw upErr;
-            const {data:pub,error:pubErr} = supabase.storage.from('images').getPublicUrl(path);
-            if(pubErr) throw pubErr;
-            onAddImage?.({name:file.name, url:pub.publicUrl, revoke:null});
+            
+            onAddImage?.({name:file.name, path: path});
             successCount++;
         }catch(e){console.error(`[handleAddImages] Error for ${h.name}:`, e); toastFn?.(`Image ${h.name} failed: ${e.message}`,4000); failCount++;}
     }
@@ -401,12 +406,11 @@ export default function CodebaseImporter({
             const raw = await it.getType(mime);
             const blob = await compressImageToWebP(raw);
             const name = `clipboard_${Date.now()}.webp`;
-            const path = `public/images/${crypto.randomUUID()}.webp`;
+            const path = `protected/${crypto.randomUUID()}.webp`;
             const {error:upErr} = await supabase.storage.from('images').upload(path,blob,{contentType:'image/webp', upsert: false});
             if(upErr) throw upErr;
-            const {data:pub,error:pubErr} = supabase.storage.from('images').getPublicUrl(path);
-            if(pubErr) throw pubErr;
-            onAddImage?.({name,url:pub.publicUrl,revoke:null});
+
+            onAddImage?.({name, path: path});
             toastFn?.('Image pasted.',2000); pasted = true; break;
         }
         if(!pasted && items.length > 0) toastFn?.('No image found in clipboard.', 3000);

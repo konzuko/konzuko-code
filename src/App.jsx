@@ -12,6 +12,7 @@ import ChatList from './ChatList.jsx';
 import PromptBuilder from './PromptBuilder.jsx';
 import ChatArea from './components/ChatArea.jsx';
 import Toast from './components/Toast.jsx';
+import { supabase } from './lib/supabase.js';
 
 import {
     IMAGE_TOKEN_ESTIMATE,
@@ -71,6 +72,7 @@ function MainLayout() {
   const previousChatIdRef = useRef(null);
   
   const [stagedCodeFiles, setStagedCodeFiles] = useState([]);
+  const [resetImporterSignal, setResetImporterSignal] = useState(0);
 
   const {
     form,
@@ -102,12 +104,16 @@ function MainLayout() {
   const handleMouseDown = useCallback((e) => {
     e.preventDefault();
     startXRef.current = e.clientX;
-    startWidthRef.current = appContainerRef.current.querySelector('.chat-container').offsetWidth;
-    setIsResizing(true);
+    const chatContainer = appContainerRef.current?.querySelector('.chat-container');
+    if (chatContainer) {
+      startWidthRef.current = chatContainer.offsetWidth;
+      setIsResizing(true);
+    }
   }, []);
 
   useEffect(() => {
     const handleMouseMove = (e) => {
+      if (!appContainerRef.current) return;
       const deltaX = e.clientX - startXRef.current;
       const containerWidth = appContainerRef.current.offsetWidth;
       let newWidth = startWidthRef.current + deltaX;
@@ -116,17 +122,17 @@ function MainLayout() {
       const maxWidth = containerWidth * 0.80;
       newWidth = Math.max(minWidth, Math.min(newWidth, maxWidth));
       
-      appContainerRef.current.style.setProperty('--left-pane-width', `${newWidth}px`);
+      const newWidthPercent = (newWidth / containerWidth) * 100;
+      appContainerRef.current.style.setProperty('--left-pane-width', `${newWidthPercent}%`);
     };
 
     const handleMouseUp = () => {
+      if (!appContainerRef.current) return;
       setIsResizing(false);
-      const finalWidthPx = parseFloat(appContainerRef.current.style.getPropertyValue('--left-pane-width'));
-      const containerWidth = appContainerRef.current.offsetWidth;
-      const finalWidthPercent = (finalWidthPx / containerWidth) * 100;
-      setLeftPaneWidth(`${finalWidthPercent}%`);
+      const finalWidth = appContainerRef.current.style.getPropertyValue('--left-pane-width');
+      setLeftPaneWidth(finalWidth);
       try {
-        localStorage.setItem(LOCALSTORAGE_PANE_WIDTH_KEY, finalWidthPercent);
+        localStorage.setItem(LOCALSTORAGE_PANE_WIDTH_KEY, parseFloat(finalWidth));
       } catch (e) {
         console.warn("Could not save pane width to localStorage", e);
       }
@@ -209,7 +215,7 @@ function MainLayout() {
         ? msg.content
         : [{ type: 'text', text: String(msg.content ?? '') }];
       contentBlocks.forEach(block => {
-        if (block.type === 'image_url' && block.image_url?.url) {
+        if (block.type === 'image_url' && block.image_url && (block.image_url.url || block.image_url.path)) {
           estimatedImageTokens += IMAGE_TOKEN_ESTIMATE;
         }
       });
@@ -270,7 +276,7 @@ function MainLayout() {
   }, [currentChatId, editingId, cancelEdit, scrollToBottom]);
 
 
-  function handleSend() {
+  async function handleSend() {
     if (isBusy) { Toast("An operation is already in progress.", 3000); return; }
     if (isHardTokenLimitReached) { Toast(`Memory limit exceeded (max ${MAX_ABSOLUTE_TOKEN_LIMIT.toLocaleString()}).`, 8000); return; }
     if (!currentChatId) { Toast('Please select or create a task first.', 3000); return; }
@@ -288,12 +294,27 @@ function MainLayout() {
         file: { file_id: p.fileId, original_name: p.name, mime_type: p.mimeType, },
       })
     );
-    pendingImages.forEach((img) =>
-      userMessageContentBlocks.push({
-        type: 'image_url',
-        image_url: { url: img.url, detail: 'high', original_name: img.name, },
-      })
-    );
+    
+    if (pendingImages.length > 0) {
+      const paths = pendingImages.map(img => img.path);
+      const { data, error } = await supabase.functions.invoke('get-signed-urls', {
+        body: { paths, expiresIn: 900 }
+      });
+      if (error || data.error) {
+        Toast(`Could not get image URLs: ${error?.message || data.error}`, 5000);
+        return;
+      }
+      pendingImages.forEach(img => {
+        const signedUrl = data.urlMap[img.path];
+        if (signedUrl) {
+          userMessageContentBlocks.push({
+            type: 'image_url',
+            image_url: { url: signedUrl, detail: 'high', original_name: img.name, path: img.path },
+          });
+        }
+      });
+    }
+
     if (userPromptText?.trim()) {
       userMessageContentBlocks.push({ type: 'text', text: userPromptText });
     }
@@ -301,6 +322,8 @@ function MainLayout() {
 
     sendMessage({ userMessageContentBlocks, existingMessages: messages, apiKey: apiKey });
     resetPrompt();
+    setStagedCodeFiles([]);
+    setResetImporterSignal(c => c + 1);
   }
 
   const handleCopyAll = () => {
@@ -414,6 +437,7 @@ function MainLayout() {
               onProjectRootChange={handleProjectRootChange}
               promptBuilderRootName={currentProjectRootName}
               currentChatId={currentChatId}
+              resetSignal={resetImporterSignal}
             />
           </div>
         </div>

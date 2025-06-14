@@ -1,16 +1,8 @@
 /* src/api.js */
-/* ======================================================================
-   File: src/api.js
-====================================================================== */
-
 import { supabase } from './lib/supabase.js';
 import { GEMINI_API_TIMEOUT_MS } from './config.js';
 import HARDCODED_GEMINI_SYSTEM_PROMPT from './system-prompt.md?raw';
-import {
-    GoogleGenAI,
-    // HarmCategory, // Not directly used as string values are used
-    // HarmBlockThreshold, // Not directly used as string values are used
-} from "@google/genai";
+import { GoogleGenAI } from "@google/genai";
 
 export const GEMINI_MODEL_NAME = "gemini-2.5-pro-preview-06-05";
 export const CHATS_PAGE_LIMIT = 20;
@@ -25,6 +17,55 @@ function validateKey(raw = '') {
     throw new Error(errorMsg);
   }
   return key;
+}
+
+async function prepareMessagesForApi(messages) {
+  const imagePaths = new Set();
+  messages.forEach(msg => {
+    const content = Array.isArray(msg.content) ? msg.content : [];
+    content.forEach(block => {
+      if (block.type === 'image_url' && block.image_url?.path) {
+        imagePaths.add(block.image_url.path);
+      }
+    });
+  });
+
+  let urlMap = {};
+  if (imagePaths.size > 0) {
+    const { data, error } = await supabase.functions.invoke('get-signed-urls', {
+      body: { paths: Array.from(imagePaths), expiresIn: 900 } // 15 minutes
+    });
+    if (error || data.error) {
+      throw new Error(`Failed to get signed URLs for API call: ${error?.message || data.error}`);
+    }
+    urlMap = data.urlMap;
+  }
+
+  const processedMessages = [];
+  for (const msg of messages) {
+    const contentBlocks = Array.isArray(msg.content)
+      ? msg.content
+      : [{ type: 'text', text: String(msg.content ?? '') }];
+    
+    const finalContent = [];
+    for (const block of contentBlocks) {
+      if (block.type === 'image_url' && block.image_url?.path) {
+        const signedUrl = urlMap[block.image_url.path];
+        if (signedUrl) {
+          finalContent.push({
+            ...block,
+            image_url: { ...block.image_url, url: signedUrl }
+          });
+        } else {
+          console.warn(`Could not find signed URL for path: ${block.image_url.path}`);
+        }
+      } else {
+        finalContent.push(block);
+      }
+    }
+    processedMessages.push({ ...msg, content: finalContent });
+  }
+  return processedMessages;
 }
 
 async function convertImageUrlToPart(imageUrlBlock) {
@@ -90,6 +131,8 @@ export async function callApiForText({
     throw abortError;
   }
 
+  const messagesWithUrls = await prepareMessagesForApi(messages);
+
   let ai;
   try {
     ai = new GoogleGenAI({ apiKey: validatedKey });
@@ -100,18 +143,16 @@ export async function callApiForText({
 
   let systemInstructionTextFromMessages = "";
   const historyContents = [];
-  console.log(`[API - callApiForText @ ${callTimestamp}] Processing ${messages.length} input messages.`);
+  console.log(`[API - callApiForText @ ${callTimestamp}] Processing ${messagesWithUrls.length} input messages.`);
 
-  for (const msg of messages) {
+  for (const msg of messagesWithUrls) {
     const contentBlocks = Array.isArray(msg.content)
       ? msg.content
       : [{ type: 'text', text: String(msg.content ?? '') }];
 
-    // Separate text/file parts from image parts
     const textAndFileParts = contentBlocks.filter(b => b.type !== 'image_url');
     const imagePartsToProcess = contentBlocks.filter(b => b.type === 'image_url' && b.image_url?.url);
 
-    // Process all images in parallel
     const processedImageParts = await Promise.all(imagePartsToProcess.map(convertImageUrlToPart));
 
     const parts = [];
@@ -128,7 +169,6 @@ export async function callApiForText({
         }
     }
     
-    // Combine the processed parts
     const finalParts = [...parts, ...processedImageParts];
 
     if (finalParts.length > 0) {
@@ -369,7 +409,6 @@ export async function archiveMessagesAfter(chat_id, anchorCreatedAt) {
   return { success: true };
 }
 
-// NEW: Single function to call the atomic 'undo-fork' edge function
 export async function performUndoFork({ messageId, originalContent, chatId, anchorCreatedAt }) {
   const { data, error } = await supabase.functions.invoke('undo-fork', {
     body: { messageId, originalContent, chatId, anchorCreatedAt },
