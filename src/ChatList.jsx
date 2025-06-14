@@ -1,7 +1,5 @@
 // file: src/ChatList.jsx
-/* src/ChatList.jsx */
-// src/ChatList.jsx
-import { useEffect, useCallback, useRef } from 'preact/hooks';
+import { useMemo, useCallback, useRef } from 'preact/hooks';
 import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchChats, GEMINI_MODEL_NAME } from './api.js';
 import ChatPaneLayout from './ChatPaneLayout.jsx';
@@ -26,7 +24,7 @@ export default function ChatList({
     isFetching,
     isFetchingNextPage,
     error: chatsError,
-    status, // Use status for more reliable state checks: 'pending', 'error', 'success'
+    status,
   } = useInfiniteQuery({
     queryKey: ['chats'],
     queryFn: ({ pageParam = 1 }) => fetchChats({ pageParam }),
@@ -52,15 +50,16 @@ export default function ChatList({
     }
   });
 
-  const allChats = data
-    ? data.pages.flatMap(page => page.chats?.map(r => ({
+  const allChats = useMemo(() => {
+    if (!data) return [];
+    return data.pages.flatMap(page => page.chats?.map(r => ({
         id: r.id,
         title: r.title,
         started: r.created_at,
         model: r.code_type || GEMINI_MODEL_NAME,
         messages: []
-      })) || [])
-    : [];
+      })) || []);
+  }, [data]);
 
   const handleLoadMore = useCallback(() => {
     if (hasNextPage && !isFetchingNextPage) {

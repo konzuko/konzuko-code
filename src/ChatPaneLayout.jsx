@@ -1,6 +1,4 @@
 // file: src/ChatPaneLayout.jsx
-/* src/ChatPaneLayout.jsx */
-// src/ChatPaneLayout.jsx
 import { useState, useMemo, useEffect, useRef, useCallback } from 'preact/hooks';
 import { useVirtualizer } from '@tanstack/react-virtual';
 
@@ -111,6 +109,7 @@ function ChatItem({ chat, isActive, onSelectChat, onTitleUpdate, onDeleteChat, d
 
 const groupChatsByDate = (chats) => {
   if (!chats || chats.length === 0) return [];
+  
   const groups = [];
   const now = new Date();
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
@@ -123,10 +122,12 @@ const groupChatsByDate = (chats) => {
   lastWeekStartDate.setDate(thisWeekStartDate.getDate() - 7);
   const lastWeekStart = lastWeekStartDate.getTime();
   const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+  
+  const monthFormatter = new Intl.DateTimeFormat('default', { month: 'long', year: 'numeric' });
   let currentGroupKey = null;
 
-  chats.forEach(chat => {
-    const chatTime = chat.started ? new Date(chat.started).getTime() : 0;
+  for (const chat of chats) {
+    const chatTime = chat.started ? Date.parse(chat.started) : 0;
     let groupTitle;
     let groupKey;
 
@@ -136,8 +137,8 @@ const groupChatsByDate = (chats) => {
     else if (chatTime >= lastWeekStart) { groupTitle = 'Last Week'; groupKey = 'last-week'; }
     else if (chatTime >= thisMonthStart) { groupTitle = 'This Month'; groupKey = 'this-month'; }
     else if (chatTime > 0) {
-      const chatDateObj = new Date(chat.started);
-      groupTitle = chatDateObj.toLocaleString('default', { month: 'long', year: 'numeric' });
+      const chatDateObj = new Date(chatTime);
+      groupTitle = monthFormatter.format(chatDateObj);
       groupKey = `${chatDateObj.getFullYear()}-${String(chatDateObj.getMonth() + 1).padStart(2, '0')}`;
     } else {
       groupTitle = 'Older'; groupKey = 'older';
@@ -148,7 +149,7 @@ const groupChatsByDate = (chats) => {
       currentGroupKey = groupKey;
     }
     groups.push({ type: 'chat', chat, id: chat.id });
-  });
+  }
   return groups;
 };
 
