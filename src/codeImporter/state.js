@@ -17,12 +17,6 @@ export function reducer(state, ev) {
       return { tag: 'SCANNING', root: ev.handle, files: existingFiles };
     }
 
-    case 'PICK_SECONDARY_ROOT':
-        if (state.tag === 'STAGED' || state.tag === 'FILTER') {
-            return { ...state, tag: 'SCANNING_SECONDARY', secondaryRoot: ev.handle };
-        }
-        return state;
-
     case 'SCAN_DONE':
       if (state.tag === 'SCANNING') {
         return {
@@ -34,15 +28,6 @@ export function reducer(state, ev) {
           files: state.files || []
         };
       }
-      if (state.tag === 'SCANNING_SECONDARY') {
-        return {
-            ...state,
-            tag: 'FILTER_SECONDARY',
-            secondaryTops: ev.tops || [],
-            secondaryMeta: ev.meta || [],
-            secondarySelected: new Set()
-        };
-      }
       return state;
 
     case 'TOGGLE_SELECT': {
@@ -51,12 +36,6 @@ export function reducer(state, ev) {
         if (ev.desiredState) nextSelected.add(ev.path);
         else nextSelected.delete(ev.path);
         return { ...state, selected: nextSelected };
-      }
-      if (state.tag === 'FILTER_SECONDARY') {
-        const nextSelected = new Set(state.secondarySelected);
-        if (ev.desiredState) nextSelected.add(ev.path);
-        else nextSelected.delete(ev.path);
-        return { ...state, secondarySelected: nextSelected };
       }
       return state;
     }
@@ -70,14 +49,6 @@ export function reducer(state, ev) {
             });
             return { ...state, selected: nextSelected };
         }
-        if (state.tag === 'FILTER_SECONDARY') {
-            const nextSelected = new Set(state.secondarySelected);
-            (ev.paths || []).forEach(path => {
-                if (ev.select) nextSelected.add(path);
-                else nextSelected.delete(path);
-            });
-            return { ...state, secondarySelected: nextSelected };
-        }
         return state;
     }
 
@@ -88,16 +59,10 @@ export function reducer(state, ev) {
           tag: 'STAGING',
         };
       }
-      if (state.tag === 'FILTER_SECONDARY') {
-        return {
-            ...state,
-            tag: 'STAGING_SECONDARY',
-        };
-      }
       return state;
 
     case 'STAGING_DONE':
-      if (state.tag === 'STAGING' || state.tag === 'STAGING_SECONDARY') {
+      if (state.tag === 'STAGING') {
         const existingFiles = state.files || [];
         const newFiles = ev.files || [];
         return {

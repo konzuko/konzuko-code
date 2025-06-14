@@ -72,7 +72,6 @@ function MainLayout() {
   const previousChatIdRef = useRef(null);
   
   const [stagedCodeFiles, setStagedCodeFiles] = useState([]);
-  const [resetImporterSignal, setResetImporterSignal] = useState(0);
 
   const {
     form,
@@ -323,7 +322,6 @@ function MainLayout() {
     sendMessage({ userMessageContentBlocks, existingMessages: messages, apiKey: apiKey });
     resetPrompt();
     setStagedCodeFiles([]);
-    setResetImporterSignal(c => c + 1);
   }
 
   const handleCopyAll = () => {
@@ -437,7 +435,6 @@ function MainLayout() {
               onProjectRootChange={handleProjectRootChange}
               promptBuilderRootName={currentProjectRootName}
               currentChatId={currentChatId}
-              resetSignal={resetImporterSignal}
             />
           </div>
         </div>

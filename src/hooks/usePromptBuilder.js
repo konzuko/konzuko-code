@@ -1,6 +1,4 @@
 /* src/hooks/usePromptBuilder.js */
-// src/hooks/usePromptBuilder.js
-
 import { useState, useEffect, useCallback, useMemo } from 'preact/hooks';
 import { useFormData, useMode, INITIAL_FORM_DATA } from '../hooks.js';
 import { asciiTree } from '../lib/textUtils.js';
@@ -66,24 +64,37 @@ function buildFormSection(currentForm, currentMode) {
 }
 
 // Builds the text from imported files. This can be slow and is memoized separately.
-function buildFilesSection(currentImportedCodeFiles, projectRootName) {
+function buildFilesSection(currentImportedCodeFiles) {
     if (!currentImportedCodeFiles || currentImportedCodeFiles.length === 0) return '';
     
     const out = [];
-    const treePaths = (currentImportedCodeFiles || []).filter(f => f.insideProject).map(f => f.fullPath);
-    if (projectRootName && treePaths.length > 0) {
-      out.push(`${projectRootName}/`);
-      out.push(asciiTree(treePaths));
-    }
-
-    (currentImportedCodeFiles || []).forEach(f => {
-      out.push('```yaml');
-      out.push(`file: ${f.fullPath}`);
-      out.push('```');
-      out.push('```');
-      out.push(f.text);
-      out.push('```');
+    
+    const filesByRoot = new Map();
+    currentImportedCodeFiles.forEach(file => {
+        const rootName = file.rootName || null;
+        if (!filesByRoot.has(rootName)) {
+            filesByRoot.set(rootName, []);
+        }
+        filesByRoot.get(rootName).push(file);
     });
+
+    for (const [rootName, files] of filesByRoot.entries()) {
+        if (rootName) {
+            const treePaths = files.map(f => f.fullPath);
+            out.push(`${rootName}/`);
+            out.push(asciiTree(treePaths));
+            out.push('');
+        }
+        
+        files.forEach(f => {
+            out.push('```yaml');
+            out.push(`file: ${f.fullPath}`);
+            out.push('```');
+            out.push('```');
+            out.push(f.text);
+            out.push('```');
+        });
+    }
 
     return out.join('\n');
 }
@@ -110,7 +121,7 @@ export function usePromptBuilder(importedCodeFiles = []) {
   }, [pendingImages]);
 
   const formText = useMemo(() => buildFormSection(form, mode), [form, mode]);
-  const fileText = useMemo(() => buildFilesSection(importedCodeFiles, currentProjectRootName), [importedCodeFiles, currentProjectRootName]);
+  const fileText = useMemo(() => buildFilesSection(importedCodeFiles), [importedCodeFiles]);
 
   const userPromptText = useMemo(() => {
     if (mode !== 'DEVELOP' || !fileText) {

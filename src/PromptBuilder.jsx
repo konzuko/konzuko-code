@@ -48,7 +48,6 @@ export default function PromptBuilder({
   onProjectRootChange,
   promptBuilderRootName,
   currentChatId,
-  resetSignal,
 }) {
   const formRef = useRef(form);
   const textareaRefs = useRef({});
@@ -209,7 +208,6 @@ export default function PromptBuilder({
           settings={settings}
           onProjectRootChange={onProjectRootChange}
           currentProjectRootNameFromBuilder={promptBuilderRootName}
-          resetSignal={resetSignal}
         />
       )}
 
