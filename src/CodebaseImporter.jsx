@@ -514,10 +514,8 @@ export default function CodebaseImporter({
 
       {(phase === 'SCANNING' || phase === 'STAGING' || phase === 'SCANNING_SECONDARY' || phase === 'STAGING_SECONDARY') && (
          <div className="analysing-animation-container">
-            <span className="analysing-text">{phase.startsWith('SCANNING') ? 'Scanning folder...' : 'Processing files...'}</span>
-            <div class="progress-bar-container">
-                <div class="progress-bar-fill"></div>
-            </div>
+            <span className="analysing-text">{phase.startsWith('SCANNING') ? 'Scanning folder (metadata)...' : 'Processing selected files...'}</span>
+            <div className="analysing-dots"><span></span><span></span><span></span></div>
         </div>
       )}
       {isFiltering && (
