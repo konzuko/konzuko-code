@@ -583,10 +583,10 @@ export default function CodebaseImporter({
               ))}
             </ul>
           )}
-          {impState.files.length === 0 && ( <p style={{ color: 'var(--text-secondary)' }}>No text files staged. Add files or select from a folder.</p> )}
+          {impState.files.length === 0 && ( <p style={{ color: 'var(--text-secondary)' }}></p> )}
         </>
       )}
-      {phase === 'IDLE' && !isLoadingOperation && ( <p style={{ color: 'var(--text-secondary)' }}>No text files added yet. Use "+ Add Files" or select a folder.</p> )}
+      {phase === 'IDLE' && !isLoadingOperation && ( <p style={{ color: 'var(--text-secondary)' }}></p> )}
     </div>
   );
 }
