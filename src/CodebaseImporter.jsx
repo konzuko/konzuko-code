@@ -447,7 +447,7 @@ export default function CodebaseImporter({
           {hasContent ? '+ Add More Folders' : '+ Add Folder'}
         </button>
         <button className="button" onClick={pickTextFilesAndDispatch} disabled={isLoadingOperation}>
-          {hasContent ? '+ Add More Files' : '+ Add Files'}
+          {hasContent ? '+ Add More Documents' : '+ Add Document'}
         </button>
         <button className="button" onClick={clearAllStatesAndNotifyParent}
           disabled={isLoadingOperation || phase === 'IDLE'}
