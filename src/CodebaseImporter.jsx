@@ -213,7 +213,6 @@ export default function CodebaseImporter({
   useEffect(() => {
     console.log('[SyncEffect] Running. Parent wants root:', currentProjectRootNameFromBuilder, 'Importer state:', impState.tag, 'Importer root:', impState.root?.name);
   
-    // Scenario 1: Parent component wants no project root.
     if (currentProjectRootNameFromBuilder === null) {
       if (impState.root) {
         console.log('[SyncEffect] Parent cleared root. Resetting importer state and clearing IDB.');
@@ -224,16 +223,13 @@ export default function CodebaseImporter({
       return;
     }
   
-    // Scenario 2: Parent wants a specific project root.
     if (currentProjectRootNameFromBuilder) {
-      // If the importer already has the correct root, do nothing.
       if (impState.root?.name === currentProjectRootNameFromBuilder && (impState.tag === 'FILTER' || impState.tag === 'STAGED')) {
         console.log('[SyncEffect] Importer already has the correct root. No change.');
         initialLoadAttemptedRef.current = true;
         return;
       }
   
-      // If the importer needs to switch to the new root, load it from IDB.
       console.log(`[SyncEffect] Mismatch or idle state. Attempting to load root '${currentProjectRootNameFromBuilder}' from IDB.`);
       initialLoadAttemptedRef.current = true;
       loadRoot().then(handleFromIDB => {
@@ -244,7 +240,7 @@ export default function CodebaseImporter({
         } else {
           console.warn(`[SyncEffect] Expected root '${currentProjectRootNameFromBuilder}' but found '${handleFromIDB?.name}' in IDB. Clearing state.`);
           dispatch({ type: 'CLEAR_ALL' });
-          onProjectRootChange?.(null); // Notify parent that the load failed
+          onProjectRootChange?.(null);
           clearIDBRoot().catch(console.warn);
         }
       }).catch(err => {
@@ -255,7 +251,6 @@ export default function CodebaseImporter({
       return;
     }
   
-    // Scenario 3: Initial load, no root from parent. Try to restore from IDB.
     if (!currentProjectRootNameFromBuilder && !initialLoadAttemptedRef.current) {
       console.log('[SyncEffect] Initial mount. Attempting to restore root from IDB.');
       initialLoadAttemptedRef.current = true;
@@ -280,23 +275,19 @@ export default function CodebaseImporter({
     try {
       const dirHandle = await window.showDirectoryPicker();
       
-      if (impState.tag === 'STAGED' && impState.files.length > 0) {
+      if (impState.root) {
         dispatch({ type: 'PICK_SECONDARY_ROOT', handle: dirHandle });
         performScan(dirHandle, `secondary scan of ${dirHandle.name}`, true);
       } else {
         await saveRoot(dirHandle);
-        if (impState.root?.name === dirHandle.name && (impState.tag === 'FILTER' || impState.tag === 'STAGED')) {
-          dispatch({ type: 'RESCAN_ROOT' });
-        } else {
-          onProjectRootChange?.(dirHandle.name);
-        }
+        onProjectRootChange?.(dirHandle.name);
       }
     } catch (e) {
       if (e.name !== 'AbortError') toastFn?.('Folder pick error: ' + e.message, 4000);
     } finally {
       setAdding(false);
     }
-  }, [toastFn, onProjectRootChange, impState, performScan]);
+  }, [toastFn, onProjectRootChange, impState.root, performScan]);
 
   const handleCheckboxChange = useCallback((event, path) => {
     dispatch({ type: 'TOGGLE_SELECT', path: path, desiredState: event.target.checked });
@@ -479,6 +470,7 @@ export default function CodebaseImporter({
   }, [impState, onFilesChange]);
 
   const allRoots = (phase === 'STAGED' && impState.files) ? [...new Set(impState.files.map(f => f.rootName).filter(Boolean))] : [];
+  const hasContent = impState.root || (impState.files && impState.files.length > 0);
 
   const isFiltering = phase === 'FILTER' || phase === 'FILTER_SECONDARY';
   const currentFilterTops = phase === 'FILTER' ? impState.tops : (phase === 'FILTER_SECONDARY' ? impState.secondaryTops : []);
@@ -492,10 +484,10 @@ export default function CodebaseImporter({
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '8px', marginBottom: '1rem' }}>
         {/* Top Row */}
         <button className="button" onClick={pickFolder} disabled={isLoadingOperation}>
-          {phase === 'STAGED' && impState.files.length > 0 ? '+ Add More Folders' : '+ Add Folder'}
+          {hasContent ? '+ Add More Folders' : '+ Add Folder'}
         </button>
         <button className="button" onClick={pickTextFilesAndDispatch} disabled={isLoadingOperation}>
-          {phase === 'STAGED' && impState.files.length > 0 ? '+ Add More Files' : '+ Add Files'}
+          {hasContent ? '+ Add More Files' : '+ Add Files'}
         </button>
         <button className="button" onClick={clearAllStatesAndNotifyParent}
           disabled={isLoadingOperation || phase === 'IDLE'}

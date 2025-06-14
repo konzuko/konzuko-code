@@ -1,6 +1,4 @@
 /* src/codeImporter/state.js */
-// src/codeImporter/state.js
-
 const generateId = () => crypto.randomUUID();
 
 export function makeTopEntry(name, kind) { return { name, kind }; }
@@ -14,26 +12,16 @@ export const initialState = { tag: 'IDLE' };
 export function reducer(state, ev) {
   console.log('[Reducer] Current state:', state.tag, 'Event:', ev.type, ev);
   switch (ev.type) {
-    case 'PICK_ROOT':
-      if (state.tag === 'IDLE' || (state.root && state.root.name !== ev.handle.name) || state.tag === 'SCANNING' || (state.root && state.root.name === ev.handle.name) ) {
-        return { tag: 'SCANNING', root: ev.handle };
-      }
-      console.warn('[Reducer] PICK_ROOT called but root is already set and not SCANNING. State unchanged or needs explicit rescan logic.');
-      return state;
+    case 'PICK_ROOT': {
+      const existingFiles = state.tag === 'STAGED' ? state.files : [];
+      return { tag: 'SCANNING', root: ev.handle, files: existingFiles };
+    }
 
     case 'PICK_SECONDARY_ROOT':
-        if (state.tag === 'STAGED') {
+        if (state.tag === 'STAGED' || state.tag === 'FILTER') {
             return { ...state, tag: 'SCANNING_SECONDARY', secondaryRoot: ev.handle };
         }
         return state;
-
-    case 'RESCAN_ROOT':
-      if (state.root && (state.tag === 'FILTER' || state.tag === 'STAGED' || state.tag === 'IDLE')) {
-        console.log('[Reducer] RESCAN_ROOT: Transitioning to SCANNING for root:', state.root.name);
-        return { tag: 'SCANNING', root: state.root };
-      }
-      console.warn('[Reducer] RESCAN_ROOT called without a valid root or in an unexpected state.');
-      return state;
 
     case 'SCAN_DONE':
       if (state.tag === 'SCANNING') {
@@ -42,7 +30,8 @@ export function reducer(state, ev) {
           root: state.root,
           tops: ev.tops || [],
           meta: ev.meta || [], 
-          selected: new Set()
+          selected: new Set(),
+          files: state.files || []
         };
       }
       if (state.tag === 'SCANNING_SECONDARY') {
@@ -95,10 +84,8 @@ export function reducer(state, ev) {
     case 'BEGIN_STAGING':
       if (state.tag === 'FILTER') {
         return {
+          ...state,
           tag: 'STAGING',
-          root: state.root,
-          meta: state.meta,
-          selected: state.selected
         };
       }
       if (state.tag === 'FILTER_SECONDARY') {
@@ -110,19 +97,13 @@ export function reducer(state, ev) {
       return state;
 
     case 'STAGING_DONE':
-      if (state.tag === 'STAGING') {
+      if (state.tag === 'STAGING' || state.tag === 'STAGING_SECONDARY') {
+        const existingFiles = state.files || [];
+        const newFiles = ev.files || [];
         return {
           tag: 'STAGED',
           root: state.root,
-          files: ev.files || []
-        };
-      }
-      if (state.tag === 'STAGING_SECONDARY') {
-        const newFiles = [...state.files, ...ev.files];
-        return {
-            tag: 'STAGED',
-            root: state.root,
-            files: newFiles
+          files: [...existingFiles, ...newFiles]
         };
       }
       return state;
@@ -131,8 +112,8 @@ export function reducer(state, ev) {
       const existingFiles = (state.tag === 'STAGED' && state.files) ? state.files : [];
       const newFiles = [...existingFiles, ...ev.files];
       return {
+        ...state,
         tag: 'STAGED',
-        root: state.root || null,
         files: newFiles
       };
     }
