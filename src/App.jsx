@@ -22,7 +22,7 @@ import {
     LOCALSTORAGE_PANE_WIDTH_KEY
 } from './config.js';
 
-import { useDisplaySettings } from './hooks.js';
+import { useSettings } from './contexts/SettingsContext.jsx';
 import { useChatSessionManager } from './hooks/useChatSessionManager.js';
 import { useMessageManager } from './hooks/useMessageManager.js';
 import { usePromptBuilder } from './hooks/usePromptBuilder.js';
@@ -40,29 +40,19 @@ const debounce = (func, delay) => {
   };
 };
 
-const getInitialPaneWidth = () => {
-  try {
-    const storedWidth = localStorage.getItem(LOCALSTORAGE_PANE_WIDTH_KEY);
-    if (storedWidth) {
-      const percent = parseFloat(storedWidth);
-      if (percent >= 20 && percent <= 80) {
-        return `${percent}%`;
-      }
-    }
-  } catch (e) {
-    console.warn("Could not read pane width from localStorage", e);
-  }
-  return window.innerWidth <= 1600 ? '60%' : '50%';
-};
-
 export default function App() {
-  const [displaySettings, setDisplaySettings] = useDisplaySettings();
+  const { 
+    collapsed, 
+    handleToggleCollapse, 
+    leftPaneWidth, 
+    setLeftPaneWidth,
+    displaySettings,
+    setDisplaySettings
+  } = useSettings();
+  
   const [apiKey, setApiKey] = useState('');
   const [isApiKeyLoading, setIsApiKeyLoading] = useState(true);
-  const [collapsed, setCollapsed] = useState(false);
-  const handleToggleCollapse = useCallback(() => setCollapsed(c => !c), []);
-
-  const [leftPaneWidth, setLeftPaneWidth] = useState(getInitialPaneWidth);
+  
   const [isResizing, setIsResizing] = useState(false);
   const appContainerRef = useRef(null);
   const startXRef = useRef(0);
@@ -178,7 +168,7 @@ export default function App() {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isResizing, leftPaneWidth]);
+  }, [isResizing, leftPaneWidth, setLeftPaneWidth]);
 
   useEffect(() => {
     const fetchApiKey = async () => {
@@ -331,8 +321,8 @@ export default function App() {
   );
 
   const navRailDisabled = useMemo(
-    () => globalBusy,
-    [globalBusy]
+    () => isSessionBusy || isSwitchingChat || isApiKeyLoading,
+    [isSessionBusy, isSwitchingChat, isApiKeyLoading]
   );
 
   const chatAreaActionsDisabled = useMemo(
@@ -461,8 +451,6 @@ export default function App() {
         onDeleteChatTrigger={handleDeleteChatTrigger}
         onUpdateChatTitleTrigger={handleUpdateChatTitleTrigger}
         appDisabled={chatListDisabled}
-        collapsed={collapsed}
-        onToggleCollapse={handleToggleCollapse}
       />
       <div className="main-content">
         <div className="top-bar">

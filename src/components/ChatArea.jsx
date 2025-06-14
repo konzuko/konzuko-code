@@ -1,3 +1,4 @@
+// file: src/components/ChatArea.jsx
 /* src/components/ChatArea.jsx */
 // src/components/ChatArea.jsx
 import { useEffect, useRef, useState } from 'preact/hooks';
@@ -126,9 +127,9 @@ function ChatArea({
                             className="button icon-button"
                             disabled={loadingSend || actionsDisabled}
                             onClick={() => setForkingMessage(m)}
-                            title="Fork conversation from this point"
+                            title="Fork/Edit conversation from this point"
                           >
-                            Fork
+                            Fork/Edit
                           </button>
                         )}
                       </>

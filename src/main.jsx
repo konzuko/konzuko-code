@@ -1,3 +1,4 @@
+// file: src/main.jsx
 // src/main.jsx
 // Ensure gcTime (TQv5) or cacheTime (TQv4) is set appropriately in QueryClient defaultOptions
 import { render } from 'preact';
@@ -8,6 +9,7 @@ import { createIDBPersister } from './lib/idbPersister.js';
 
 import AuthGate from './components/AuthGate.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
+import { SettingsProvider } from './contexts/SettingsContext.jsx';
 import App from './App.jsx';
 import './styles.css';
 
@@ -35,7 +37,9 @@ persistQueryClient({
 render(
   <QueryClientProvider client={queryClient}>
     <ErrorBoundary>
-      <AuthGate><App /></AuthGate>
+      <SettingsProvider>
+        <AuthGate><App /></AuthGate>
+      </SettingsProvider>
     </ErrorBoundary>
     {import.meta.env.DEV && <ReactQueryDevtools initialIsOpen={false} />}
   </QueryClientProvider>,

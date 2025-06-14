@@ -5,6 +5,7 @@ import { useEffect, useCallback, useRef } from 'preact/hooks';
 import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchChats, GEMINI_MODEL_NAME } from './api.js';
 import ChatPaneLayout from './ChatPaneLayout.jsx';
+import { useSettings } from './contexts/SettingsContext.jsx';
 
 export default function ChatList({
   currentChatId,
@@ -13,10 +14,9 @@ export default function ChatList({
   onDeleteChatTrigger,
   onUpdateChatTitleTrigger,
   appDisabled,
-  collapsed,
-  onToggleCollapse,
 }) {
   const queryClient = useQueryClient();
+  const { collapsed, handleToggleCollapse } = useSettings();
   const initialLogicRan = useRef(false);
 
   const {
@@ -90,7 +90,7 @@ export default function ChatList({
         <div className="sidebar-header flex space-between align-center">
           <button
             className="button icon-button sidebar-collapse-toggle is-open"
-            onClick={onToggleCollapse}
+            onClick={handleToggleCollapse}
             title="Collapse Sidebar"
           >
             {'«'}

@@ -1,3 +1,4 @@
+// file: src/hooks.js
 /* -------------------------------------------------------------------------
    src/hooks.js
    Shared utility hooks + file/dir helpers
@@ -12,14 +13,12 @@ import {
 import {
   LOCALSTORAGE_DEBOUNCE,
   LOCALSTORAGE_FORM_KEY,
-  LOCALSTORAGE_SETTINGS_KEY,
   LOCALSTORAGE_MODE_KEY
 } from './config.js';
 import { isTextLike, isImage }   from './lib/fileTypeGuards.js';
 
 /* ───────────────────────── constants ────────────────────────── */
 const MAX_TOTAL_DROPPED_FILES = 2000;
-const TARGET_GEMINI_MODEL = "gemini-2.5-pro-preview-06-05";
 
 // Define the initial structure for the form data
 export const INITIAL_FORM_DATA = {
@@ -33,22 +32,15 @@ export const INITIAL_FORM_DATA = {
 };
 
 /* ───────────────────── localStorage helpers ─────────────────── */
-// This generic hook remains, but its usage for settings will change.
 function useDebouncedLocalStorage(key, initial, delay = LOCALSTORAGE_DEBOUNCE) {
   const [value, setValue] = useState(() => {
     try {
       const storedValue = localStorage.getItem(key);
       if (storedValue !== null) {
         let parsed = JSON.parse(storedValue);
-        // Special handling for 'konzuko-form-data' (merging)
         if (key === LOCALSTORAGE_FORM_KEY) {
             parsed = { ...initial, ...parsed };
         }
-        // Special handling for 'konzuko-display-settings' (model enforcement)
-        // This is now handled by useDisplaySettings itself to keep this hook generic.
-        // if (key === 'konzuko-display-settings' && parsed.hasOwnProperty('model')) {
-        //     parsed.model = TARGET_GEMINI_MODEL;
-        // }
         return parsed;
       }
       return initial;
@@ -60,12 +52,7 @@ function useDebouncedLocalStorage(key, initial, delay = LOCALSTORAGE_DEBOUNCE) {
   useEffect(() => {
     const id = setTimeout(() => {
       try {
-        let valueToStore = value;
-        // Model enforcement for 'konzuko-display-settings' is handled by useDisplaySettings.
-        // if (key === 'konzuko-display-settings' && valueToStore && typeof valueToStore === 'object' && valueToStore.hasOwnProperty('model')) {
-        //     valueToStore = { ...valueToStore, model: TARGET_GEMINI_MODEL };
-        // }
-        localStorage.setItem(key, JSON.stringify(valueToStore));
+        localStorage.setItem(key, JSON.stringify(value));
       } catch (err) {
         console.warn('localStorage error:', err);
       }
@@ -75,26 +62,6 @@ function useDebouncedLocalStorage(key, initial, delay = LOCALSTORAGE_DEBOUNCE) {
 
   return [value, setValue];
 }
-
-// Manages display-related settings (model, showSettings), persisted to localStorage.
-// API key is NOT managed here anymore.
-export function useDisplaySettings() {
-  const [displaySettings, setDisplaySettings] = useDebouncedLocalStorage(LOCALSTORAGE_SETTINGS_KEY, {
-    model        : TARGET_GEMINI_MODEL, // Default model
-    showSettings : false                 // Default for showing settings panel
-    // apiKey is intentionally removed from here
-  });
-
-  // Ensure the model is always the target model, even if localStorage had something else.
-  useEffect(() => {
-    if (displaySettings.model !== TARGET_GEMINI_MODEL) {
-      setDisplaySettings(s => ({ ...s, model: TARGET_GEMINI_MODEL }));
-    }
-  }, [displaySettings.model, setDisplaySettings]);
-
-  return [displaySettings, setDisplaySettings];
-}
-
 
 export function useFormData() {
   return useDebouncedLocalStorage(LOCALSTORAGE_FORM_KEY, INITIAL_FORM_DATA);
