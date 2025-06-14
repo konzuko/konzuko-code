@@ -8,10 +8,10 @@ import {
   LOCALSTORAGE_PANE_WIDTH_KEY,
   LOCALSTORAGE_SETTINGS_KEY,
   LOCALSTORAGE_SIDEBAR_COLLAPSED_KEY,
+  GEMINI_MODEL_NAME, // <-- IMPORT from config
 } from '../config.js';
 
-import { GEMINI_MODEL_NAME } from '../api.js';               // ← fixed path
-
+// ... rest of the file is unchanged
 /* ───────────────────────── helpers ───────────────────────── */
 const getInitialPaneWidth = () => {
   try {

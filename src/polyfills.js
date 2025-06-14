@@ -1,5 +1,5 @@
 /* ---------- crypto.randomUUID() ---------- */
-if (!crypto.randomUUID) {
+if (typeof crypto !== 'undefined' && !crypto.randomUUID) {
   crypto.randomUUID = () =>
   ([1e7]+-1e3+-4e3+-8e3+-1e11)
   .replace(/[018]/g, c =>
@@ -15,14 +15,14 @@ if (!crypto.randomUUID) {
   •  Echoes message to same tab (matches real BC behaviour)
   •  Removes key immediately to avoid quota bloat
   */
-  if (!('BroadcastChannel' in self)) {
+  if (typeof self !== 'undefined' && !('BroadcastChannel' in self)) {
   class BCPoly {
   constructor (name) {
   this.name = name
   this.onmessage = null
 
 
-    addEventListener('storage', e => { // Removed the stray clipboard icon here
+    addEventListener('storage', e => {
       if (e.key !== `__bc_${name}` || !e.newValue) return
       const payload = JSON.parse(e.newValue)
       this.onmessage?.({ data: payload.msg })

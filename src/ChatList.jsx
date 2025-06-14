@@ -1,12 +1,14 @@
 // file: src/ChatList.jsx
 import { useMemo, useCallback, useRef, useEffect } from 'preact/hooks';
 import { useInfiniteQuery } from '@tanstack/react-query';
-import { fetchChats, GEMINI_MODEL_NAME } from './api.js';
+import { fetchChats } from './api/supabaseApi.js'; // <-- UPDATED PATH
+import { GEMINI_MODEL_NAME } from './config.js'; // <-- UPDATED PATH
 import ChatPaneLayout from './ChatPaneLayout.jsx';
 import { useSettings } from './contexts/SettingsContext.jsx';
 import { useChat } from './contexts/ChatContext.jsx';
 import { LOCALSTORAGE_LAST_CHAT_ID_KEY } from './config.js';
 
+// ... rest of the file is unchanged
 export default function ChatList({ appDisabled }) {
   const { collapsed, handleToggleCollapse } = useSettings();
   const { 

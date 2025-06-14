@@ -5,31 +5,34 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="Konzuko Code - AI-powered coding assistant" />
     <title>Konzuko Code</title>
+
+    <!-- Favicon -->
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <!-- Preload fonts -->
+
+    <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-    <!-- Preload styles -->
-    <link rel="stylesheet" href="/src/styles.css" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
   </head>
+
   <body>
     <div id="app"></div>
+    <!-- Vite will inject the hashed CSS automatically via main.jsx import -->
     <script type="module" src="/src/main.jsx"></script>
-    
-    <!-- Loading indicator that shows before JS loads -->
+
+    <!-- Simple full-screen loading indicator (removed after JS loads) -->
     <div id="loading-indicator">
       <style>
         #loading-indicator {
           position: fixed;
-          top: 0;
-          left: 0;
-          right: 0;
-          bottom: 0;
+          inset: 0;
           display: flex;
           align-items: center;
           justify-content: center;
-          background-color: #121212;
+          background: #121212;
           z-index: 9999;
         }
         .loading-dots {
@@ -40,24 +43,14 @@
           width: 8px;
           height: 8px;
           border-radius: 50%;
-          background-color: #4f8eff;
+          background: #4f8eff;
           animation: pulse 1.4s infinite ease-in-out both;
         }
-        .loading-dots .dot:nth-child(1) {
-          animation-delay: -0.32s;
-        }
-        .loading-dots .dot:nth-child(2) {
-          animation-delay: -0.16s;
-        }
+        .loading-dots .dot:nth-child(1) { animation-delay: -0.32s; }
+        .loading-dots .dot:nth-child(2) { animation-delay: -0.16s; }
         @keyframes pulse {
-          0%, 80%, 100% {
-            transform: scale(0.6);
-            opacity: 0.6;
-          }
-          40% {
-            transform: scale(1);
-            opacity: 1;
-          }
+          0%, 80%, 100% { transform: scale(0.6); opacity: 0.6; }
+          40%          { transform: scale(1);   opacity: 1;   }
         }
       </style>
       <div class="loading-dots">
@@ -66,18 +59,15 @@
         <div class="dot"></div>
       </div>
     </div>
-    
+
     <script>
-      // Remove loading indicator when app is loaded
+      // Fade out / remove loading indicator once the bundle finishes loading
       window.addEventListener('load', () => {
-        const loadingIndicator = document.getElementById('loading-indicator');
-        if (loadingIndicator) {
-          loadingIndicator.style.opacity = '0';
-          loadingIndicator.style.transition = 'opacity 0.3s ease-out';
-          setTimeout(() => {
-            loadingIndicator.remove();
-          }, 300);
-        }
+        const el = document.getElementById('loading-indicator');
+        if (!el) return;
+        el.style.transition = 'opacity 0.3s ease-out';
+        el.style.opacity = '0';
+        setTimeout(() => el.remove(), 300);
       });
     </script>
   </body>

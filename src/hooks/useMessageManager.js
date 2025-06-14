@@ -9,8 +9,8 @@ import {
   undoDeleteMessage,
   archiveMessagesAfter,
   performUndoFork,
-  callApiForText,
-} from '../api.js';
+} from '../api/supabaseApi.js'; // <-- UPDATED PATH
+import { callApiForText } from '../api/geminiApi.js'; // <-- UPDATED PATH
 import Toast from '../components/Toast.jsx';
 
 export function useMessageManager(currentChatId, setHasLastSendFailed) {

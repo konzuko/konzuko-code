@@ -1,6 +1,8 @@
 /* src/hooks/usePromptBuilder.js */
 import { useState, useEffect, useCallback, useMemo } from 'preact/hooks';
-import { useFormData, useMode, INITIAL_FORM_DATA } from '../hooks.js';
+import { useFormData } from './useFormData.js';
+import { useMode } from './useMode.js';
+import { INITIAL_FORM_DATA } from './useFormData.js';
 import { asciiTree } from '../lib/textUtils.js';
 
 const safeTrim = (val) => (val ?? '').trim();
