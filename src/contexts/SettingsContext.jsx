@@ -1,7 +1,7 @@
 // file: src/contexts/SettingsContext.jsx
 import { createContext, useContext } from 'preact/compat';
 import { useState, useCallback, useEffect } from 'preact/hooks';
-import { LOCALSTORAGE_PANE_WIDTH_KEY, LOCALSTORAGE_SETTINGS_KEY } from '../config.js';
+import { LOCALSTORAGE_PANE_WIDTH_KEY, LOCALSTORAGE_SETTINGS_KEY, LOCALSTORAGE_SIDEBAR_COLLAPSED_KEY } from '../config.js';
 import { GEMINI_MODEL_NAME } from '../api.js';
 
 const getInitialPaneWidth = () => {
@@ -38,12 +38,22 @@ const getInitialDisplaySettings = () => {
     };
 };
 
+const getInitialCollapsedState = () => {
+  try {
+    const stored = localStorage.getItem(LOCALSTORAGE_SIDEBAR_COLLAPSED_KEY);
+    return stored === 'true';
+  } catch (e) {
+    console.warn("Could not read sidebar collapsed state from localStorage", e);
+    return false;
+  }
+};
+
 
 const SettingsContext = createContext();
 SettingsContext.displayName = 'SettingsContext';
 
 export const SettingsProvider = ({ children }) => {
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(getInitialCollapsedState);
   const [leftPaneWidth, setLeftPaneWidth] = useState(getInitialPaneWidth);
   const [displaySettings, setDisplaySettings] = useState(getInitialDisplaySettings);
 
@@ -53,13 +63,20 @@ export const SettingsProvider = ({ children }) => {
     try {
         const settingsToSave = {
             showSettings: displaySettings.showSettings,
-            // model is not saved as it's constant
         };
         localStorage.setItem(LOCALSTORAGE_SETTINGS_KEY, JSON.stringify(settingsToSave));
     } catch (e) {
         console.warn("Could not save display settings to localStorage", e);
     }
   }, [displaySettings]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(LOCALSTORAGE_SIDEBAR_COLLAPSED_KEY, String(collapsed));
+    } catch (e) {
+      console.warn("Could not save sidebar collapsed state to localStorage", e);
+    }
+  }, [collapsed]);
 
   const value = {
     collapsed,

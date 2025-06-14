@@ -1,3 +1,4 @@
+// file: src/CodebaseImporter.jsx
 /* src/CodebaseImporter.jsx */
 /*  src/CodebaseImporter.jsx  – Fix for "+ Add Files" working independently */
 import {
@@ -203,72 +204,63 @@ export default function CodebaseImporter({
     }
   }, [toastFn, onProjectRootChange]);
 
-  useEffect(() => { // SyncEffect
-    const currentEffectRootName = impState.root?.name;
-    console.log('[SyncEffect] Running. ParentRootName:', currentProjectRootNameFromBuilder, 'ImporterState:', impState.tag, 'CurrentImporterRootName:', currentEffectRootName, 'InitialLoadAttempted:', initialLoadAttemptedRef.current, 'ScanInProgress:', scanInProgressRef.current);
-
-    // Scenario 1: Parent indicates no project root is active
+  useEffect(() => {
+    console.log('[SyncEffect] Running. Parent wants root:', currentProjectRootNameFromBuilder, 'Importer state:', impState.tag, 'Importer root:', impState.root?.name);
+  
+    // Scenario 1: Parent component wants no project root.
     if (currentProjectRootNameFromBuilder === null) {
       if (impState.root) {
-        console.log('[SyncEffect] SCENARIO 1A: Parent cleared project root. Resetting importer.');
+        console.log('[SyncEffect] Parent cleared root. Resetting importer state and clearing IDB.');
+        dispatch({ type: 'CLEAR_ALL' });
         clearIDBRoot().catch(console.warn);
-        dispatch({ type: 'CLEAR_ALL' });
-      } else if (!impState.root && (impState.tag !== 'IDLE' && impState.tag !== 'STAGED')) {
-        console.log('[SyncEffect] SCENARIO 1B: Parent wants no root, and importer is in a root-dependent intermediate state. Resetting.');
-        dispatch({ type: 'CLEAR_ALL' });
       }
       initialLoadAttemptedRef.current = true;
       return;
     }
-
-    // Scenario 2: Parent specifies a root name
+  
+    // Scenario 2: Parent wants a specific project root.
     if (currentProjectRootNameFromBuilder) {
-      if (currentEffectRootName === currentProjectRootNameFromBuilder && (impState.tag === 'FILTER' || impState.tag === 'STAGED')) {
-        console.log('[SyncEffect] SCENARIO 2A: Importer already has correct root and stable state.');
+      // If the importer already has the correct root, do nothing.
+      if (impState.root?.name === currentProjectRootNameFromBuilder && (impState.tag === 'FILTER' || impState.tag === 'STAGED')) {
+        console.log('[SyncEffect] Importer already has the correct root. No change.');
         initialLoadAttemptedRef.current = true;
         return;
       }
-
-      if (impState.tag === 'SCANNING' && currentEffectRootName === currentProjectRootNameFromBuilder) {
-          console.log('[SyncEffect] SCENARIO 2B: State is SCANNING for the target root. Triggering performScan if not already in progress.');
-          if (impState.root) performScan(impState.root, "SyncEffect - state was SCANNING");
-          return;
-      }
-      
-      if (currentEffectRootName !== currentProjectRootNameFromBuilder || impState.tag === 'IDLE') {
-        console.log('[SyncEffect] SCENARIO 2C: Parent wants root:', currentProjectRootNameFromBuilder, '. Current importer root:', currentEffectRootName, 'State:', impState.tag, '. Attempting to load/set.');
-        initialLoadAttemptedRef.current = true;
-        loadRoot().then(handleFromIDB => {
-          if (handleFromIDB?.name === currentProjectRootNameFromBuilder) {
-            console.log('[SyncEffect] SCENARIO 2C: Loaded matching root from IDB:', handleFromIDB.name);
-            dispatch({ type: 'PICK_ROOT', handle: handleFromIDB });
-          } else {
-            console.log('[SyncEffect] SCENARIO 2C: No matching root in IDB for', currentProjectRootNameFromBuilder, '. Importer to IDLE.');
-            if (handleFromIDB) clearIDBRoot().catch(console.warn);
-            if (impState.tag !== 'IDLE') dispatch({ type: 'CLEAR_ALL' });
-          }
-        }).catch(err => {
-          console.warn('[SyncEffect] SCENARIO 2C: Error in loadRoot():', err);
-          if (impState.tag !== 'IDLE') dispatch({ type: 'CLEAR_ALL' });
-        });
-        return;
-      }
+  
+      // If the importer needs to switch to the new root, load it from IDB.
+      console.log(`[SyncEffect] Mismatch or idle state. Attempting to load root '${currentProjectRootNameFromBuilder}' from IDB.`);
+      initialLoadAttemptedRef.current = true;
+      loadRoot().then(handleFromIDB => {
+        if (handleFromIDB?.name === currentProjectRootNameFromBuilder) {
+          console.log('[SyncEffect] Loaded matching root from IDB. Dispatching PICK_ROOT and starting scan.');
+          dispatch({ type: 'PICK_ROOT', handle: handleFromIDB });
+          performScan(handleFromIDB, "SyncEffect - root change");
+        } else {
+          console.warn(`[SyncEffect] Expected root '${currentProjectRootNameFromBuilder}' but found '${handleFromIDB?.name}' in IDB. Clearing state.`);
+          dispatch({ type: 'CLEAR_ALL' });
+          onProjectRootChange?.(null); // Notify parent that the load failed
+          clearIDBRoot().catch(console.warn);
+        }
+      }).catch(err => {
+        console.error('[SyncEffect] Error loading root from IDB:', err);
+        dispatch({ type: 'CLEAR_ALL' });
+        onProjectRootChange?.(null);
+      });
+      return;
     }
-
-    // Scenario 3: Initial mount, no root from parent, try to load from IDB once
-    if (!currentProjectRootNameFromBuilder && impState.tag === 'IDLE' && !currentEffectRootName && !initialLoadAttemptedRef.current) {
-      console.log('[SyncEffect] SCENARIO 3: Initial mount, no parent root. Attempting IDB load.');
+  
+    // Scenario 3: Initial load, no root from parent. Try to restore from IDB.
+    if (!currentProjectRootNameFromBuilder && !initialLoadAttemptedRef.current) {
+      console.log('[SyncEffect] Initial mount. Attempting to restore root from IDB.');
       initialLoadAttemptedRef.current = true;
       loadRoot().then(handleFromIDB => {
         if (handleFromIDB) {
-          console.log('[SyncEffect] SCENARIO 3: Initial mount: Loaded root from IDB:', handleFromIDB.name);
+          console.log(`[SyncEffect] Restored root '${handleFromIDB.name}' from IDB. Notifying parent.`);
           onProjectRootChange?.(handleFromIDB.name);
-        } else {
-          console.log('[SyncEffect] SCENARIO 3: Initial mount: No root in IDB.');
         }
-      }).catch(err => console.warn('[SyncEffect] SCENARIO 3: Initial mount: Error loading root:', err));
+      }).catch(err => console.warn('[SyncEffect] Initial loadRoot error:', err));
     }
-  }, [currentProjectRootNameFromBuilder, onProjectRootChange, toastFn, impState.tag, impState.root?.name, performScan]);
+  }, [currentProjectRootNameFromBuilder, onProjectRootChange, performScan]);
 
   useEffect(() => {
     if (impState.tag === 'FILTER' || impState.tag === 'FILTER_SECONDARY') {
@@ -493,7 +485,7 @@ export default function CodebaseImporter({
     <div className="file-pane-container">
       <h2>Codebase Importer</h2>
       
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', marginBottom: '1rem' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '8px', marginBottom: '1rem' }}>
         {/* Top Row */}
         <button className="button" onClick={pickFolder} disabled={isLoadingOperation}>
           {phase === 'STAGED' && impState.files.length > 0 ? '+ Add More Folders' : '+ Add Folder'}

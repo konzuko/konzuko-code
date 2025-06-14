@@ -31,6 +31,8 @@ function ChatArea({
   const [copyMessage] = useCopyToClipboard();
   const editingTextareaRef = useRef(null);
   const [forkingMessage, setForkingMessage] = useState(null);
+  const [highlightedId, setHighlightedId] = useState(null);
+  const chatAreaRef = useRef(null);
   let assistantMessageCounter = 0;
 
   const MAX_EDIT_TEXTAREA_HEIGHT = 200; // px
@@ -41,6 +43,22 @@ function ChatArea({
       autoResizeTextarea(editingTextareaRef.current, MAX_EDIT_TEXTAREA_HEIGHT);
     }
   }, [editingId, editText]);
+
+  useEffect(() => {
+    const area = chatAreaRef.current;
+    if (!area) return;
+
+    const handleCopyEvent = (e) => {
+      const messageDiv = e.target.closest('.message');
+      if (messageDiv && messageDiv.dataset.messageId) {
+        setHighlightedId(messageDiv.dataset.messageId);
+        setTimeout(() => setHighlightedId(null), 800); // Animation duration
+      }
+    };
+
+    area.addEventListener('konzuko:copy', handleCopyEvent);
+    return () => area.removeEventListener('konzuko:copy', handleCopyEvent);
+  }, []);
 
   if (forceLoading || isLoading) {
     return <div className="chat-loading-placeholder">Loading messages...</div>;
@@ -53,7 +71,7 @@ function ChatArea({
   const lastUserMessageIndex = messages.map(m => m.role).lastIndexOf('user');
 
   return (
-    <>
+    <div ref={chatAreaRef}>
       {messages.map((m, idx) => {
         const isUser = m.role === 'user';
         const isAsst = m.role === 'assistant';
@@ -65,11 +83,14 @@ function ChatArea({
         }
 
         const isLastUserMessage = isUser && idx === lastUserMessageIndex;
-        const doCopy = () => copyMessage(flatten(m.content));
+        const doCopy = (e) => {
+          copyMessage(flatten(m.content));
+          e.currentTarget.dispatchEvent(new CustomEvent('konzuko:copy', { bubbles: true }));
+        };
         const currentMessageIsBeingEdited = m.id === editingId;
 
         return (
-          <div key={m.id} className={`message message-${m.role}`}>
+          <div key={m.id} data-message-id={m.id} className={`message message-${m.role} ${m.id === highlightedId ? 'highlight-on-copy' : ''}`}>
             <div className="floating-controls">
               {isAsst && !actionsDisabled && (
                 <button
@@ -216,7 +237,7 @@ function ChatArea({
           This action is destructive and can be undone for a short time via the notification that will appear.
         </p>
       </ConfirmationModal>
-    </>
+    </div>
   );
 }
 

@@ -32,16 +32,36 @@ export const INITIAL_FORM_DATA = {
 };
 
 /* ───────────────────── localStorage helpers ─────────────────── */
+
+function isObject(item) {
+  return (item && typeof item === 'object' && !Array.isArray(item));
+}
+
+function deepMerge(target, source) {
+  const output = { ...target };
+  if (isObject(target) && isObject(source)) {
+    Object.keys(source).forEach(key => {
+      if (isObject(source[key])) {
+        if (!(key in target)) {
+          Object.assign(output, { [key]: source[key] });
+        } else {
+          output[key] = deepMerge(target[key], source[key]);
+        }
+      } else {
+        Object.assign(output, { [key]: source[key] });
+      }
+    });
+  }
+  return output;
+}
+
 function useDebouncedLocalStorage(key, initial, delay = LOCALSTORAGE_DEBOUNCE) {
   const [value, setValue] = useState(() => {
     try {
       const storedValue = localStorage.getItem(key);
       if (storedValue !== null) {
-        let parsed = JSON.parse(storedValue);
-        if (key === LOCALSTORAGE_FORM_KEY) {
-            parsed = { ...initial, ...parsed };
-        }
-        return parsed;
+        const parsed = JSON.parse(storedValue);
+        return deepMerge(initial, parsed);
       }
       return initial;
     } catch {

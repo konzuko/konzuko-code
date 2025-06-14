@@ -1,3 +1,4 @@
+// file: src/PromptBuilder.jsx
 /* src/PromptBuilder.jsx
    STAGE 2: Receives `importedCodeFiles` and `onCodeFilesChange` from App.jsx.
    `onCodeFilesChange` is passed to CodebaseImporter as `onFilesChange`.
@@ -92,7 +93,7 @@ export default function PromptBuilder({
 
   return (
     <div className="template-container">
-      <div className="mode-selector form-group">
+      <div className="mode-selector form-group" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '8px' }}>
         {['DEVELOP', 'CODE CHECK', 'COMMIT'].map((m) => (
           <button
             key={m}

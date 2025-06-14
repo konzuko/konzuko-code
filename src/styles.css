@@ -412,20 +412,31 @@ html, body {
 .button {
   background: var(--bg-tertiary);
   color: var(--text-primary);
-  border: 1px solid var(--border);
+  border: none;
   border-radius: var(--radius);
   padding: var(--space-sm) var(--space-md);
   cursor: pointer;
   transition: all var(--transition);
   font-size: 0.9rem;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.3), inset 0 1px 1px rgba(255,255,255,0.05);
 }
 .button:hover:not(:disabled) {
   background: var(--accent);
   color: #fff;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.4);
+}
+.button:active:not(:disabled) {
+    transform: translateY(1px);
+    box-shadow: 0 1px 2px rgba(0,0,0,0.4);
+}
+.button:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--bg-primary), 0 0 0 4px var(--accent-hover);
 }
 .button:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+    box-shadow: none;
 }
 .button.active {
   background: var(--accent);
@@ -528,15 +539,16 @@ html, body {
   align-items: flex-start;
   padding: var(--space-sm);
   background: var(--bg-primary);
-  border: 1px solid var(--border);
+  /* border: 1px solid var(--border); REMOVED */
   border-radius: var(--radius);
   width: 100%;
   cursor: text;
-  transition: border-color var(--transition), background-color var(--transition);
+  transition: box-shadow var(--transition), background-color var(--transition);
+  position: relative; /* Needed for box-shadow transition */
 }
 .input-with-prefix-container:focus-within {
-  border-color: var(--accent);
   background-color: #2a2a2e;
+  box-shadow: 0 0 0 2px var(--accent); /* REPLACED border-color with box-shadow */
 }
 .input-prefix {
   font-weight: bold;
@@ -590,6 +602,7 @@ html, body {
   position: relative;
   animation: fadeIn 0.3s ease-out;
   clear: both;
+  overflow: hidden; /* Contain the highlight pseudo-element */
 }
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(10px); }
@@ -608,6 +621,32 @@ html, body {
   float: left;
   border-top-left-radius: 0;
   max-width: 100%;
+}
+
+.message.highlight-on-copy::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    110deg,
+    transparent 40%,
+    rgba(76, 175, 80, 0.4) 50%,
+    transparent 60%
+  );
+  animation: copy-highlight-sweep 0.8s ease-out;
+  pointer-events: none;
+}
+
+@keyframes copy-highlight-sweep {
+  0% {
+    left: -100%;
+  }
+  100% {
+    left: 100%;
+  }
 }
 
 .message-header {
@@ -730,7 +769,7 @@ html, body {
 }
 
 .file-pane-container {
-  border: 1px solid var(--border);
+  /* border: 1px solid var(--border); REMOVED */
   background-color: var(--bg-secondary);
   padding: var(--space-md);
   border-radius: var(--radius);
@@ -887,7 +926,7 @@ html, body {
 .send-button.send-button--error {
   background-color: var(--error);
   color: white;
-  border-color: var(--error-hover);
+  /* border-color: var(--error-hover); REMOVED */
 }
 .send-button.send-button--error:hover:not(:disabled) {
   background-color: var(--error-hover);

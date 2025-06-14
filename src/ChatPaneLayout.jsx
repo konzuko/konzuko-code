@@ -1,11 +1,12 @@
 // file: src/ChatPaneLayout.jsx
 import { useState, useMemo, useEffect, useRef, useCallback } from 'preact/hooks';
+import { memo } from 'preact/compat';
 import { useVirtualizer } from '@tanstack/react-virtual';
 
 const DEFAULT_TITLE = "Untitled Task";
 const STATUS_INDICATOR_DURATION_MS = 2000;
 
-function ChatItem({ chat, isActive, onSelectChat, onTitleUpdate, onDeleteChat, disabled }) {
+const ChatItem = memo(function ChatItem({ chat, isActive, onSelectChat, onTitleUpdate, onDeleteChat, disabled }) {
   const [editing, setEditing] = useState(false);
   const [status, setStatus] = useState('idle');
   const [currentTitle, setCurrentTitle] = useState(chat.title || DEFAULT_TITLE);
@@ -16,10 +17,6 @@ function ChatItem({ chat, isActive, onSelectChat, onTitleUpdate, onDeleteChat, d
       setCurrentTitle(chat.title || DEFAULT_TITLE);
     }
   }, [chat.title, editing]);
-
-  const ts    = chat.started ? new Date(chat.started) : new Date();
-  const date  = ts.toLocaleDateString([], { day: 'numeric', month: 'short'});
-  const time  = ts.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
   const finishEdit = async () => {
     setEditing(false);
@@ -98,14 +95,14 @@ function ChatItem({ chat, isActive, onSelectChat, onTitleUpdate, onDeleteChat, d
         )}
       </div>
       <div className="chat-item-meta">
-        {status === 'idle' && <>{date} {time}</>}
+        {status === 'idle' && <>{chat.displayDate} {chat.displayTime}</>}
         {status === 'processing' && <span className="save-indicator saving">Processing...</span>}
         {status === 'success' && <span className="save-indicator success">✓ Saved</span>}
         {status === 'error' && <span className="save-indicator error">✗ Failed</span>}
       </div>
     </div>
   );
-}
+});
 
 const groupChatsByDate = (chats) => {
   if (!chats || chats.length === 0) return [];

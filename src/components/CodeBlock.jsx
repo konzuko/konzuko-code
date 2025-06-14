@@ -1,3 +1,4 @@
+// file: src/components/CodeBlock.jsx
 import { useRef } from 'preact/hooks';
 import useCopyToClipboard from '../hooks/useCopyToClipboard.js';
 import 'highlight.js/styles/atom-one-dark.css';
@@ -12,7 +13,12 @@ export default function CodeBlock({ preProps, children }) {
 
   function handleCopy(e) {
     e.stopPropagation();
-    copy(preRef.current?.innerText || '');
+    const textToCopy = preRef.current?.innerText || '';
+    copy(textToCopy).then(success => {
+      if (success) {
+        e.currentTarget.dispatchEvent(new CustomEvent('konzuko:copy', { bubbles: true }));
+      }
+    });
   }
 
   return (

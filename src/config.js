@@ -15,3 +15,4 @@ export const LOCALSTORAGE_SETTINGS_KEY = 'konzuko-display-settings';
 export const LOCALSTORAGE_MODE_KEY = 'konzuko-mode';
 export const LOCALSTORAGE_LAST_CHAT_ID_KEY = 'konzuko-lastChatId';
 export const LOCALSTORAGE_PANE_WIDTH_KEY = 'konzuko-pane-width';
+export const LOCALSTORAGE_SIDEBAR_COLLAPSED_KEY = 'konzuko-sidebar-collapsed';
