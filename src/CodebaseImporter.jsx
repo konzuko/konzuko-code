@@ -274,7 +274,7 @@ export default function CodebaseImporter({
           + Add Project Folder
         </button>
         <button className="button" onClick={pickTextFilesAndDispatch} disabled={isLoading}>
-          + Add Files
+          + Add Document
         </button>
         <button className="button" onClick={clearAllStates}
           disabled={isLoading || !hasContent}
