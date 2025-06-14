@@ -45,7 +45,7 @@ function buildFormSection(currentForm, currentMode) {
     return (
       '## MODE # COMMIT\n' +
       'Identify if a commit has been made in this conversation yet or not. If ' +
-      'it hasn\'t. Generate a git-style commit message for everything ' +
+      'it hasn\'t, Generate a git-style commit message for everything ' +
       'accomplished so far. If there is a prior commit, generate a commit ' +
       'message based on everything accomplished since that prior commit. Be ' +
       'HIGHLY DETAILED and COMPREHENSIVE to the extent an engineer not of ' +
