@@ -55,8 +55,10 @@ function buildFormSection(currentForm, currentMode) {
   if (currentMode === 'CODE CHECK') {
     return (
       "## MODE # CODE CHECK\n" +
-      "Apply your \"Code Auditing\" workflow to the provided files. " +
-      "1. ANALYSE THE CHANGES JUST MADE THEN 2. THE ENTIRE UPTODATE CODEBASE AS A WHOLE, providing an audit report." +
+      "Apply your \"Code Auditing\" workflow to the following " +
+      "1. ANALYSING THE CHANGES JUST MADE AND THEIR EFFECT ON THE WIDER CODEBASE, providing an audit report\n" +
+      "IF THERE ARE NO ISSUES WITH THE LATEST CHANGES, or there were NONE, STATE SO EXPLICITY, THEN MOVE TO" +
+      "2. ANALYSING THE ENTIRE UPTODATE CODEBASE AS A WHOLE, providing an audit report." +
       "\nReturn in order of High and Low Severity, provide specific findings, examples where possible, and explain the potential impact. For any cateogries you don't find any errors, just let us know that you don't find any errors at the end."
     );
   }
