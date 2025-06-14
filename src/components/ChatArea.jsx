@@ -1,33 +1,35 @@
 // file: src/components/ChatArea.jsx
-/* src/components/ChatArea.jsx */
-// src/components/ChatArea.jsx
 import { useEffect, useRef, useState } from 'preact/hooks';
 import MessageItem from './MessageItem.jsx';
 import ConfirmationModal from './ConfirmationModal.jsx';
 import useCopyToClipboard from '../hooks/useCopyToClipboard.js';
 import { autoResizeTextarea } from '../lib/domUtils.js';
+import { useChat } from '../contexts/ChatContext.jsx';
+import { useSettings } from '../contexts/SettingsContext.jsx';
 
 const flatten = c =>
   Array.isArray(c)
     ? c.filter(b => b.type === 'text').map(b => b.text).join('')
     : String(c ?? '');
 
-function ChatArea({
-  messages = [],
-  isLoading,
-  forceLoading,
-  editingId,
-  editText,
-  loadingSend,
-  savingEdit,
-  setEditText,
-  handleSaveEdit,
-  handleCancelEdit,
-  handleStartEdit,
-  handleResendMessage,
-  handleDeleteMessage,
-  actionsDisabled
-}) {
+export default function ChatArea({ forceLoading, actionsDisabled }) {
+  const {
+    messages,
+    isLoadingMessages,
+    editingId,
+    editText,
+    setEditText,
+    startEdit,
+    cancelEdit,
+    saveEdit,
+    resendMessage,
+    deleteMessage,
+    isSendingMessage,
+    isForking,
+  } = useChat();
+  
+  const { apiKey } = useSettings();
+
   const [copyMessage] = useCopyToClipboard();
   const editingTextareaRef = useRef(null);
   const [forkingMessage, setForkingMessage] = useState(null);
@@ -35,8 +37,8 @@ function ChatArea({
   const chatAreaRef = useRef(null);
   let assistantMessageCounter = 0;
 
-  const MAX_EDIT_TEXTAREA_HEIGHT = 200; // px
-  const showThinkingSpinner = loadingSend && messages.length > 0 && messages[messages.length - 1].role === 'user' && !editingId;
+  const MAX_EDIT_TEXTAREA_HEIGHT = 200;
+  const showThinkingSpinner = isSendingMessage && messages.length > 0 && messages[messages.length - 1].role === 'user' && !editingId;
 
   useEffect(() => {
     if (editingId && editingTextareaRef.current) {
@@ -52,7 +54,7 @@ function ChatArea({
       const messageDiv = e.target.closest('.message');
       if (messageDiv && messageDiv.dataset.messageId) {
         setHighlightedId(messageDiv.dataset.messageId);
-        setTimeout(() => setHighlightedId(null), 800); // Animation duration
+        setTimeout(() => setHighlightedId(null), 800);
       }
     };
 
@@ -60,7 +62,7 @@ function ChatArea({
     return () => area.removeEventListener('konzuko:copy', handleCopyEvent);
   }, []);
 
-  if (forceLoading || isLoading) {
+  if (forceLoading || isLoadingMessages) {
     return <div className="chat-loading-placeholder">Loading messages...</div>;
   }
 
@@ -111,15 +113,15 @@ function ChatArea({
                   <>
                     <button
                       className="button"
-                      disabled={savingEdit || actionsDisabled}
-                      onClick={handleSaveEdit}
+                      disabled={isForking || actionsDisabled}
+                      onClick={() => saveEdit(apiKey)}
                     >
-                      {savingEdit ? 'Processing…' : 'Save'}
+                      {isForking ? 'Processing…' : 'Save'}
                     </button>
                     <button
                       className="button"
                       disabled={actionsDisabled}
-                      onClick={handleCancelEdit}
+                      onClick={cancelEdit}
                     >
                       Cancel
                     </button>
@@ -131,22 +133,20 @@ function ChatArea({
                     </button>
                     {isUser && (
                       <>
-                        {/* Only show Edit on the last user message */}
                         {isLastUserMessage && (
                           <button
                             className="button icon-button"
-                            disabled={loadingSend || actionsDisabled}
-                            onClick={() => handleStartEdit(m)}
+                            disabled={isSendingMessage || actionsDisabled}
+                            onClick={() => startEdit(m)}
                             title="Edit message"
                           >
                             Edit
                           </button>
                         )}
-                        {/* Show Fork on any user message that is NOT the last one */}
                         {!isLastUserMessage && (
                            <button
                             className="button icon-button"
-                            disabled={loadingSend || actionsDisabled}
+                            disabled={isSendingMessage || actionsDisabled}
                             onClick={() => setForkingMessage(m)}
                             title="Fork/Edit conversation from this point"
                           >
@@ -158,18 +158,18 @@ function ChatArea({
                     {isLastUserMessage && (
                       <button
                         className="button icon-button"
-                        disabled={loadingSend || actionsDisabled}
-                        onClick={() => handleResendMessage(m.id)}
+                        disabled={isSendingMessage || actionsDisabled}
+                        onClick={() => resendMessage(m.id, apiKey)}
                         title="Resend message"
                       >
                         Resend
                       </button>
                     )}
-                    {handleDeleteMessage && (
+                    {deleteMessage && (
                         <button
                           className="button icon-button"
-                          disabled={loadingSend || actionsDisabled}
-                          onClick={() => handleDeleteMessage(m.id)}
+                          disabled={isSendingMessage || actionsDisabled}
+                          onClick={() => deleteMessage(m.id)}
                           title="Delete message"
                         >
                           Del
@@ -200,8 +200,8 @@ function ChatArea({
               <div className="message-bottom-actions">
                 <button
                   className="button icon-button resend-button-bottom"
-                  disabled={loadingSend || actionsDisabled}
-                  onClick={() => handleResendMessage(m.id)}
+                  disabled={isSendingMessage || actionsDisabled}
+                  onClick={() => resendMessage(m.id, apiKey)}
                   title="Resend message"
                 >
                   Resend
@@ -225,7 +225,7 @@ function ChatArea({
       <ConfirmationModal
         isOpen={!!forkingMessage}
         onClose={() => setForkingMessage(null)}
-        onConfirm={() => handleStartEdit(forkingMessage)}
+        onConfirm={() => startEdit(forkingMessage)}
         title="Fork Conversation?"
         confirmationText="fork"
         confirmButtonText="Fork"
@@ -240,5 +240,3 @@ function ChatArea({
     </div>
   );
 }
-
-export default ChatArea;

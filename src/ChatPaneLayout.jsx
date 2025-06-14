@@ -26,9 +26,10 @@ const ChatItem = memo(function ChatItem({ chat, isActive, onSelectChat, onTitleU
     if (trimmedTitle && trimmedTitle !== originalTitle) {
       setStatus('processing');
       try {
-        await onTitleUpdate(chat.id, trimmedTitle);
+        await onTitleUpdate({ id: chat.id, title: trimmedTitle });
         setStatus('success');
       } catch (error) {
+        console.error("Failed to update title:", error);
         setStatus('error');
         setCurrentTitle(originalTitle);
       } finally {

@@ -1,6 +1,4 @@
 // file: src/App.jsx
-/* src/App.jsx */
-// src/App.jsx
 import {
   useEffect,
   useMemo,
@@ -9,12 +7,12 @@ import {
   useCallback
 } from 'preact/hooks';
 
+import { ChatProvider, useChat } from './contexts/ChatContext.jsx';
 import ChatList from './ChatList.jsx';
 import PromptBuilder from './PromptBuilder.jsx';
 import ChatArea from './components/ChatArea.jsx';
 import Toast from './components/Toast.jsx';
 
-import { GEMINI_MODEL_NAME } from './api.js';
 import {
     IMAGE_TOKEN_ESTIMATE,
     USER_FACING_TOKEN_LIMIT,
@@ -23,14 +21,10 @@ import {
 } from './config.js';
 
 import { useSettings } from './contexts/SettingsContext.jsx';
-import { useChatSessionManager } from './hooks/useChatSessionManager.js';
-import { useMessageManager } from './hooks/useMessageManager.js';
 import { usePromptBuilder } from './hooks/usePromptBuilder.js';
 import { useScrollNavigation } from './hooks/useScrollNavigation.js';
-
 import { useTokenizableContent } from './hooks/useTokenizableContent.js';
 import { countTokensWithGemini } from './lib/tokenWorkerClient.js';
-import { supabase } from './lib/supabase.js';
 
 const debounce = (func, delay) => {
   let timeoutId;
@@ -40,62 +34,43 @@ const debounce = (func, delay) => {
   };
 };
 
-export default function App() {
+function MainLayout() {
   const { 
     collapsed, 
     handleToggleCollapse, 
     leftPaneWidth, 
     setLeftPaneWidth,
     displaySettings,
-    setDisplaySettings
+    setDisplaySettings,
+    apiKey,
+    isApiKeyLoading,
+    handleApiKeyChangeAndSave,
+    model,
   } = useSettings();
-  
-  const [apiKey, setApiKey] = useState('');
-  const [isApiKeyLoading, setIsApiKeyLoading] = useState(true);
+
+  const {
+    currentChatId,
+    isSessionBusy,
+    isCreatingChat,
+    messages,
+    isLoadingMessages,
+    editingId,
+    cancelEdit,
+    sendMessage,
+    isSendingMessage,
+    isForking,
+    isResendingMessage,
+    hasLastSendFailed,
+    isBusy,
+  } = useChat();
   
   const [isResizing, setIsResizing] = useState(false);
   const appContainerRef = useRef(null);
   const startXRef = useRef(0);
   const startWidthRef = useRef(0);
-
-  const settings = useMemo(() => ({
-    ...displaySettings,
-    apiKey,
-  }), [displaySettings, apiKey]);
-
   const previousChatIdRef = useRef(null);
-  const [isSwitchingChat, setIsSwitchingChat] = useState(false);
-  const [hasLastSendFailed, setHasLastSendFailed] = useState(false);
   
   const [stagedCodeFiles, setStagedCodeFiles] = useState([]);
-
-  const {
-    currentChatId,
-    setCurrentChatId: originalSetCurrentChatId,
-    createChat,
-    deleteChat,
-    updateChatTitle,
-    isSessionBusy,
-    isCreatingChat,
-  } = useChatSessionManager();
-
-  const {
-    messages,
-    isLoadingMessages,
-    editingId,
-    editText,
-    setEditText,
-    startEdit,
-    cancelEdit,
-    saveEdit,
-    sendMessage,
-    resendMessage,
-    deleteMessage,
-    isLoadingOps: isLoadingMessageOps,
-    isSendingMessage,
-    isForking,
-    isResendingMessage,
-  } = useMessageManager(currentChatId, setHasLastSendFailed);
 
   const {
     form,
@@ -109,8 +84,6 @@ export default function App() {
     addPendingPDF,
     currentProjectRootName,
     handleProjectRootChange,
-    formText,
-    fileText,
     userPromptText,
     resetPrompt,
   } = usePromptBuilder(stagedCodeFiles);
@@ -122,6 +95,10 @@ export default function App() {
     scrollToBottom,
   } = useScrollNavigation();
 
+  useEffect(() => {
+    appContainerRef.current?.style.setProperty('--left-pane-width', leftPaneWidth);
+  }, [leftPaneWidth]);
+
   const handleMouseDown = useCallback((e) => {
     e.preventDefault();
     startXRef.current = e.clientX;
@@ -131,22 +108,28 @@ export default function App() {
 
   useEffect(() => {
     const handleMouseMove = (e) => {
-      requestAnimationFrame(() => {
-        const deltaX = e.clientX - startXRef.current;
-        const containerWidth = appContainerRef.current.offsetWidth;
-        let newWidth = startWidthRef.current + deltaX;
+      const deltaX = e.clientX - startXRef.current;
+      const containerWidth = appContainerRef.current.offsetWidth;
+      let newWidth = startWidthRef.current + deltaX;
 
-        const minWidth = containerWidth * 0.20;
-        const maxWidth = containerWidth * 0.80;
-        newWidth = Math.max(minWidth, Math.min(newWidth, maxWidth));
-
-        const newWidthPercent = (newWidth / containerWidth) * 100;
-        setLeftPaneWidth(`${newWidthPercent}%`);
-      });
+      const minWidth = containerWidth * 0.20;
+      const maxWidth = containerWidth * 0.80;
+      newWidth = Math.max(minWidth, Math.min(newWidth, maxWidth));
+      
+      appContainerRef.current.style.setProperty('--left-pane-width', `${newWidth}px`);
     };
 
     const handleMouseUp = () => {
       setIsResizing(false);
+      const finalWidthPx = parseFloat(appContainerRef.current.style.getPropertyValue('--left-pane-width'));
+      const containerWidth = appContainerRef.current.offsetWidth;
+      const finalWidthPercent = (finalWidthPx / containerWidth) * 100;
+      setLeftPaneWidth(`${finalWidthPercent}%`);
+      try {
+        localStorage.setItem(LOCALSTORAGE_PANE_WIDTH_KEY, finalWidthPercent);
+      } catch (e) {
+        console.warn("Could not save pane width to localStorage", e);
+      }
     };
 
     if (isResizing) {
@@ -157,85 +140,22 @@ export default function App() {
     } else {
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
-      try {
-        localStorage.setItem(LOCALSTORAGE_PANE_WIDTH_KEY, parseFloat(leftPaneWidth));
-      } catch (e) {
-        console.warn("Could not save pane width to localStorage", e);
-      }
     }
 
     return () => {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isResizing, leftPaneWidth, setLeftPaneWidth]);
-
-  useEffect(() => {
-    const fetchApiKey = async () => {
-      setIsApiKeyLoading(true);
-      try {
-        const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-        if (sessionError || !sessionData.session) {
-          setIsApiKeyLoading(false);
-          return;
-        }
-
-        const { data, error: invokeError } = await supabase.functions.invoke('manage-api-key', {
-          method: 'GET',
-        });
-
-        if (invokeError) throw invokeError;
-        
-        if (data && typeof data.apiKey === 'string') {
-          setApiKey(data.apiKey);
-        } else if (data && data.error) {
-            throw new Error(data.error);
-        }
-      } catch (err) {
-        console.error('Failed to fetch API key:', err);
-        Toast(`Error fetching API key: ${err.message}`, 5000);
-      } finally {
-        setIsApiKeyLoading(false);
-      }
-    };
-    fetchApiKey();
-  }, []);
-
-  const handleApiKeyChangeAndSave = async (newApiKey) => {
-    const oldApiKey = apiKey;
-    setApiKey(newApiKey);
-
-    try {
-      const { error: invokeError, data:responseData } = await supabase.functions.invoke('manage-api-key', {
-        method: 'POST',
-        body: { apiKey: newApiKey },
-      });
-
-      if (invokeError) throw invokeError;
-      if (responseData && responseData.error) throw new Error(responseData.error);
-
-      Toast('API key saved!', 3000);
-    } catch (err) {
-      console.error('Failed to save API key:', err);
-      setApiKey(oldApiKey);
-      Toast(`Error saving API key: ${err.message}`, 5000);
-    }
-  };
+  }, [isResizing, setLeftPaneWidth]);
 
   const isAwaitingApiResponse = isSendingMessage || isForking || isResendingMessage;
 
-  const handleSelectChat = useCallback(
-    (newChatId) => {
-      if (newChatId === currentChatId && !isSwitchingChat) return;
-      if (isSwitchingChat && newChatId === currentChatId) return;
-      if (isLoadingMessageOps || isSessionBusy) {
-        Toast("An operation is in progress. Please wait.", 3000);
-        return;
-      }
-      setIsSwitchingChat(true);
-      originalSetCurrentChatId(newChatId);
-    },
-    [currentChatId, originalSetCurrentChatId, isSwitchingChat, isLoadingMessageOps, isSessionBusy]
+  const itemsForApiCount = useTokenizableContent(
+    messages,
+    userPromptText,
+    null,
+    pendingPDFs,
+    isAwaitingApiResponse
   );
 
   const [totalApiTokenCount, setTotalApiTokenCount] = useState(0);
@@ -243,16 +163,8 @@ export default function App() {
   const tokenCountVersionRef = useRef(0);
   const debouncedApiCallRef = useRef(null);
 
-  const itemsForApiCount = useTokenizableContent(
-    messages,
-    formText,
-    fileText,
-    pendingPDFs,
-    isAwaitingApiResponse
-  );
-
   const callWorkerForTotalTokenCount = useCallback(
-    (currentItemsForApi, currentApiKey, model) => {
+    (currentItemsForApi, currentApiKey, modelToUse) => {
       const currentVersion = ++tokenCountVersionRef.current;
       if (!currentApiKey || String(currentApiKey).trim() === "" || !currentItemsForApi || currentItemsForApi.length === 0) {
         if (tokenCountVersionRef.current === currentVersion) {
@@ -264,7 +176,7 @@ export default function App() {
       if (tokenCountVersionRef.current === currentVersion) setIsCountingApiTokens(true);
       else return;
 
-      countTokensWithGemini(currentApiKey, model, currentItemsForApi)
+      countTokensWithGemini(currentApiKey, modelToUse, currentItemsForApi)
         .then(count => {
           if (tokenCountVersionRef.current === currentVersion) setTotalApiTokenCount(count);
         })
@@ -283,9 +195,8 @@ export default function App() {
     if (!debouncedApiCallRef.current) {
       debouncedApiCallRef.current = debounce(callWorkerForTotalTokenCount, 500);
     }
-    const modelToUse = settings.model || GEMINI_MODEL_NAME;
-    debouncedApiCallRef.current(itemsForApiCount, settings.apiKey, modelToUse);
-  }, [itemsForApiCount, settings.apiKey, settings.model, callWorkerForTotalTokenCount]);
+    debouncedApiCallRef.current(itemsForApiCount, apiKey, model);
+  }, [itemsForApiCount, apiKey, model, callWorkerForTotalTokenCount]);
 
 
   const currentTotalPromptTokens = useMemo(() => {
@@ -310,46 +221,26 @@ export default function App() {
   const isSoftMemoryLimitReached = currentTotalPromptTokens >= USER_FACING_TOKEN_LIMIT;
   const isHardTokenLimitReached = currentTotalPromptTokens >= MAX_ABSOLUTE_TOKEN_LIMIT;
 
-  const chatListDisabled = useMemo(
-    () => isCreatingChat || isSwitchingChat || isLoadingMessageOps || isSessionBusy,
-    [isCreatingChat, isSwitchingChat, isLoadingMessageOps, isSessionBusy]
-  );
-
-  const globalBusy = useMemo(
-    () => isLoadingMessageOps || isSessionBusy || isSwitchingChat || isApiKeyLoading,
-    [isLoadingMessageOps, isSessionBusy, isSwitchingChat, isApiKeyLoading]
-  );
-
-  const navRailDisabled = useMemo(
-    () => isSessionBusy || isSwitchingChat || isApiKeyLoading,
-    [isSessionBusy, isSwitchingChat, isApiKeyLoading]
-  );
-
-  const chatAreaActionsDisabled = useMemo(
-    () => globalBusy,
-    [globalBusy]
-  );
-
   const sendButtonDisplayInfo = useMemo(() => {
-    if (globalBusy) {
+    if (isBusy) {
       if (isResendingMessage) return { text: 'Resending…', disabled: true };
       if (isSendingMessage) return { text: 'Sending…', disabled: true };
       if (isForking) return { text: 'Forking…', disabled: true };
       if (isCreatingChat) return { text: 'Creating Task…', disabled: true };
+      if (isApiKeyLoading) return { text: 'Loading Key...', disabled: true };
       return { text: 'Processing…', disabled: true };
     }
-    if (isApiKeyLoading) return { text: 'Loading Key...', disabled: true };
-    if (!settings.apiKey) return { text: 'Set API Key', disabled: false };
+    if (!apiKey) return { text: 'Set API Key', disabled: false };
     if (!currentChatId) return { text: 'Select Task', disabled: false };
     if (isHardTokenLimitReached) return { text: 'Memory Limit Exceeded', disabled: true };
     return { text: 'Send', disabled: false };
   }, [
-    globalBusy, isResendingMessage, isSendingMessage, isForking, isCreatingChat,
-    settings.apiKey, currentChatId, isHardTokenLimitReached, isApiKeyLoading,
+    isBusy, isResendingMessage, isSendingMessage, isForking, isCreatingChat,
+    apiKey, currentChatId, isHardTokenLimitReached, isApiKeyLoading,
   ]);
 
   useEffect(() => {
-    if (messages.length > 0 && currentChatId && !isSwitchingChat) {
+    if (messages.length > 0 && currentChatId) {
         const lastMessage = messages[messages.length - 1];
         if (lastMessage.role === 'assistant' || (lastMessage.role === 'user' && !editingId)) {
             const box = scrollContainerRef.current;
@@ -358,42 +249,33 @@ export default function App() {
             }
         }
     }
-  }, [messages, editingId, scrollToBottom, scrollContainerRef, currentChatId, isSwitchingChat]);
+  }, [messages, editingId, scrollToBottom, scrollContainerRef, currentChatId]);
 
   useEffect(() => {
-    let cleanupRaf, scrollRaf, transitionEndRaf;
     if (currentChatId !== previousChatIdRef.current) {
-      setHasLastSendFailed(false);
-      cleanupRaf = requestAnimationFrame(() => {
+      const cleanupRaf = requestAnimationFrame(() => {
         if (editingId) cancelEdit();
-        resetPrompt();
       });
-      if (currentChatId) {
-        scrollRaf = requestAnimationFrame(() => scrollToBottom('auto'));
-      }
-      if (isSwitchingChat) {
-        transitionEndRaf = requestAnimationFrame(() => setIsSwitchingChat(false));
-      }
+      const scrollRaf = requestAnimationFrame(() => {
+        if (currentChatId) scrollToBottom('auto');
+      });
+      
       previousChatIdRef.current = currentChatId;
+
+      return () => {
+        cancelAnimationFrame(cleanupRaf);
+        cancelAnimationFrame(scrollRaf);
+      };
     }
-    return () => {
-      if (cleanupRaf) cancelAnimationFrame(cleanupRaf);
-      if (scrollRaf) cancelAnimationFrame(scrollRaf);
-      if (transitionEndRaf) cancelAnimationFrame(transitionEndRaf);
-    };
-  }, [currentChatId, isSwitchingChat, editingId, cancelEdit, scrollToBottom, setHasLastSendFailed, resetPrompt]);
+  }, [currentChatId, editingId, cancelEdit, scrollToBottom]);
 
 
   function handleSend() {
-    if (globalBusy) { Toast("An operation is already in progress.", 3000); return; }
+    if (isBusy) { Toast("An operation is already in progress.", 3000); return; }
     if (isHardTokenLimitReached) { Toast(`Memory limit exceeded (max ${MAX_ABSOLUTE_TOKEN_LIMIT.toLocaleString()}).`, 8000); return; }
     if (!currentChatId) { Toast('Please select or create a task first.', 3000); return; }
     
-    if (!settings.apiKey || String(settings.apiKey).trim() === '') {
-      if (isApiKeyLoading) {
-        Toast('API Key is still loading. Please wait.', 3000);
-        return;
-      }
+    if (!apiKey || String(apiKey).trim() === '') {
       Toast('Gemini API Key missing. Please set it in settings.', 5000);
       setDisplaySettings((s) => ({ ...s, showSettings: true }));
       return;
@@ -417,7 +299,7 @@ export default function App() {
     }
     if (userMessageContentBlocks.length === 0) { Toast('Cannot send an empty message.', 3000); return; }
 
-    sendMessage({ userMessageContentBlocks, existingMessages: messages, apiKey: settings.apiKey });
+    sendMessage({ userMessageContentBlocks, existingMessages: messages, apiKey: apiKey });
     resetPrompt();
   }
 
@@ -425,33 +307,10 @@ export default function App() {
     const txt = messages.map((m) => { const blocks = Array.isArray(m.content) ? m.content : [{ type: 'text', text: String(m.content ?? '') }]; return blocks.filter((b) => b.type === 'text').map((b) => b.text).join('\n'); }).join('\n\n');
     navigator.clipboard.writeText(txt).then(() => Toast('Copied all text!', 2000)).catch(() => Toast('Copy failed.', 4000));
   };
-  
-  const handleUpdateChatTitleTrigger = useCallback(async (id, title) => {
-    if (globalBusy) {
-      Toast("Cannot update title while an operation is in progress.", 3000);
-      return Promise.reject(new Error("Operation in progress"));
-    }
-    if (!id) {
-      console.error('handleUpdateChatTitleTrigger called with undefined id');
-      Toast('Error: Could not update title.', 4000);
-      return Promise.reject(new Error("Invalid ID"));
-    }
-    return updateChatTitle({ id, title });
-  }, [updateChatTitle, globalBusy]);
-
-  const handleNewChatTrigger = useCallback(() => { if (globalBusy) { Toast("Cannot create new task while an operation is in progress.", 3000); return; } createChat(); }, [createChat, globalBusy]);
-  const handleDeleteChatTrigger = useCallback((chatId) => { if (globalBusy) { Toast("Cannot delete task while an operation is in progress.", 3000); return; } deleteChat(chatId); }, [deleteChat, globalBusy]);
 
   return (
     <div className="app-container" ref={appContainerRef}>
-      <ChatList
-        currentChatId={currentChatId}
-        onSelectChat={handleSelectChat}
-        onNewChatTrigger={handleNewChatTrigger}
-        onDeleteChatTrigger={handleDeleteChatTrigger}
-        onUpdateChatTitleTrigger={handleUpdateChatTitleTrigger}
-        appDisabled={chatListDisabled}
-      />
+      <ChatList appDisabled={isBusy} />
       <div className="main-content">
         <div className="top-bar">
           {collapsed && (
@@ -466,7 +325,7 @@ export default function App() {
           <div 
             className={`top-bar-loading-indicator ${isAwaitingApiResponse ? 'active' : ''}`} 
           />
-          <button className="button" onClick={() => setDisplaySettings((s) => ({ ...s, showSettings: !s.showSettings }))} disabled={globalBusy} >
+          <button className="button" onClick={() => setDisplaySettings((s) => ({ ...s, showSettings: !s.showSettings }))} disabled={isBusy} >
             {displaySettings.showSettings ? 'Close Settings' : 'Open Settings'}
           </button>
           <span style={{ margin: '0 1em', fontWeight: 'bold' }}>
@@ -501,7 +360,7 @@ export default function App() {
               {USER_FACING_TOKEN_LIMIT.toLocaleString()}
               {isHardTokenLimitReached && ( <span style={{ marginLeft: 4 }}> {' '} (Max&nbsp; {MAX_ABSOLUTE_TOKEN_LIMIT.toLocaleString()}) </span> )}
             </div>
-            <button className="button" onClick={handleCopyAll} disabled={ !messages || messages.length === 0 || globalBusy } >
+            <button className="button" onClick={handleCopyAll} disabled={!messages || messages.length === 0} >
               Copy All Text
             </button>
           </div>
@@ -523,26 +382,21 @@ export default function App() {
             </div>
             <div className="form-group">
               <label htmlFor="modelInputApp">Model:</label>
-              <input id="modelInputApp" className="form-input" value={settings.model} readOnly />
+              <input id="modelInputApp" className="form-input" value={model} readOnly />
             </div>
           </div>
         )}
 
         <div className="content-container">
-          <div className="chat-container" style={{ flexBasis: leftPaneWidth }}>
+          <div className="chat-container" style={{ flexBasis: 'var(--left-pane-width, 50%)' }}>
             <div className="chat-messages-scroll-area" ref={scrollContainerRef}>
               {currentChatId ? (
-                <ChatArea
-                  key={currentChatId} messages={messages} isLoading={isLoadingMessages} forceLoading={isSwitchingChat}
-                  editingId={editingId} editText={editText} loadingSend={isAwaitingApiResponse} savingEdit={isForking}
-                  setEditText={setEditText} handleSaveEdit={() => saveEdit(settings.apiKey)} handleCancelEdit={cancelEdit} handleStartEdit={startEdit}
-                  handleResendMessage={(messageId) => resendMessage(messageId, settings.apiKey)} handleDeleteMessage={deleteMessage} actionsDisabled={chatAreaActionsDisabled}
-                />
+                <ChatArea key={currentChatId} actionsDisabled={isBusy} />
               ) : ( <div className="chat-empty-placeholder"> Select or create a task to begin. </div> )}
             </div>
             <div className="chat-nav-rail">
-              <button className="button icon-button" onClick={scrollToPrev} title="Scroll Up" disabled={navRailDisabled} > ↑ </button>
-              <button className="button icon-button" onClick={scrollToNext} title="Scroll Down" disabled={navRailDisabled} > ↓ </button>
+              <button className="button icon-button" onClick={scrollToPrev} title="Scroll Up" disabled={isSessionBusy || isLoadingMessages} > ↑ </button>
+              <button className="button icon-button" onClick={scrollToNext} title="Scroll Down" disabled={isSessionBusy || isLoadingMessages} > ↓ </button>
             </div>
           </div>
           <div className="resizable-handle" onMouseDown={handleMouseDown} />
@@ -553,7 +407,7 @@ export default function App() {
               handleSend={handleSend} showToast={Toast}
               imagePreviews={pendingImages} pdfPreviews={pendingPDFs}
               onRemoveImage={removePendingImage} onAddImage={addPendingImage} onAddPDF={addPendingPDF}
-              settings={settings}
+              settings={{ apiKey, model }}
               hasLastSendFailed={hasLastSendFailed}
               importedCodeFiles={stagedCodeFiles}
               onCodeFilesChange={setStagedCodeFiles}
@@ -565,5 +419,13 @@ export default function App() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <ChatProvider>
+      <MainLayout />
+    </ChatProvider>
   );
 }

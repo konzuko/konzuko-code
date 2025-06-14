@@ -1,24 +1,22 @@
 // file: src/ChatList.jsx
 import { useMemo, useCallback, useRef, useEffect } from 'preact/hooks';
-import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery } from '@tanstack/react-query';
 import { fetchChats, GEMINI_MODEL_NAME } from './api.js';
 import ChatPaneLayout from './ChatPaneLayout.jsx';
 import { useSettings } from './contexts/SettingsContext.jsx';
+import { useChat } from './contexts/ChatContext.jsx';
 
-/**  Chat list (sidebar) */
-function ChatList({
-  currentChatId,
-  onSelectChat,
-  onNewChatTrigger,
-  onDeleteChatTrigger,
-  onUpdateChatTitleTrigger,
-  appDisabled,
-}) {
-  const queryClient = useQueryClient();
+export default function ChatList({ appDisabled }) {
   const { collapsed, handleToggleCollapse } = useSettings();
+  const { 
+    currentChatId, 
+    setCurrentChatId, 
+    createChat, 
+    deleteChat, 
+    updateChatTitle 
+  } = useChat();
   const initialLogicRan = useRef(false);
 
-  /* ─────────────── query all chats ─────────────── */
   const {
     data,
     fetchNextPage,
@@ -33,24 +31,22 @@ function ChatList({
     queryFn: ({ pageParam = 1 }) => fetchChats({ pageParam }),
     getNextPageParam: (lastPage) => lastPage.nextCursor,
     initialPageParam: 1,
-    staleTime: 1000 * 60 * 30, // 30 minutes
+    staleTime: 1000 * 60 * 30,
   });
 
-  /* ─────────────── initial selection logic ─────────────── */
   useEffect(() => {
     if (isSuccess && !initialLogicRan.current && data) {
       const allChatsFlat = data.pages.flatMap(p => p.chats || []);
       if (allChatsFlat.length === 0) {
-        onNewChatTrigger({ title: 'First Task', model: GEMINI_MODEL_NAME });
+        createChat({ title: 'First Task', model: GEMINI_MODEL_NAME });
       } else {
         const valid = allChatsFlat.some(c => String(c.id) === String(currentChatId));
-        if (!valid) onSelectChat(allChatsFlat[0].id);
+        if (!valid) setCurrentChatId(allChatsFlat[0].id);
       }
       initialLogicRan.current = true;
     }
-  }, [isSuccess, data, currentChatId, onSelectChat, onNewChatTrigger]);
+  }, [isSuccess, data, currentChatId, createChat, setCurrentChatId]);
 
-  /* ─────────────── flatten & pre-format ─────────────── */
   const allChats = useMemo(() => {
     if (!data) return [];
     const dOpt = { day: 'numeric', month: 'short' };
@@ -71,12 +67,10 @@ function ChatList({
     );
   }, [data]);
 
-  /* ─────────────── infinite scroll handler ─────────────── */
   const handleLoadMore = useCallback(() => {
     if (hasNextPage && !isFetchingNextPage) fetchNextPage();
   }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
-  /* ─────────────── render states ─────────────── */
   if (status === 'pending') {
     return (
       <div className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
@@ -96,7 +90,6 @@ function ChatList({
     );
   }
 
-  /* ─────────────── main sidebar ─────────────── */
   return (
     <div className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
       {!collapsed && (
@@ -111,7 +104,7 @@ function ChatList({
           <button
             className="button new-chat-button"
             disabled={appDisabled}
-            onClick={onNewChatTrigger}
+            onClick={() => createChat()}
           >
             New Task
           </button>
@@ -121,9 +114,9 @@ function ChatList({
       <ChatPaneLayout
         chats={allChats}
         currentChatId={currentChatId}
-        onSelectChat={onSelectChat}
-        onTitleUpdate={onUpdateChatTitleTrigger}
-        onDeleteChat={onDeleteChatTrigger}
+        onSelectChat={setCurrentChatId}
+        onTitleUpdate={updateChatTitle}
+        onDeleteChat={deleteChat}
         disabled={appDisabled || isFetching}
         hasMoreChatsToFetch={hasNextPage}
         onLoadMoreChats={handleLoadMore}
@@ -132,5 +125,3 @@ function ChatList({
     </div>
   );
 }
-
-export default ChatList;

@@ -1,6 +1,4 @@
 // file: src/hooks/useMessageManager.js
-/* src/hooks/useMessageManager.js */
-// src/hooks/useMessageManager.js
 import { useState, useCallback } from 'preact/hooks';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
@@ -20,94 +18,67 @@ export function useMessageManager(currentChatId, setHasLastSendFailed) {
   const [editingId, setEditingId] = useState(null);
   const [editText, setEditText] = useState('');
 
-  const { data: messagesData, isLoading: isLoadingMessages } = useQuery({
+  const { data: messages = [], isLoading: isLoadingMessages } = useQuery({
     queryKey: ['messages', currentChatId],
     queryFn: () => fetchMessages(currentChatId),
     enabled: !!currentChatId,
-    staleTime: Infinity,
-    refetchOnMount: true,
-    refetchOnWindowFocus: false,
-    refetchOnReconnect: false,
+    staleTime: 1000 * 60 * 5, // Keep messages fresh for 5 minutes
   });
-  const messages = messagesData || [];
+
+  const invalidateMessages = () => {
+    queryClient.invalidateQueries({ queryKey: ['messages', currentChatId] });
+  };
 
   const sendMessageMutation = useMutation({
     mutationFn: async (payload) => {
       const { userMessageContentBlocks, existingMessages, apiKey } = payload;
+      
+      // Create the user message first
       const userRow = await createMessage({
         chat_id: currentChatId,
         role: 'user',
         content: userMessageContentBlocks,
       });
-      queryClient.setQueryData(['messages', currentChatId], (oldMessages = []) => [...oldMessages, userRow]);
 
+      // Immediately invalidate to show the user's message
+      invalidateMessages();
+
+      // Then, call the AI and create the assistant message
       const messagesForApi = [...existingMessages, userRow];
       const { content: assistantContent } = await callApiForText({
         apiKey: apiKey,
         messages: messagesForApi,
       });
 
-      const assistantRow = await createMessage({
+      await createMessage({
         chat_id: currentChatId,
         role: 'assistant',
         content: [{ type: 'text', text: assistantContent }],
       });
-      return {
-        userRow,
-        assistantRow,
-      };
     },
-    onMutate: async () => {
-      setHasLastSendFailed?.(false);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['messages', currentChatId] });
-    },
+    onMutate: () => setHasLastSendFailed?.(false),
+    onSuccess: invalidateMessages,
     onError: (error) => {
       Toast(`Error sending message: ${error.message}`, 8000);
-      queryClient.invalidateQueries({ queryKey: ['messages', currentChatId] });
+      invalidateMessages();
       setHasLastSendFailed?.(true);
     },
   });
 
-  const undoEditMutation = useMutation({
-    mutationFn: performUndoFork,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['messages', currentChatId] });
-      Toast('Fork undone.', 3000);
-    },
-    onError: (error) => {
-      Toast(`Failed to undo fork: ${error.message}`, 5000);
-      queryClient.invalidateQueries({ queryKey: ['messages', currentChatId] });
-    }
-  });
-
   const updateMessageMutation = useMutation({
     mutationFn: ({ messageId, newContentArray }) => updateMessage(messageId, newContentArray),
-    onMutate: async ({ messageId, newContentArray }) => {
-        await queryClient.cancelQueries({ queryKey: ['messages', currentChatId] });
-        const previousMessages = queryClient.getQueryData(['messages', currentChatId]);
-        queryClient.setQueryData(['messages', currentChatId], (old = []) =>
-            old.map(m => m.id === messageId ? { ...m, content: newContentArray, updated_at: new Date().toISOString() } : m)
-        );
-        return { previousMessages };
-    },
     onSuccess: () => {
-        queryClient.invalidateQueries({ queryKey: ['messages', currentChatId] });
-        setEditingId(null);
-        setEditText('');
-        Toast('Message updated.', 3000);
+      invalidateMessages();
+      setEditingId(null);
+      setEditText('');
+      Toast('Message updated.', 3000);
     },
-    onError: (err, variables, context) => {
-        if (context?.previousMessages) {
-            queryClient.setQueryData(['messages', currentChatId], context.previousMessages);
-        }
-        Toast(`Failed to update message: ${err.message}`, 5000);
-    },
+    onError: (err) => Toast(`Failed to update message: ${err.message}`, 5000),
   });
 
   const forkConversationMutation = useMutation({
-    mutationFn: async ({ messageId, newContentArray, originalMessages, apiKey }) => {
+    mutationFn: async ({ messageId, newContentArray, apiKey }) => {
+      const originalMessages = queryClient.getQueryData(['messages', currentChatId]) || [];
       const editedMessage = await updateMessage(messageId, newContentArray);
       await archiveMessagesAfter(currentChatId, editedMessage.created_at);
 
@@ -115,95 +86,51 @@ export function useMessageManager(currentChatId, setHasLastSendFailed) {
       if (editedMsgIndex === -1) throw new Error("Edited message not found for API call.");
       const messagesForApi = [...originalMessages.slice(0, editedMsgIndex), editedMessage];
 
-      const { content: assistantContent } = await callApiForText({
-        apiKey: apiKey,
-        messages: messagesForApi,
-      });
+      const { content: assistantContent } = await callApiForText({ apiKey, messages: messagesForApi });
       await createMessage({
         chat_id: currentChatId,
         role: 'assistant',
         content: [{ type: 'text', text: assistantContent }],
       });
-      return { editedMessageId: messageId };
     },
-    onMutate: async ({ messageId, newContentArray }) => {
-      setHasLastSendFailed?.(false);
-      const queryKey = ['messages', currentChatId];
-      await queryClient.cancelQueries({ queryKey });
-      const previousMessages = queryClient.getQueryData(queryKey);
-
-      const originalMessage = previousMessages.find(m => m.id === messageId);
-
-      queryClient.setQueryData(queryKey, (oldMessages = []) => {
-        const originalEditedMessageIndex = oldMessages.findIndex(m => m.id === messageId);
-        
-        if (originalEditedMessageIndex === -1) {
-            console.error("Optimistic update failed: message to edit not found.");
-            return oldMessages;
-        }
-
-        const optimisticallyUpdatedMessage = {
-          ...oldMessages[originalEditedMessageIndex],
-          content: newContentArray,
-          updated_at: new Date().toISOString(),
-        };
-        
-        return oldMessages.slice(0, originalEditedMessageIndex).concat(optimisticallyUpdatedMessage);
-      });
-      return { previousMessages, originalMessage };
-    },
-    onSuccess: (data, variables, context) => {
-      queryClient.invalidateQueries({ queryKey: ['messages', currentChatId] });
+    onSuccess: () => {
+      invalidateMessages();
       setEditingId(null);
       setEditText('');
-      Toast('Fork successful. All subsequent messages removed.', 15000, () => {
-        queryClient.setQueryData(['messages', currentChatId], context.previousMessages);
-        undoEditMutation.mutate({
-          messageId: context.originalMessage.id,
-          originalContent: context.originalMessage.content,
-          chatId: currentChatId,
-          anchorCreatedAt: context.originalMessage.created_at,
-        });
-      });
+      Toast('Fork successful. All subsequent messages removed.', 3000);
     },
-    onError: (error, variables, context) => {
-      if (context?.previousMessages) {
-        queryClient.setQueryData(['messages', currentChatId], context.previousMessages);
-      }
+    onError: (error) => {
       Toast('Failed to fork: ' + error.message, 5000);
-      queryClient.invalidateQueries({ queryKey: ['messages', currentChatId] });
+      invalidateMessages();
       setHasLastSendFailed?.(true);
     },
   });
 
   const resendMessageMutation = useMutation({
-    mutationFn: async ({ messageId, originalMessages, apiKey }) => {
+    mutationFn: async ({ messageId, apiKey }) => {
+      const originalMessages = queryClient.getQueryData(['messages', currentChatId]) || [];
       const anchorMessage = originalMessages.find(m => m.id === messageId);
       if (!anchorMessage) throw new Error("Anchor message for resend not found.");
-      const anchorMsgIndex = originalMessages.findIndex(m => m.id === messageId);
+      
       await archiveMessagesAfter(currentChatId, anchorMessage.created_at);
+      const anchorMsgIndex = originalMessages.findIndex(m => m.id === messageId);
       const messagesForApi = originalMessages.slice(0, anchorMsgIndex + 1);
-      const { content: assistantContent } = await callApiForText({
-        apiKey: apiKey,
-        messages: messagesForApi,
-      });
+      
+      const { content: assistantContent } = await callApiForText({ apiKey, messages: messagesForApi });
       await createMessage({
         chat_id: currentChatId,
         role: 'assistant',
         content: [{ type: 'text', text: assistantContent }],
       });
-      return { resentMessageId: messageId };
     },
-    onMutate: async () => {
-        setHasLastSendFailed?.(false);
-    },
+    onMutate: () => setHasLastSendFailed?.(false),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['messages', currentChatId] });
+      invalidateMessages();
       Toast('Message resent and conversation continued.', 3000);
     },
     onError: (error) => {
       Toast('Failed to resend message: ' + error.message, 5000);
-      queryClient.invalidateQueries({ queryKey: ['messages', currentChatId] });
+      invalidateMessages();
       setHasLastSendFailed?.(true);
     },
   });
@@ -211,35 +138,19 @@ export function useMessageManager(currentChatId, setHasLastSendFailed) {
   const undoDeleteMessageMutation = useMutation({
     mutationFn: (messageId) => undoDeleteMessage(messageId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['messages', currentChatId] });
+      invalidateMessages();
       Toast('Message restored.', 2000);
     },
-    onError: (error) => {
-      Toast('Failed to undo message delete: ' + error.message, 5000);
-    },
+    onError: (error) => Toast('Failed to undo message delete: ' + error.message, 5000),
   });
 
   const deleteMessageMutation = useMutation({
     mutationFn: (messageId) => deleteMessage(messageId),
-    onMutate: async (messageId) => {
-      await queryClient.cancelQueries({ queryKey: ['messages', currentChatId] });
-      const previousMessages = queryClient.getQueryData(['messages', currentChatId]);
-      queryClient.setQueryData(['messages', currentChatId], (oldMessages = []) =>
-        oldMessages.filter(msg => msg.id !== messageId)
-      );
-      return { previousMessages, messageId };
-    },
     onSuccess: (data, messageId) => {
-      Toast('Message deleted.', 15000, () => {
-        undoDeleteMessageMutation.mutate(messageId);
-      });
+      invalidateMessages();
+      Toast('Message deleted.', 15000, () => undoDeleteMessageMutation.mutate(messageId));
     },
-    onError: (err, messageId, context) => {
-      if (context?.previousMessages) {
-        queryClient.setQueryData(['messages', currentChatId], context.previousMessages);
-      }
-      Toast('Failed to delete message: ' + err.message, 5000);
-    },
+    onError: (err) => Toast('Failed to delete message: ' + err.message, 5000),
   });
 
   const handleStartEdit = useCallback((msg) => {
@@ -258,56 +169,33 @@ export function useMessageManager(currentChatId, setHasLastSendFailed) {
   const handleSaveEdit = useCallback((apiKey) => {
     if (!editingId || !currentChatId) return;
     if (forkConversationMutation.isPending || updateMessageMutation.isPending) return;
+    if (!apiKey) { Toast("API Key not set.", 4000); return; }
 
-    if (!apiKey || String(apiKey).trim() === "") {
-      Toast("API Key not set. Cannot save edit.", 4000); return;
-    }
     const originalMessage = messages.find(m => m.id === editingId);
-    if (!originalMessage) {
-      Toast("Original message not found for editing.", 4000);
-      handleCancelEdit();
-      return;
-    }
+    if (!originalMessage) { Toast("Original message not found.", 4000); handleCancelEdit(); return; }
 
-    let newContentArray = [];
-    if (Array.isArray(originalMessage.content)) {
-      newContentArray = originalMessage.content.map(block =>
-        block.type === 'text' ? { ...block, text: editText.trim() } : block
-      );
-      if (!newContentArray.some(b => b.type === 'text') && editText.trim() !== "") {
-        newContentArray.push({ type: 'text', text: editText.trim() });
-      }
-    } else {
+    let newContentArray = Array.isArray(originalMessage.content)
+      ? originalMessage.content.map(b => b.type === 'text' ? { ...b, text: editText.trim() } : b)
+      : [{ type: 'text', text: editText.trim() }];
+    if (!newContentArray.some(b => b.type === 'text') && editText.trim()) {
       newContentArray.push({ type: 'text', text: editText.trim() });
     }
-    newContentArray = newContentArray.filter(block => block.type !== 'text' || (block.text && block.text.trim() !== ""));
-    if (newContentArray.length === 0) {
-      Toast("Cannot save an empty message.", 3000); return;
-    }
+    newContentArray = newContentArray.filter(b => b.type !== 'text' || b.text.trim());
+    if (newContentArray.length === 0) { Toast("Cannot save an empty message.", 3000); return; }
 
     const isLastMessage = messages.length > 0 && messages[messages.length - 1].id === editingId;
-
     if (isLastMessage) {
-      // It's a simple edit, not a fork.
       updateMessageMutation.mutate({ messageId: editingId, newContentArray });
     } else {
-      // It's a fork.
-      forkConversationMutation.mutate({
-        messageId: editingId,
-        newContentArray: newContentArray,
-        originalMessages: messages,
-        apiKey: apiKey,
-      });
+      forkConversationMutation.mutate({ messageId: editingId, newContentArray, apiKey });
     }
   }, [editingId, editText, currentChatId, messages, forkConversationMutation, updateMessageMutation, handleCancelEdit]);
 
   const handleResendMessage = useCallback((messageId, apiKey) => {
     if (!currentChatId || resendMessageMutation.isPending) return;
-    if (!apiKey || String(apiKey).trim() === "") {
-      Toast("API Key not set. Cannot resend.", 4000); return;
-    }
-    resendMessageMutation.mutate({ messageId, originalMessages: messages, apiKey: apiKey });
-  }, [currentChatId, messages, resendMessageMutation]);
+    if (!apiKey) { Toast("API Key not set.", 4000); return; }
+    resendMessageMutation.mutate({ messageId, apiKey });
+  }, [currentChatId, resendMessageMutation]);
 
   const handleDeleteMessage = useCallback((messageId) => {
     if (deleteMessageMutation.isPending || !currentChatId) return;
@@ -315,7 +203,6 @@ export function useMessageManager(currentChatId, setHasLastSendFailed) {
       deleteMessageMutation.mutate(messageId);
     }
   }, [deleteMessageMutation, currentChatId]);
-
 
   const isLoadingOps = sendMessageMutation.isPending ||
                        forkConversationMutation.isPending ||

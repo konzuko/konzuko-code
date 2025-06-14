@@ -1,6 +1,4 @@
 // file: src/main.jsx
-// src/main.jsx
-// Ensure gcTime (TQv5) or cacheTime (TQv4) is set appropriately in QueryClient defaultOptions
 import { render } from 'preact';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
@@ -16,29 +14,30 @@ import './styles.css';
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 1000 * 60 * 1, // Default stale time: 1 minute for most queries
-      gcTime: 1000 * 60 * 5, // 5 minutes. Data is persisted to IndexedDB, so long in-memory cache is unnecessary and causes memory bloat.
-      refetchOnWindowFocus: false, // Personal preference, often set to false to reduce fetches
-      refetchOnMount: true, // Refetch if stale on mount
+      staleTime: 1000 * 60 * 1,
+      gcTime: 1000 * 60 * 5,
+      refetchOnWindowFocus: false,
+      refetchOnMount: true,
       retry: 1, 
     },
   },
 });
 
-const idbPersister = createIDBPersister('konzukoAppTQCache-v1'); // Use a consistent key
+const idbPersister = createIDBPersister('konzukoAppTQCache-v1');
 
 persistQueryClient({
   queryClient,
   persister: idbPersister,
-  maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days: Data older than this in IndexedDB won't be restored.
-  // buster: 'app-v1.0.1', // Increment to bust cache on new app versions if needed
+  maxAge: 1000 * 60 * 60 * 24 * 7,
 });
 
 render(
   <QueryClientProvider client={queryClient}>
     <ErrorBoundary>
       <SettingsProvider>
-        <AuthGate><App /></AuthGate>
+        <AuthGate>
+          <App />
+        </AuthGate>
       </SettingsProvider>
     </ErrorBoundary>
     {import.meta.env.DEV && <ReactQueryDevtools initialIsOpen={false} />}

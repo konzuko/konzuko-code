@@ -1,9 +1,8 @@
-/* src/hooks/useChatSessionManager.js */
-// src/hooks/useChatSessionManager.js
+// file: src/hooks/useChatSessionManager.js
 import { useState, useCallback, useEffect } from 'preact/hooks';
 import { useQueryClient, useMutation } from '@tanstack/react-query';
 import {
-  createChat,
+  createChat as apiCreateChat,
   updateChatTitle as apiUpdateChatTitle,
   deleteChat as apiDeleteChat,
   undoDeleteChat,
@@ -36,101 +35,58 @@ export function useChatSessionManager() {
     }
   }, [currentChatId]);
 
+  const invalidateChats = () => queryClient.invalidateQueries({ queryKey: ['chats'] });
+
   const createChatMutation = useMutation({
-    mutationKey: ['createChat'],
-    mutationFn: (newChatData) => createChat(newChatData),
+    mutationFn: (newChatData) => apiCreateChat(newChatData),
     onSuccess: (newlyCreatedChat) => {
-      queryClient.invalidateQueries({ queryKey: ['chats'] });
-      if (newlyCreatedChat && newlyCreatedChat.id) {
+      invalidateChats();
+      if (newlyCreatedChat?.id) {
         setCurrentChatId(newlyCreatedChat.id);
       }
       Toast('New task created!', 2000);
     },
-    onError: (error) => {
-      Toast('Failed to create task: ' + error.message, 5000);
-    },
+    onError: (error) => Toast('Failed to create task: ' + error.message, 5000),
   });
 
   const undoDeleteChatMutation = useMutation({
     mutationFn: (chatId) => undoDeleteChat(chatId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['chats'] });
+      invalidateChats();
       Toast('Task restored.', 2000);
     },
-    onError: (error) => {
-      Toast('Failed to restore task: ' + error.message, 5000);
-    },
+    onError: (error) => Toast('Failed to restore task: ' + error.message, 5000),
   });
 
-  const internalDeleteChatMutation = useMutation({
+  const deleteChatMutation = useMutation({
     mutationFn: (chatId) => apiDeleteChat(chatId),
-    onMutate: async (chatId) => {
-      await queryClient.cancelQueries({ queryKey: ['chats'] });
-      const previousChatsData = queryClient.getQueryData(['chats']);
-      queryClient.setQueryData(['chats'], (oldInfiniteData) => {
-        if (!oldInfiniteData) return oldInfiniteData;
-        const newPages = oldInfiniteData.pages.map(page => ({
-          ...page,
-          chats: page.chats.filter(chat => chat.id !== chatId),
-        }));
-        return { ...oldInfiniteData, pages: newPages };
-      });
-      return { previousChatsData, chatId };
-    },
     onSuccess: (data, chatId) => {
       if (currentChatId === chatId) {
         setCurrentChatId(null);
       }
-      Toast('Task deleted.', 15000, () => {
-        undoDeleteChatMutation.mutate(chatId);
-      });
+      Toast('Task deleted.', 15000, () => undoDeleteChatMutation.mutate(chatId));
     },
-    onSettled: () => {
-      const chatsData = queryClient.getQueryData(['chats']);
-      const totalChats = chatsData?.pages?.reduce((acc, page) => acc + (page.chats?.length || 0), 0) ?? 0;
-      
-      if (totalChats === 0 && !createChatMutation.isPending) {
-        createChatMutation.mutate({ title: 'First Task', model: GEMINI_MODEL_NAME });
-      }
+    onSettled: async (data, error) => {
+      await queryClient.invalidateQueries({ queryKey: ['chats'] });
 
-      queryClient.invalidateQueries({ queryKey: ['chats'] });
-    },
-    onError: (err, chatId, context) => {
-      if (context?.previousChatsData) {
-        queryClient.setQueryData(['chats'], context.previousChatsData);
+      if (!error) {
+        const chatsData = queryClient.getQueryData(['chats']);
+        const totalChats = chatsData?.pages?.reduce((acc, page) => acc + (page.chats?.length || 0), 0) ?? 0;
+        
+        if (totalChats === 0 && !createChatMutation.isPending) {
+          createChatMutation.mutate({ title: 'First Task', model: GEMINI_MODEL_NAME });
+        }
       }
+    },
+    onError: (err) => {
       Toast('Failed to delete task: ' + err.message, 5000);
     },
   });
 
   const updateChatTitleMutation = useMutation({
     mutationFn: ({ id, title }) => apiUpdateChatTitle(id, title),
-    onMutate: async ({ id, title }) => {
-      await queryClient.cancelQueries({ queryKey: ['chats'] });
-      const previousChatsData = queryClient.getQueryData(['chats']);
-      queryClient.setQueryData(['chats'], (oldInfiniteData) => {
-        if (!oldInfiniteData) return oldInfiniteData;
-        return {
-          ...oldInfiniteData,
-          pages: oldInfiniteData.pages.map(page => ({
-            ...page,
-            chats: page.chats.map(chat =>
-              chat.id === id ? { ...chat, title: title, updated_at: new Date().toISOString() } : chat
-            ),
-          })),
-        };
-      });
-      return { previousChatsData };
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['chats'] });
-    },
-    onError: (err, variables, context) => {
-      if (context?.previousChatsData) {
-        queryClient.setQueryData(['chats'], context.previousChatsData);
-      }
-      Toast('Failed to update title: ' + err.message, 5000);
-    },
+    onSuccess: invalidateChats,
+    onError: (err) => Toast('Failed to update title: ' + err.message, 5000),
   });
 
   const handleCreateChat = useCallback((data = {}) => {
@@ -139,15 +95,16 @@ export function useChatSessionManager() {
   }, [createChatMutation]);
 
   const handleDeleteChat = useCallback((chatId) => {
-    if (internalDeleteChatMutation.isPending || undoDeleteChatMutation.isPending) return;
+    if (deleteChatMutation.isPending || undoDeleteChatMutation.isPending) return;
     if (window.confirm('Are you sure you want to delete this task? This action can be undone from the notification.')) {
-      internalDeleteChatMutation.mutate(chatId);
+      deleteChatMutation.mutate(chatId);
     }
-  }, [internalDeleteChatMutation, undoDeleteChatMutation]);
+  }, [deleteChatMutation, undoDeleteChatMutation]);
 
   const isSessionBusy = createChatMutation.isPending ||
-                        internalDeleteChatMutation.isPending ||
-                        undoDeleteChatMutation.isPending;
+                        deleteChatMutation.isPending ||
+                        undoDeleteChatMutation.isPending ||
+                        updateChatTitleMutation.isPending;
 
   return {
     currentChatId,
@@ -155,10 +112,7 @@ export function useChatSessionManager() {
     createChat: handleCreateChat,
     deleteChat: handleDeleteChat,
     updateChatTitle: updateChatTitleMutation.mutateAsync,
-    undoDeleteChat: undoDeleteChatMutation.mutate,
     isSessionBusy,
     isCreatingChat: createChatMutation.isPending,
-    isDeletingChat: internalDeleteChatMutation.isPending,
-    isUpdatingTitle: updateChatTitleMutation.isPending,
   };
 }
