@@ -1,3 +1,4 @@
+// file: src/App.jsx
 /* src/App.jsx */
 // src/App.jsx
 import {
@@ -17,7 +18,8 @@ import { GEMINI_MODEL_NAME } from './api.js';
 import {
     IMAGE_TOKEN_ESTIMATE,
     USER_FACING_TOKEN_LIMIT,
-    MAX_ABSOLUTE_TOKEN_LIMIT
+    MAX_ABSOLUTE_TOKEN_LIMIT,
+    LOCALSTORAGE_PANE_WIDTH_KEY
 } from './config.js';
 
 import { useDisplaySettings } from './hooks.js';
@@ -38,10 +40,33 @@ const debounce = (func, delay) => {
   };
 };
 
+const getInitialPaneWidth = () => {
+  try {
+    const storedWidth = localStorage.getItem(LOCALSTORAGE_PANE_WIDTH_KEY);
+    if (storedWidth) {
+      const percent = parseFloat(storedWidth);
+      if (percent >= 20 && percent <= 80) {
+        return `${percent}%`;
+      }
+    }
+  } catch (e) {
+    console.warn("Could not read pane width from localStorage", e);
+  }
+  return window.innerWidth <= 1600 ? '60%' : '50%';
+};
+
 export default function App() {
   const [displaySettings, setDisplaySettings] = useDisplaySettings();
   const [apiKey, setApiKey] = useState('');
   const [isApiKeyLoading, setIsApiKeyLoading] = useState(true);
+  const [collapsed, setCollapsed] = useState(false);
+  const handleToggleCollapse = useCallback(() => setCollapsed(c => !c), []);
+
+  const [leftPaneWidth, setLeftPaneWidth] = useState(getInitialPaneWidth);
+  const [isResizing, setIsResizing] = useState(false);
+  const appContainerRef = useRef(null);
+  const startXRef = useRef(0);
+  const startWidthRef = useRef(0);
 
   const settings = useMemo(() => ({
     ...displaySettings,
@@ -106,6 +131,54 @@ export default function App() {
     scrollToNext,
     scrollToBottom,
   } = useScrollNavigation();
+
+  const handleMouseDown = useCallback((e) => {
+    e.preventDefault();
+    startXRef.current = e.clientX;
+    startWidthRef.current = appContainerRef.current.querySelector('.chat-container').offsetWidth;
+    setIsResizing(true);
+  }, []);
+
+  useEffect(() => {
+    const handleMouseMove = (e) => {
+      requestAnimationFrame(() => {
+        const deltaX = e.clientX - startXRef.current;
+        const containerWidth = appContainerRef.current.offsetWidth;
+        let newWidth = startWidthRef.current + deltaX;
+
+        const minWidth = containerWidth * 0.20;
+        const maxWidth = containerWidth * 0.80;
+        newWidth = Math.max(minWidth, Math.min(newWidth, maxWidth));
+
+        const newWidthPercent = (newWidth / containerWidth) * 100;
+        setLeftPaneWidth(`${newWidthPercent}%`);
+      });
+    };
+
+    const handleMouseUp = () => {
+      setIsResizing(false);
+    };
+
+    if (isResizing) {
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+    } else {
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      try {
+        localStorage.setItem(LOCALSTORAGE_PANE_WIDTH_KEY, parseFloat(leftPaneWidth));
+      } catch (e) {
+        console.warn("Could not save pane width to localStorage", e);
+      }
+    }
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isResizing, leftPaneWidth]);
 
   useEffect(() => {
     const fetchApiKey = async () => {
@@ -380,7 +453,7 @@ export default function App() {
   const handleDeleteChatTrigger = useCallback((chatId) => { if (globalBusy) { Toast("Cannot delete task while an operation is in progress.", 3000); return; } deleteChat(chatId); }, [deleteChat, globalBusy]);
 
   return (
-    <div className="app-container">
+    <div className="app-container" ref={appContainerRef}>
       <ChatList
         currentChatId={currentChatId}
         onSelectChat={handleSelectChat}
@@ -388,9 +461,20 @@ export default function App() {
         onDeleteChatTrigger={handleDeleteChatTrigger}
         onUpdateChatTitleTrigger={handleUpdateChatTitleTrigger}
         appDisabled={chatListDisabled}
+        collapsed={collapsed}
+        onToggleCollapse={handleToggleCollapse}
       />
       <div className="main-content">
         <div className="top-bar">
+          {collapsed && (
+            <button
+              className="button icon-button sidebar-expand-toggle"
+              onClick={handleToggleCollapse}
+              title="Expand Sidebar"
+            >
+              {'»'}
+            </button>
+          )}
           <div 
             className={`top-bar-loading-indicator ${isAwaitingApiResponse ? 'active' : ''}`} 
           />
@@ -457,7 +541,7 @@ export default function App() {
         )}
 
         <div className="content-container">
-          <div className="chat-container">
+          <div className="chat-container" style={{ flexBasis: leftPaneWidth }}>
             <div className="chat-messages-scroll-area" ref={scrollContainerRef}>
               {currentChatId ? (
                 <ChatArea
@@ -473,7 +557,7 @@ export default function App() {
               <button className="button icon-button" onClick={scrollToNext} title="Scroll Down" disabled={navRailDisabled} > ↓ </button>
             </div>
           </div>
-
+          <div className="resizable-handle" onMouseDown={handleMouseDown} />
           <div className="prompt-builder-area">
             <PromptBuilder
               mode={mode} setMode={setMode} form={form} setForm={setForm}

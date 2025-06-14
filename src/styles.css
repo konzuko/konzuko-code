@@ -77,6 +77,15 @@ html, body {
   background-color: var(--accent-hover);
 }
 
+.sidebar-expand-toggle {
+  margin-right: var(--space-sm);
+  background-color: var(--accent);
+  color: white;
+}
+.sidebar-expand-toggle:hover {
+  background-color: var(--accent-hover);
+}
+
 .chat-list-scroll-area {
   flex-grow: 1;
   overflow-y: auto;
@@ -315,11 +324,36 @@ html, body {
 
 .chat-container {
   position: relative;
-  width: 50%;
+  flex-grow: 0;
+  flex-shrink: 0;
   display: flex;
   overflow: hidden;
-  border-right: 1px solid var(--border);
   background-color: var(--bg-primary);
+}
+
+.resizable-handle {
+  width: 8px;
+  flex-shrink: 0;
+  background-color: var(--bg-secondary);
+  cursor: col-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  transition: background-color 0.15s ease;
+}
+.resizable-handle:hover {
+  background-color: var(--accent);
+}
+.resizable-handle::after {
+  content: '..';
+  color: var(--text-secondary);
+  font-size: 1.5rem;
+  line-height: 0;
+  letter-spacing: -2px;
+  transform: rotate(90deg);
+  user-select: none;
 }
 
 .chat-messages-scroll-area {
@@ -357,7 +391,7 @@ html, body {
 }
 
 .prompt-builder-area {
-  width: 50%;
+  flex: 1;
   display: flex;
   flex-direction: column;
   overflow-y: auto;
@@ -945,7 +979,8 @@ html, body {
   }
   .chat-container,
   .prompt-builder-area {
-    width: 100%;
+    width: 100% !important; /* Override inline styles */
+    flex-basis: auto !important;
     height: auto;
     flex-grow: 1;
   }
@@ -956,6 +991,9 @@ html, body {
     min-height: 300px;
    }
 
+  .resizable-handle {
+    display: none;
+  }
 
   .chat-container {
     border-right: none;

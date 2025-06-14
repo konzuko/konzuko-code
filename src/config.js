@@ -1,3 +1,4 @@
+// file: src/config.js
 // Centralised tuning knobs & feature flags
 export const GEMINI_API_TIMEOUT_MS = 11 * 60 * 1_000;  // 11-minute hard timeout for Gemini API
 export const LOCALSTORAGE_DEBOUNCE = 300;              // ms before we persist
@@ -13,3 +14,4 @@ export const LOCALSTORAGE_FORM_KEY = 'konzuko-form-data';
 export const LOCALSTORAGE_SETTINGS_KEY = 'konzuko-display-settings';
 export const LOCALSTORAGE_MODE_KEY = 'konzuko-mode';
 export const LOCALSTORAGE_LAST_CHAT_ID_KEY = 'konzuko-lastChatId';
+export const LOCALSTORAGE_PANE_WIDTH_KEY = 'konzuko-pane-width';
