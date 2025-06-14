@@ -44,11 +44,12 @@ function buildFormSection(currentForm, currentMode) {
   if (currentMode === 'COMMIT') {
     return (
       '## MODE # COMMIT\n' +
-      'Identify the last commit done in this chat, then identify everything ' +
-      'accomplished since then. Generate a git-style commit message for ' +
-      'everything accomplished. If there was no previous commit, generate ' +
-      'a commit message based on everything accomplished since the beginning ' +
-      'of this chat. Be detailed and comprehensive'
+      'Identify if a commit has been made in this conversation yet or not. If ' +
+      'it hasn\'t. Generate a git-style commit message for everything ' +
+      'accomplished so far. If there is a prior commit, generate a commit ' +
+      'message based on everything accomplished since that prior commit. Be ' +
+      'HIGHLY DETAILED and COMPREHENSIVE to the extent an engineer not of ' +
+      'the project can understand.'
     );
   }
   if (currentMode === 'CODE CHECK') {
