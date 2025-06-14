@@ -1,3 +1,4 @@
+// file: src/ChatList.jsx
 /* src/ChatList.jsx */
 // src/ChatList.jsx
 import { useEffect, useCallback, useRef } from 'preact/hooks';
@@ -11,7 +12,9 @@ export default function ChatList({
   onNewChatTrigger,
   onDeleteChatTrigger,
   onUpdateChatTitleTrigger,
-  appDisabled
+  appDisabled,
+  collapsed,
+  onToggleCollapse,
 }) {
   const queryClient = useQueryClient();
   const initialLogicRan = useRef(false);
@@ -66,25 +69,48 @@ export default function ChatList({
   }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   if (status === 'pending') {
-    return <div style={{ padding: '1rem', textAlign: 'center', color: 'var(--text-secondary)' }}>Loading tasks...</div>;
+    return (
+      <div className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
+        <div style={{ padding: '1rem', textAlign: 'center', color: 'var(--text-secondary)' }}>Loading tasks...</div>
+      </div>
+    );
   }
 
   if (status === 'error') {
-    return <div style={{ padding: '1rem', color: 'var(--error)' }}>Error loading tasks: {chatsError.message}</div>;
+    return (
+      <div className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
+        <div style={{ padding: '1rem', color: 'var(--error)' }}>Error loading tasks: {chatsError.message}</div>
+      </div>
+    );
   }
 
   return (
-    <ChatPaneLayout
-      chats={allChats}
-      currentChatId={currentChatId}
-      onSelectChat={onSelectChat}
-      onNewChat={onNewChatTrigger}
-      onTitleUpdate={onUpdateChatTitleTrigger}
-      onDeleteChat={onDeleteChatTrigger}
-      disabled={appDisabled || isFetching} // Disable controls if any fetch is in progress
-      hasMoreChatsToFetch={hasNextPage}
-      onLoadMoreChats={handleLoadMore}
-      isLoadingMoreChats={isFetchingNextPage}
-    />
+    <div className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
+      {!collapsed && (
+        <div className="sidebar-header flex space-between align-center">
+          <button
+            className="button icon-button sidebar-collapse-toggle is-open"
+            onClick={onToggleCollapse}
+            title="Collapse Sidebar"
+          >
+            {'«'}
+          </button>
+          <button className="button new-chat-button" onClick={onNewChatTrigger} disabled={appDisabled}>
+            New Task
+          </button>
+        </div>
+      )}
+      <ChatPaneLayout
+        chats={allChats}
+        currentChatId={currentChatId}
+        onSelectChat={onSelectChat}
+        onTitleUpdate={onUpdateChatTitleTrigger}
+        onDeleteChat={onDeleteChatTrigger}
+        disabled={appDisabled || isFetching}
+        hasMoreChatsToFetch={hasNextPage}
+        onLoadMoreChats={handleLoadMore}
+        isLoadingMoreChats={isFetchingNextPage}
+      />
+    </div>
   );
 }

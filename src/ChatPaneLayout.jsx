@@ -1,3 +1,4 @@
+// file: src/ChatPaneLayout.jsx
 /* src/ChatPaneLayout.jsx */
 // src/ChatPaneLayout.jsx
 import { useState, useMemo, useEffect, useRef, useCallback } from 'preact/hooks';
@@ -155,15 +156,13 @@ export default function ChatPaneLayout({
   chats,
   currentChatId,
   onSelectChat,
-  onNewChat,
   onTitleUpdate,
   onDeleteChat,
   disabled = false,
   hasMoreChatsToFetch,
   onLoadMoreChats,
-  isLoadingMoreChats
+  isLoadingMoreChats,
 }) {
-  const [collapsed, setCollapsed] = useState(false);
   const groupedItems = useMemo(() => groupChatsByDate(chats), [chats]);
   
   const parentRef = useRef(null);
@@ -203,69 +202,52 @@ export default function ChatPaneLayout({
   ]);
 
   return (
-    <div className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
-      <div className="sidebar-header flex space-between align-center">
-        <button
-          className={`button icon-button sidebar-collapse-toggle ${!collapsed ? 'is-open' : ''}`}
-          onClick={() => setCollapsed(!collapsed)}
-          title={collapsed ? "Expand Sidebar" : "Collapse Sidebar"}
-        >
-          {collapsed ? '»' : '«'}
-        </button>
-        {!collapsed && onNewChat && (
-          <button className="button new-chat-button" onClick={onNewChat} disabled={disabled}>
-            New Task
-          </button>
-        )}
-      </div>
+    <div ref={parentRef} className="chat-list-scroll-area">
+      {itemCount > 0 && (
+        <div style={{ height: `${rowVirtualizer.getTotalSize()}px`, width: '100%', position: 'relative' }}>
+          {virtualItems.map((virtualItem) => {
+            const isLoaderRow = virtualItem.index >= groupedItems.length;
+            const item = isLoaderRow ? null : groupedItems[virtualItem.index];
 
-      <div ref={parentRef} className="chat-list-scroll-area">
-        {itemCount > 0 && (
-          <div style={{ height: `${rowVirtualizer.getTotalSize()}px`, width: '100%', position: 'relative' }}>
-            {virtualItems.map((virtualItem) => {
-              const isLoaderRow = virtualItem.index >= groupedItems.length;
-              const item = isLoaderRow ? null : groupedItems[virtualItem.index];
-
-              return (
-                <div
-                  key={virtualItem.key}
-                  ref={virtualItem.measureElement}
-                  style={{
-                    position: 'absolute',
-                    top: 0,
-                    left: 0,
-                    width: '100%',
-                    transform: `translateY(${virtualItem.start}px)`,
-                    padding: '0 8px', // Horizontal padding for all rows
-                    backgroundColor: 'var(--bg-secondary)', // Opaque background for all rows
-                  }}
-                >
-                  {isLoaderRow ? (
-                    <div className="load-more-sentinel">
-                      {hasMoreChatsToFetch && (isLoadingMoreChats ? 'Loading...' : '')}
-                      {!hasMoreChatsToFetch && chats.length > 0 && <div className="all-chats-loaded-indicator">All tasks loaded.</div>}
-                    </div>
-                  ) : item.type === 'header' ? (
-                    <div className="chat-group-header">{item.title}</div>
-                  ) : (
-                    <ChatItem
-                      chat={item.chat}
-                      isActive={item.chat.id === currentChatId}
-                      onSelectChat={onSelectChat}
-                      onTitleUpdate={onTitleUpdate}
-                      onDeleteChat={onDeleteChat}
-                      disabled={disabled}
-                    />
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-        {chats?.length === 0 && !isLoadingMoreChats && (
-            <div className="no-chats-indicator">No tasks yet. Create one!</div>
-        )}
-      </div>
+            return (
+              <div
+                key={virtualItem.key}
+                ref={virtualItem.measureElement}
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  width: '100%',
+                  transform: `translateY(${virtualItem.start}px)`,
+                  padding: '0 8px', // Horizontal padding for all rows
+                  backgroundColor: 'var(--bg-secondary)', // Opaque background for all rows
+                }}
+              >
+                {isLoaderRow ? (
+                  <div className="load-more-sentinel">
+                    {hasMoreChatsToFetch && (isLoadingMoreChats ? 'Loading...' : '')}
+                    {!hasMoreChatsToFetch && chats.length > 0 && <div className="all-chats-loaded-indicator">All tasks loaded.</div>}
+                  </div>
+                ) : item.type === 'header' ? (
+                  <div className="chat-group-header">{item.title}</div>
+                ) : (
+                  <ChatItem
+                    chat={item.chat}
+                    isActive={item.chat.id === currentChatId}
+                    onSelectChat={onSelectChat}
+                    onTitleUpdate={onTitleUpdate}
+                    onDeleteChat={onDeleteChat}
+                    disabled={disabled}
+                  />
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {chats?.length === 0 && !isLoadingMoreChats && (
+          <div className="no-chats-indicator">No tasks yet. Create one!</div>
+      )}
     </div>
   );
 }
