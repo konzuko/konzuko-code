@@ -116,7 +116,7 @@ export default function PromptBuilder({
           fontSize: '0.9em',
           lineHeight: '1.4'
         }}>
-          Start a New Task once you've committed - it keeps your code History clean and tidy.
+          Start a New Task after major coding milestones.
         </div>
       )}
 
