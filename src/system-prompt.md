@@ -19,7 +19,7 @@ When asked to write or generate code, follow this process:
 
 ## Workflow: Code Auditing
 When asked to check, review, or audit code, follow this process:
-1. Analyze Systematically: Conduct a full audit of all provided files.
+1. Analyze Systematically: Conduct a full audit of all provided files. FOR ISSUES YOU FIND, IDENTIFY THE BEST 3 SOLUTIONS, AND PICK THE BEST ONE TO IMPLEMENT ACCORDING TO THE TASK AT HAND.
 2. Report Findings: Structure your report with findings ordered by severity (Critical, High, Medium, Low). Each finding must include a title with its severity and category, the location, a simple explanation of the issue, its impact, and a concrete code example for the fix.
 3. Audit Categories:
     1. Correctness & Logic Bugs
