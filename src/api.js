@@ -1,11 +1,11 @@
+/* src/api.js */
 /* ======================================================================
    File: src/api.js
 ====================================================================== */
 
-console.log('API.JS FILE LOADED (for @google/genai & TanStack Query) - VERSION TQ_004_OPTIMISTIC_UNDO_WITH_GEMINI_LOGGING - TIMESTAMP', new Date().toISOString());
-
-import { supabase }                      from './lib/supabase.js'
-import { GEMINI_API_TIMEOUT_MS }         from './config.js'
+import { supabase } from './lib/supabase.js';
+import { GEMINI_API_TIMEOUT_MS } from './config.js';
+import HARDCODED_GEMINI_SYSTEM_PROMPT from './system-prompt.md?raw';
 import {
     GoogleGenAI,
     // HarmCategory, // Not directly used as string values are used
@@ -16,37 +16,6 @@ export const GEMINI_MODEL_NAME = "gemini-2.5-pro-preview-06-05";
 export const CHATS_PAGE_LIMIT = 20;
 
 const isoNow = () => new Date().toISOString()
-
-// Define your hardcoded system prompt here
-const HARDCODED_GEMINI_SYSTEM_PROMPT = `# Identity
-You are a Staff Software Engineer. Your expertise is in writing and auditing code that is correct, performant, secure, and maintainable. You are direct, concise, and you challenge assumptions to arrive at the best technical outcome.
-Your primary role is coding but you can do everything. 
-Your ability to code is critical to the success of the user's project.
-
-# Instructions
-
-## Core Principles
-1. Clarity and Concision: Avoid redundancy. Get straight to the point.
-2. Critical Thinking: Do not accept user requests at face value. If instructions are contradictory, ambiguous, or suboptimal, ask clarifying questions. Disagree and provide counter-proposals when warranted.
-3. Preserve Intent: Never remove or change the functionality of a user's code without explicit permission. When proposing refactors, clearly state what will change and why.
-4. Code Integrity: Always ensure code is complete and includes all necessary imports, exports, and dependencies. Double-check this before finishing your response.
-
-## Workflow: Code Generation
-When asked to write or generate code, follow this process:
-1. Plan: Briefly outline the functions, data structures, and logic flow under a "### Plan" heading.
-2. Code: Write the complete, production-ready code under a "### Code" heading.
-3. Explained: Justify key decisions and trade-offs under an "### Explained" heading.
-
-## Workflow: Code Auditing
-When asked to check, review, or audit code, follow this process:
-1. Analyze Systematically: Conduct a full audit of all provided files.
-2. Report Findings: Structure your report with findings ordered by severity (Critical, High, Medium, Low). Each finding must include a title with its severity and category, the location, a simple explanation of the issue, its impact, and a concrete code example for the fix.
-3. Audit Categories:
-    1. Correctness & Logic Bugs
-    2. Security Vulnerabilities
-    3. Performance Issues
-    4. Code Quality & Maintainability
-4. Conclusion: If no issues are found in a category, state that at the end. Conclude with a summary statement like "Audit Complete."`;;
 
 function validateKey(raw = '') {
   const key = raw ? raw.trim() : '';
@@ -165,13 +134,12 @@ export async function callApiForText({
     }
   }
 
-  // Combine hardcoded system prompt with any dynamic system prompt from messages
   let finalSystemInstruction = HARDCODED_GEMINI_SYSTEM_PROMPT;
   if (systemInstructionTextFromMessages.trim()) {
     finalSystemInstruction += "\n\n" + systemInstructionTextFromMessages.trim();
   }
 
-  if (historyContents.length === 0 && !finalSystemInstruction) { // Check against finalSystemInstruction
+  if (historyContents.length === 0 && !finalSystemInstruction) {
     console.error(`[API - callApiForText @ ${callTimestamp}] No content (history or system instruction) to send to the model.`);
     throw new Error("No content to send to the model.");
   }
@@ -188,7 +156,7 @@ export async function callApiForText({
         { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "OFF" },
         { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "OFF" },
       ],
-      ...(finalSystemInstruction && { systemInstruction: finalSystemInstruction }), // Use the combined system instruction
+      ...(finalSystemInstruction && { systemInstruction: finalSystemInstruction }),
     },
   };
 
@@ -198,9 +166,6 @@ export async function callApiForText({
   }
 
   console.log(`[API - callApiForText @ ${callTimestamp}] Sending request to Gemini. Model: ${requestPayload.model}, History items: ${historyContents.length}, System instruction present: ${!!finalSystemInstruction}`);
-  // For very detailed debugging, you might log the full payload, but be mindful of size and PII:
-  // console.log(`[API - callApiForText @ ${callTimestamp}] Request Payload:`, JSON.stringify(requestPayload, null, 2));
-
 
   let timeoutId;
   const controller = new AbortController();
@@ -222,11 +187,9 @@ export async function callApiForText({
     });
 
     const response = await Promise.race([generatePromise, timeoutPromise]);
-    clearTimeout(timeoutId); // Clear timeout if generatePromise resolved or rejected first
+    clearTimeout(timeoutId);
 
     console.log(`[API - callApiForText @ ${callTimestamp}] Received response from Gemini.`);
-    // Log the full raw response for detailed inspection:
-    // console.log(`[API - callApiForText @ ${callTimestamp}] Raw Gemini Response:`, JSON.stringify(response, null, 2));
 
     let textContent = "";
     if (response && response.candidates && response.candidates.length > 0) {
@@ -255,7 +218,7 @@ export async function callApiForText({
                 }
             }
         }
-    } else if (response && typeof response.text === 'string') { // Fallback for simpler response structures if any
+    } else if (response && typeof response.text === 'string') {
         textContent = response.text;
     }
 
@@ -270,18 +233,17 @@ export async function callApiForText({
     }
 
   } catch (err) {
-    clearTimeout(timeoutId); // Ensure timeout is cleared on any error
+    clearTimeout(timeoutId);
     console.error(`[API - callApiForText @ ${callTimestamp}] Error during Gemini call or processing:`, err.message, err.name, err.stack, err);
 
     if (err.name === 'AbortError' && signal?.aborted) {
         console.warn(`[API - callApiForText @ ${callTimestamp}] Confirmed AbortError due to external signal.`);
-        throw err; // Re-throw the original abort error
+        throw err;
     }
-    if (err.name === 'AbortError' && !signal?.aborted) { // This means timeoutPromise likely won
+    if (err.name === 'AbortError' && !signal?.aborted) {
         console.warn(`[API - callApiForText @ ${callTimestamp}] Confirmed AbortError due to timeout.`);
         throw new Error(`Request timed out after ${GEMINI_API_TIMEOUT_MS / 1000}s`);
     }
-    // For other errors, re-throw them.
     throw err;
   }
 }
@@ -351,7 +313,7 @@ export async function undoDeleteChat(id) {
     .select()
     .single();
   if (error) throw error;
-  return data; // Return the un-deleted chat object
+  return data;
 }
 
 export async function fetchMessages(chat_id) {

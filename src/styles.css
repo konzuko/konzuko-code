@@ -91,6 +91,7 @@ html, body {
   transition: background var(--transition);
   border: 1px solid transparent;
   position: relative;
+  background-color: var(--bg-secondary); /* Fix for virtualization overlap */
 }
 .chat-item:hover {
   background: var(--bg-tertiary);

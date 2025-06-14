@@ -174,21 +174,33 @@ export default function ChatPaneLayout({
     count: itemCount,
     getScrollElement: () => parentRef.current,
     estimateSize: (index) => {
-      if (index >= groupedItems.length) return 50; // Footer height
+      if (index >= groupedItems.length) return 50;
       return groupedItems[index].type === 'header' ? 36 : 65;
     },
     overscan: 5,
   });
 
   const virtualItems = rowVirtualizer.getVirtualItems();
-  useEffect(() => {
-    const lastItem = virtualItems[virtualItems.length - 1];
-    if (!lastItem) return;
+  const lastVirtualItem = virtualItems[virtualItems.length - 1];
+  const lastVirtualItemIndex = lastVirtualItem ? lastVirtualItem.index : -1;
 
-    if (lastItem.index >= groupedItems.length - 1 && hasMoreChatsToFetch && !isLoadingMoreChats) {
+  useEffect(() => {
+    if (!lastVirtualItem) return;
+
+    if (
+      lastVirtualItem.index >= groupedItems.length - 1 &&
+      hasMoreChatsToFetch &&
+      !isLoadingMoreChats
+    ) {
       onLoadMoreChats();
     }
-  }, [virtualItems, hasMoreChatsToFetch, isLoadingMoreChats, onLoadMoreChats, groupedItems.length]);
+  }, [
+    lastVirtualItemIndex,
+    groupedItems.length,
+    hasMoreChatsToFetch,
+    isLoadingMoreChats,
+    onLoadMoreChats,
+  ]);
 
   return (
     <div className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
@@ -216,7 +228,7 @@ export default function ChatPaneLayout({
 
               return (
                 <div
-                  key={item ? item.id : 'loader-sentinel'}
+                  key={virtualItem.key}
                   style={{
                     position: 'absolute',
                     top: 0,
