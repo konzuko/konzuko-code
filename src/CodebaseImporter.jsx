@@ -181,15 +181,15 @@ export default function CodebaseImporter({
     console.log(`[performScan] Starting scan for ${handleToScan.name} due to ${context}`);
     try {
         const { tops, meta, rejectionStats } = await scanDirectoryForMinimalMetadata(handleToScan);
-        const { root, secondaryRoot, tag } = stateRef.current;
+        const { root, secondaryRoot } = stateRef.current;
         const currentRoot = isSecondary ? secondaryRoot : root;
 
-        if (currentRoot?.name === handleToScan.name && (tag === 'SCANNING' || tag === 'SCANNING_SECONDARY')) {
+        if (currentRoot?.name === handleToScan.name) {
             dispatch({ type: 'SCAN_DONE', tops, meta });
             const msg = formatRejectionMessage(rejectionStats, `folder scan on ${context}`);
             if (msg) toastFn?.(msg, 15000);
         } else {
-            console.log(`[performScan] Scan for ${handleToScan.name} completed, but state/root changed. Discarding. State: ${tag}, Root: ${currentRoot?.name}`);
+            console.log(`[performScan] Scan for ${handleToScan.name} completed, but state/root changed. Discarding. Current Root: ${currentRoot?.name}`);
         }
     } catch (err) {
         console.error(`[performScan] Error during scan for ${handleToScan.name} (context: ${context}):`, err);
@@ -321,12 +321,21 @@ export default function CodebaseImporter({
     }
   }, [impState, toastFn]);
 
+  const phase = impState.tag;
+  const isLoadingOperation = adding || phase === 'SCANNING' || phase === 'STAGING' || phase === 'SCANNING_SECONDARY' || phase === 'STAGING_SECONDARY';
+
   const clearAllStatesAndNotifyParent = useCallback(() => {
     if (!confirm('Remove all selected files and clear project root?')) return;
+
+    if (isLoadingOperation) {
+        toastFn?.('Cannot clear files while an operation is in progress.', 3000);
+        return;
+    }
+
     if(impState.root) clearIDBRoot().catch(err => console.error("Error clearing root from IDB:", err));
     dispatch({ type: 'CLEAR_ALL' });
     onProjectRootChange?.(null);
-  }, [onProjectRootChange, impState.root]);
+  }, [onProjectRootChange, impState.root, isLoadingOperation, toastFn]);
 
   const pickTextFilesAndDispatch = useCallback(async () => {
     if (!window.showOpenFilePicker) { toastFn?.('File picker not supported.', 4000); return; }
@@ -473,8 +482,6 @@ export default function CodebaseImporter({
     }
   }, [impState, onFilesChange]);
 
-  const phase = impState.tag;
-  const isLoadingOperation = adding || phase === 'SCANNING' || phase === 'STAGING' || phase === 'SCANNING_SECONDARY' || phase === 'STAGING_SECONDARY';
   const allRoots = (phase === 'STAGED' && impState.files) ? [...new Set(impState.files.map(f => f.rootName).filter(Boolean))] : [];
 
   const isFiltering = phase === 'FILTER' || phase === 'FILTER_SECONDARY';

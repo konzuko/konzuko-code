@@ -1,6 +1,6 @@
 /* src/hooks/useChatSessionManager.js */
 // src/hooks/useChatSessionManager.js
-import { useState, useCallback } from 'preact/hooks';
+import { useState, useCallback, useEffect } from 'preact/hooks';
 import { useQueryClient, useMutation } from '@tanstack/react-query';
 import {
   createChat,
@@ -15,7 +15,7 @@ import Toast from '../components/Toast.jsx';
 export function useChatSessionManager() {
   const queryClient = useQueryClient();
 
-  const [currentChatId, _setCurrentChatId] = useState(() => {
+  const [currentChatId, setCurrentChatId] = useState(() => {
     try {
       return localStorage.getItem(LOCALSTORAGE_LAST_CHAT_ID_KEY) || null;
     } catch (e) {
@@ -24,22 +24,17 @@ export function useChatSessionManager() {
     }
   });
 
-  const setCurrentChatId = useCallback((chatId) => {
-    _setCurrentChatId(chatId);
-    if (chatId) {
-      try {
-        localStorage.setItem(LOCALSTORAGE_LAST_CHAT_ID_KEY, String(chatId));
-      } catch (e) {
-        console.warn("Failed to save last chat ID to localStorage", e);
-      }
-    } else {
-      try {
+  useEffect(() => {
+    try {
+      if (currentChatId) {
+        localStorage.setItem(LOCALSTORAGE_LAST_CHAT_ID_KEY, String(currentChatId));
+      } else {
         localStorage.removeItem(LOCALSTORAGE_LAST_CHAT_ID_KEY);
-      } catch (e) {
-        console.warn("Failed to remove last chat ID from localStorage", e);
       }
+    } catch (e) {
+      console.warn("Failed to sync chat ID to localStorage", e);
     }
-  }, [_setCurrentChatId]);
+  }, [currentChatId]);
 
   const createChatMutation = useMutation({
     mutationKey: ['createChat'],

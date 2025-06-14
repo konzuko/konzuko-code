@@ -80,25 +80,21 @@ html, body {
 .chat-list-scroll-area {
   flex-grow: 1;
   overflow-y: auto;
-  padding: var(--space-xs) var(--space-sm);
 }
 
 .chat-item {
   padding: var(--space-sm) var(--space-md);
-  margin-bottom: var(--space-xs);
   cursor: pointer;
   border-radius: var(--radius);
-  transition: background var(--transition);
-  border: 1px solid transparent;
+  transition: background var(--transition), box-shadow var(--transition);
   position: relative;
-  background-color: var(--bg-secondary); /* Fix for virtualization overlap */
 }
 .chat-item:hover {
   background: var(--bg-tertiary);
 }
 .chat-item.active {
   background: var(--bg-tertiary);
-  border-left: 3px solid var(--accent);
+  box-shadow: inset 4px 0 0 0 var(--accent);
   font-weight: 500;
 }
 .chat-item.disabled {

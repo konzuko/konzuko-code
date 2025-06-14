@@ -175,7 +175,7 @@ export default function ChatPaneLayout({
     getScrollElement: () => parentRef.current,
     estimateSize: (index) => {
       if (index >= groupedItems.length) return 50;
-      return groupedItems[index].type === 'header' ? 36 : 65;
+      return groupedItems[index].type === 'header' ? 48 : 70; // Adjusted estimates
     },
     overscan: 5,
   });
@@ -229,13 +229,15 @@ export default function ChatPaneLayout({
               return (
                 <div
                   key={virtualItem.key}
+                  ref={virtualItem.measureElement}
                   style={{
                     position: 'absolute',
                     top: 0,
                     left: 0,
                     width: '100%',
-                    height: `${virtualItem.size}px`,
                     transform: `translateY(${virtualItem.start}px)`,
+                    padding: '0 8px', // Horizontal padding for all rows
+                    backgroundColor: 'var(--bg-secondary)', // Opaque background for all rows
                   }}
                 >
                   {isLoaderRow ? (
