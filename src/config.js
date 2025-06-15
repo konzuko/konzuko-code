@@ -1,21 +1,30 @@
-// file: src/config.js
-// Centralised tuning knobs & feature flags
-export const GEMINI_API_TIMEOUT_MS = 100 * 1_000;      // 100-second hard timeout for Gemini API
-export const LOCALSTORAGE_DEBOUNCE = 300;              // ms before we persist
-export const FILE_LIMIT            = 3000;             // Hidden internal limit for CodebaseImporter
-export const IMAGE_TOKEN_ESTIMATE  = 258;              // Estimated token count for a single image with Gemini
+// src/config.js
+// ---------------------------------------------------------------------------
+// 🛠  Centralised tuning knobs & feature flags
+// ---------------------------------------------------------------------------
 
-// NEW: Add model name here
-export const GEMINI_MODEL_NAME = "gemini-2.5-pro-preview-06-05";
+// ‼️ TIME-OUTS ---------------------------------------------------------------
+// Use env-var override in production → VITE_GEMINI_TIMEOUT_MS (ms)
+const DEFAULT_GEMINI_TIMEOUT = 400000;        // 4 min
+export const GEMINI_API_TIMEOUT_MS = Number(
+  import.meta?.env?.VITE_GEMINI_TIMEOUT_MS ?? DEFAULT_GEMINI_TIMEOUT
+);
 
-// Token limit constants
-export const USER_FACING_TOKEN_LIMIT = 350000;    // Soft warning limit
-export const MAX_ABSOLUTE_TOKEN_LIMIT = 1000000;  // Hard limit for sending
+// Other core constants ------------------------------------------------------
+export const LOCALSTORAGE_DEBOUNCE = 300;       // ms before we persist
+export const FILE_LIMIT            = 3000;      // Hidden internal limit for CodebaseImporter
+export const IMAGE_TOKEN_ESTIMATE  = 258;       // Estimated token count for a single image with Gemini
 
-// LocalStorage Keys
-export const LOCALSTORAGE_FORM_KEY = 'konzuko-form-data';
-export const LOCALSTORAGE_SETTINGS_KEY = 'konzuko-display-settings';
-export const LOCALSTORAGE_MODE_KEY = 'konzuko-mode';
-export const LOCALSTORAGE_LAST_CHAT_ID_KEY = 'konzuko-lastChatId';
-export const LOCALSTORAGE_PANE_WIDTH_KEY = 'konzuko-pane-width';
-export const LOCALSTORAGE_SIDEBAR_COLLAPSED_KEY = 'konzuko-sidebar-collapsed';
+export const GEMINI_MODEL_NAME     = 'gemini-2.5-pro-preview-06-05';
+
+// Token limits
+export const USER_FACING_TOKEN_LIMIT   = 350_000;   // Soft warning limit
+export const MAX_ABSOLUTE_TOKEN_LIMIT  = 1_000_000; // Hard limit for sending
+
+// LocalStorage keys
+export const LOCALSTORAGE_FORM_KEY             = 'konzuko-form-data';
+export const LOCALSTORAGE_SETTINGS_KEY         = 'konzuko-display-settings';
+export const LOCALSTORAGE_MODE_KEY             = 'konzuko-mode';
+export const LOCALSTORAGE_LAST_CHAT_ID_KEY     = 'konzuko-lastChatId';
+export const LOCALSTORAGE_PANE_WIDTH_KEY       = 'konzuko-pane-width';
+export const LOCALSTORAGE_SIDEBAR_COLLAPSED_KEY= 'konzuko-sidebar-collapsed';
