@@ -2,6 +2,7 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { corsHeaders } from '../_shared/cors.ts';
+import { isRateLimited } from '../_shared/ratelimit.ts';
 
 const supabaseAdmin: SupabaseClient = createClient(
   Deno.env.get('SUPABASE_URL')!,
@@ -22,6 +23,10 @@ serve(async (req: Request): Promise<Response> => {
     const { data: { user }, error: authErr } = await userClient.auth.getUser();
     if (authErr || !user) throw new Error(authErr?.message || 'User not authenticated');
 
+    if (await isRateLimited(user.id, 'get-signed-urls')) {
+      return new Response(JSON.stringify({ error: 'Too Many Requests' }), { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
     const { paths, expiresIn = 60 } = await req.json();
     if (!Array.isArray(paths) || paths.length === 0) {
       return new Response(JSON.stringify({ error: '`paths` must be a non-empty array' }), {
@@ -30,16 +35,6 @@ serve(async (req: Request): Promise<Response> => {
       });
     }
 
-    // --- FIX: Verify ownership of ALL requested paths ---
-    // This query counts how many of the requested paths are found within messages
-    // belonging to chats owned by the authenticated user.
-    const { count, error: countError } = await supabaseAdmin
-      .from('messages')
-      .select('id', { count: 'exact', head: true })
-      .eq('chats.user_id', user.id) // This assumes RLS on 'chats' or an inner join is implicitly handled. For clarity, let's be explicit.
-      .in('content->image_url->>path', paths);
-
-    // A more explicit join for clarity and correctness:
     const { data: ownedMessages, error: ownedError } = await supabaseAdmin
         .from('messages')
         .select('content, chats!inner(user_id)')
@@ -48,14 +43,12 @@ serve(async (req: Request): Promise<Response> => {
 
     if (ownedError) throw ownedError;
 
-    // The number of owned images found must exactly match the number of paths requested.
     if (ownedMessages.length !== paths.length) {
         return new Response(JSON.stringify({ error: 'Forbidden: You do not own one or more of the requested resources.' }), {
             status: 403,
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
     }
-    // --- END FIX ---
 
     const { data, error } = await supabaseAdmin.storage
       .from('images')

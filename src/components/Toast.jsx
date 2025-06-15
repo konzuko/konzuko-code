@@ -1,3 +1,4 @@
+// file: src/Toast.jsx
 /*
   Toast   – stackable, HMR-safe, auto-cleaning
 
@@ -24,11 +25,10 @@ function ensureRoot() {
   Object.assign(rootEl.style, {
     position   : 'fixed',
     bottom     : '20px',
-    left       : '90%', 
-    transform  : 'translateX(-50%)', 
+    right      : '20px',
     display    : 'flex',
     flexDirection: 'column',
-    alignItems : 'center', // Center toasts horizontally if they don't take full width
+    alignItems : 'flex-end',
     gap        : '8px',
     zIndex     : 9999
   });
@@ -75,17 +75,17 @@ export default function Toast(msg, ms = 4000, onAction, actionText = "Undo") {
       style={{
         background   : '#333',
         color        : '#fff',
-        padding      : '10px 16px', // Slightly more padding for multi-line
+        padding      : '10px 16px',
         borderRadius : 4,
-        display      : 'flex',    // Changed to flex for better internal layout
-        flexDirection: 'column',  // Stack message and button vertically
-        gap          : '8px',     // Gap between message and button
-        alignItems   : 'flex-start', // Align content to the start (left)
+        display      : 'flex',
+        flexDirection: 'column',
+        gap          : '8px',
+        alignItems   : 'flex-start',
         fontSize     : '0.9rem',
-        boxShadow    : '0 2px 8px rgba(0,0,0,0.5)', // Slightly stronger shadow
-        maxWidth     : '450px',     // Max width for readability
-        width        : 'auto',      // Allow it to shrink if content is narrow
-        textAlign    : 'left',      // Ensure text is left-aligned
+        boxShadow    : '0 2px 8px rgba(0,0,0,0.5)',
+        maxWidth     : '450px',
+        width        : 'auto',
+        textAlign    : 'left',
       }}
     >
       <span style={{ whiteSpace: 'pre-line' }}>{msg}</span>
@@ -96,12 +96,12 @@ export default function Toast(msg, ms = 4000, onAction, actionText = "Undo") {
             background   : '#555',
             border       : 'none',
             color        : '#fff',
-            padding      : '6px 12px', // Slightly larger button
+            padding      : '6px 12px',
             borderRadius : 4,
             cursor       : 'pointer',
             minWidth     : '60px',
-            alignSelf    : 'flex-end', // Align button to the right
-            marginTop    : '4px',      // Margin if needed, gap might cover it
+            alignSelf    : 'flex-end',
+            marginTop    : '4px',
           }}
         >
           {actionText}

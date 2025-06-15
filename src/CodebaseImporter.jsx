@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { GoogleGenAI } from '@google/genai';
 import { supabase } from './lib/supabase.js';
 import { isTextLike, MAX_TEXT_FILE_SIZE, MAX_CHAR_LEN } from './lib/fileTypeGuards.js';
-import { FILE_LIMIT } from './config.js';
+import { FILE_LIMIT, MAX_CUMULATIVE_FILE_SIZE } from './config.js';
 import { compressImageToWebP } from './lib/imageUtils.js';
 import { reducer, initialState, makeStagedFile } from './codeImporter/state.js';
 import { saveRoot, clearRoot as clearIDBRoot } from './lib/fsRoot.js';
@@ -148,8 +148,9 @@ export default function CodebaseImporter({
   const pickTextFilesAndDispatch = useCallback(async () => {
     if (!window.showOpenFilePicker) { toastFn?.('File picker not supported.', 4000); return; }
     setAdding(true);
-    const rejectionStats = { tooLarge: 0, tooLong: 0, unsupportedType: 0, limitReached: 0, readError: 0 };
+    const rejectionStats = { tooLarge: 0, tooLong: 0, unsupportedType: 0, limitReached: 0, readError: 0, cumulativeSizeReached: 0 };
     let filesAddedCount = 0;
+    let cumulativeSize = 0;
     const currentFileCount = impState.files.length;
     try {
       const handles = await window.showOpenFilePicker({ multiple: true });
@@ -158,6 +159,8 @@ export default function CodebaseImporter({
         if (currentFileCount + newFilesPayload.length >= FILE_LIMIT) { rejectionStats.limitReached++; continue; }
         try {
             const file = await h.getFile();
+            if (cumulativeSize + file.size > MAX_CUMULATIVE_FILE_SIZE) { rejectionStats.cumulativeSizeReached++; continue; }
+
             let currentFileRejected = false;
             if (file.size > MAX_TEXT_FILE_SIZE) { rejectionStats.tooLarge++; currentFileRejected = true; }
             if (!isTextLike(file)) { if(!currentFileRejected) rejectionStats.unsupportedType++; currentFileRejected = true; }
@@ -167,6 +170,7 @@ export default function CodebaseImporter({
                 if (!currentFileRejected) {
                     newFilesPayload.push(makeStagedFile(file.name, file.size, file.type, textContent, false, file.name, null));
                     filesAddedCount++;
+                    cumulativeSize += file.size;
                 }
             }
         } catch (fileError) { console.warn(`Error processing file ${h.name}:`, fileError); rejectionStats.readError++; }

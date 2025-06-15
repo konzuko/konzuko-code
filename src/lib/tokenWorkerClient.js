@@ -1,3 +1,4 @@
+// file: src/lib/tokenWorkerClient.js
 /* ------------------------------------------------------------------
    tokenWorkerClient  – Promise-based RPC wrapper for the token worker
 -------------------------------------------------------------------*/
@@ -12,14 +13,28 @@ tokenWorker.addEventListener('message', e => {
   if (!p) return;               // unknown / timed-out
   pending.delete(id);
   if (error) p.reject(new Error(error));
-  else       p.resolve(total); // The worker now directly sends the total number
+  else       p.resolve(total);
 });
 
-/* countTokensWithGemini(apiKey, model, items) → Promise<number> */
-// items: Array<{type: 'text', value: string} | {type: 'pdf', uri: string, mimeType: string}>
-export function countTokensWithGemini(apiKey, model, items) {
+/**
+ * Initializes the token worker with the user's API key.
+ * This should be called once when the key is available.
+ * @param {string} apiKey
+ */
+export function initTokenWorker(apiKey) {
+  tokenWorker.postMessage({ type: 'INIT', apiKey });
+}
+
+/**
+ * Asks the worker to count tokens for the given content.
+ * @param {string} model - The model name to use for counting.
+ * @param {Array<{type: 'text', value: string} | {type: 'pdf', uri: string, mimeType: string}>} items - The content to count.
+ * @returns {Promise<number>} A promise that resolves with the total token count.
+ */
+export function countTokensWithGemini(model, items) {
   const id = allocId();
-  tokenWorker.postMessage({ id, apiKey, model, items }); // Pass new parameters
+  // API key is no longer passed with each message
+  tokenWorker.postMessage({ type: 'COUNT', id, model, items });
 
   return new Promise((resolve, reject) => {
     /* 60-second safety timeout */

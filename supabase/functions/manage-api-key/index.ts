@@ -2,8 +2,8 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { corsHeaders } from '../_shared/cors.ts';
+import { isRateLimited } from '../_shared/ratelimit.ts';
 
-// This function now requires the service_role key to call security definer functions
 const supabaseAdmin: SupabaseClient = createClient(
   Deno.env.get('SUPABASE_URL')!,
   Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -15,7 +15,6 @@ serve(async (req: Request): Promise<Response> => {
   }
 
   try {
-    // Authenticate the user first
     const userClient = createClient(
         Deno.env.get('SUPABASE_URL')!,
         Deno.env.get('SUPABASE_ANON_KEY')!,
@@ -23,6 +22,10 @@ serve(async (req: Request): Promise<Response> => {
     );
     const { data: { user }, error: authErr } = await userClient.auth.getUser();
     if (authErr || !user) throw new Error(authErr?.message || 'User not authenticated');
+
+    if (await isRateLimited(user.id, 'manage-api-key')) {
+      return new Response(JSON.stringify({ error: 'Too Many Requests' }), { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
 
     if (req.method === 'GET') {
       const { data, error } = await supabaseAdmin.rpc('get_user_api_key', { p_user_id: user.id });

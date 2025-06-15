@@ -25,7 +25,7 @@ import { useSettings } from './contexts/SettingsContext.jsx';
 import { usePromptBuilder } from './hooks/usePromptBuilder.js';
 import { useScrollNavigation } from './hooks/useScrollNavigation.js';
 import { useTokenizableContent } from './hooks/useTokenizableContent.js';
-import { countTokensWithGemini } from './lib/tokenWorkerClient.js';
+import { countTokensWithGemini, initTokenWorker } from './lib/tokenWorkerClient.js';
 
 const debounce = (func, delay) => {
   let timeoutId;
@@ -166,10 +166,17 @@ function MainLayout() {
   const tokenCountVersionRef = useRef(0);
   const debouncedApiCallRef = useRef(null);
 
+  // Initialize the worker with the API key when it becomes available.
+  useEffect(() => {
+    if (apiKey && !isApiKeyLoading) {
+      initTokenWorker(apiKey);
+    }
+  }, [apiKey, isApiKeyLoading]);
+
   const callWorkerForTotalTokenCount = useCallback(
-    (currentItemsForApi, currentApiKey, modelToUse) => {
+    (currentItemsForApi, modelToUse) => {
       const currentVersion = ++tokenCountVersionRef.current;
-      if (!currentApiKey || String(currentApiKey).trim() === "" || !currentItemsForApi || currentItemsForApi.length === 0) {
+      if (!currentItemsForApi || currentItemsForApi.length === 0) {
         if (tokenCountVersionRef.current === currentVersion) {
           setTotalApiTokenCount(0);
           setIsCountingApiTokens(false);
@@ -179,7 +186,7 @@ function MainLayout() {
       if (tokenCountVersionRef.current === currentVersion) setIsCountingApiTokens(true);
       else return;
 
-      countTokensWithGemini(currentApiKey, modelToUse, currentItemsForApi)
+      countTokensWithGemini(modelToUse, currentItemsForApi)
         .then(count => {
           if (tokenCountVersionRef.current === currentVersion) setTotalApiTokenCount(count);
         })
@@ -198,7 +205,13 @@ function MainLayout() {
     if (!debouncedApiCallRef.current) {
       debouncedApiCallRef.current = debounce(callWorkerForTotalTokenCount, 500);
     }
-    debouncedApiCallRef.current(itemsForApiCount, apiKey, model);
+    // Only attempt to count tokens if the API key is present (worker is initialized).
+    if (apiKey) {
+      debouncedApiCallRef.current(itemsForApiCount, model);
+    } else {
+      setTotalApiTokenCount(0);
+      setIsCountingApiTokens(false);
+    }
   }, [itemsForApiCount, apiKey, model, callWorkerForTotalTokenCount]);
 
 
@@ -293,22 +306,11 @@ function MainLayout() {
     );
     
     if (pendingImages.length > 0) {
-      const paths = pendingImages.map(img => img.path);
-      const { data, error } = await supabase.functions.invoke('get-signed-urls', {
-        body: { paths, expiresIn: 900 }
-      });
-      if (error || data.error) {
-        Toast(`Could not get image URLs: ${error?.message || data.error}`, 5000);
-        return;
-      }
       pendingImages.forEach(img => {
-        const signedUrl = data.urlMap[img.path];
-        if (signedUrl) {
-          userMessageContentBlocks.push({
-            type: 'image_url',
-            image_url: { url: signedUrl, detail: 'high', original_name: img.name, path: img.path },
-          });
-        }
+        userMessageContentBlocks.push({
+          type: 'image_url',
+          image_url: { detail: 'high', original_name: img.name, path: img.path },
+        });
       });
     }
 
@@ -418,7 +420,7 @@ function MainLayout() {
               <button className="button icon-button" onClick={scrollToNext} title="Scroll Down" disabled={isSessionBusy || isLoadingMessages} > ↓ </button>
             </div>
           </div>
-          <div className="resizable-handle" onMouseDown={handleMouseDown} />
+          <div className="resizable-handle" onMouseDown={handleMouseDown} aria-hidden="true" />
           <div className="prompt-builder-area">
             <PromptBuilder
               mode={mode} setMode={setMode} form={form} setForm={setForm}

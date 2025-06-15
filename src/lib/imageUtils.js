@@ -1,3 +1,4 @@
+// file: src/lib/imageUtils.js
 /* ------------------------------------------------------------------
    compressImageToWebP(file, shortSide = 1024, quality = 0.85)
 
@@ -32,10 +33,20 @@ export async function compressImageToWebP(
     ctx.drawImage(bmp, 0, 0, w, h);
     blob = await oc.convertToBlob({ type: 'image/webp', quality });
   } else {
-    const cvs = document.createElement('canvas');
-    cvs.width = w; cvs.height = h;
-    cvs.getContext('2d', { alpha: false }).drawImage(bmp, 0, 0, w, h);
-    blob = await new Promise(res => cvs.toBlob(res, 'image/webp', quality));
+    let cvs; // Declare canvas outside to be accessible in finally
+    try {
+      cvs = document.createElement('canvas');
+      cvs.width = w; cvs.height = h;
+      cvs.getContext('2d', { alpha: false }).drawImage(bmp, 0, 0, w, h);
+      blob = await new Promise(res => cvs.toBlob(res, 'image/webp', quality));
+    } finally {
+      // Explicitly dereference to assist garbage collection, as recommended by audit.
+      if (cvs) {
+        cvs.width = 0;
+        cvs.height = 0;
+        cvs = null;
+      }
+    }
   }
 
   bmp.close?.();

@@ -8,17 +8,18 @@ import {
   LOCALSTORAGE_PANE_WIDTH_KEY,
   LOCALSTORAGE_SETTINGS_KEY,
   LOCALSTORAGE_SIDEBAR_COLLAPSED_KEY,
-  GEMINI_MODEL_NAME, // <-- IMPORT from config
+  GEMINI_MODEL_NAME,
 } from '../config.js';
 
-// ... rest of the file is unchanged
 /* ───────────────────────── helpers ───────────────────────── */
 const getInitialPaneWidth = () => {
   try {
     const storedWidth = localStorage.getItem(LOCALSTORAGE_PANE_WIDTH_KEY);
     if (storedWidth) {
       const percent = parseFloat(storedWidth);
-      if (percent >= 20 && percent <= 80) return `${percent}%`;
+      if (!isNaN(percent) && percent >= 20 && percent <= 80) {
+        return `${percent}%`;
+      }
     }
   } catch (e) {
     console.warn('Could not read pane width from localStorage', e);
