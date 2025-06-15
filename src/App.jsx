@@ -13,12 +13,14 @@ import PromptBuilder from './PromptBuilder.jsx';
 import ChatArea from './components/ChatArea.jsx';
 import Toast from './components/Toast.jsx';
 import { supabase } from './lib/supabase.js';
+import { debounce } from './lib/utils.js'; // Import from shared utility
 
 import {
     IMAGE_TOKEN_ESTIMATE,
     USER_FACING_TOKEN_LIMIT,
     MAX_ABSOLUTE_TOKEN_LIMIT,
-    LOCALSTORAGE_PANE_WIDTH_KEY
+    LOCALSTORAGE_PANE_WIDTH_KEY,
+    TOKEN_COUNT_DEBOUNCE_MS
 } from './config.js';
 
 import { useSettings } from './contexts/SettingsContext.jsx';
@@ -26,14 +28,6 @@ import { usePromptBuilder } from './hooks/usePromptBuilder.js';
 import { useScrollNavigation } from './hooks/useScrollNavigation.js';
 import { useTokenizableContent } from './hooks/useTokenizableContent.js';
 import { countTokensWithGemini, initTokenWorker } from './lib/tokenWorkerClient.js';
-
-const debounce = (func, delay) => {
-  let timeoutId;
-  return (...args) => {
-    clearTimeout(timeoutId);
-    timeoutId = setTimeout(() => func.apply(this, args), delay);
-  };
-};
 
 function MainLayout() {
   const { 
@@ -166,7 +160,6 @@ function MainLayout() {
   const tokenCountVersionRef = useRef(0);
   const debouncedApiCallRef = useRef(null);
 
-  // Initialize the worker with the API key when it becomes available.
   useEffect(() => {
     if (apiKey && !isApiKeyLoading) {
       initTokenWorker(apiKey);
@@ -203,9 +196,8 @@ function MainLayout() {
 
   useEffect(() => {
     if (!debouncedApiCallRef.current) {
-      debouncedApiCallRef.current = debounce(callWorkerForTotalTokenCount, 500);
+      debouncedApiCallRef.current = debounce(callWorkerForTotalTokenCount, TOKEN_COUNT_DEBOUNCE_MS);
     }
-    // Only attempt to count tokens if the API key is present (worker is initialized).
     if (apiKey) {
       debouncedApiCallRef.current(itemsForApiCount, model);
     } else {
@@ -412,7 +404,11 @@ function MainLayout() {
           <div className="chat-container" style={{ flexBasis: 'var(--left-pane-width, 50%)' }}>
             <div className="chat-messages-scroll-area" ref={scrollContainerRef}>
               {currentChatId ? (
-                <ChatArea key={currentChatId} actionsDisabled={isBusy} />
+                <ChatArea
+                  key={currentChatId}
+                  actionsDisabled={isBusy}
+                  scrollParentRef={scrollContainerRef}
+                />
               ) : ( <div className="chat-empty-placeholder"> Select or create a task to begin. </div> )}
             </div>
             <div className="chat-nav-rail">

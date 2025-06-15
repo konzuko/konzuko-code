@@ -1,7 +1,29 @@
+// file: src/hooks/useSignedUrl.js
 import { useState, useEffect } from 'preact/hooks';
 import { supabase } from '../lib/supabase.js';
 
 const urlCache = new Map();
+const MAX_CACHE_SIZE = 100; // Keep the 100 most recently used URLs
+
+// Helper to enforce LRU cache policy
+function getFromCache(path) {
+    const entry = urlCache.get(path);
+    if (entry) {
+        // Move to end to mark as recently used
+        urlCache.delete(path);
+        urlCache.set(path, entry);
+    }
+    return entry;
+}
+
+function setInCache(path, value) {
+    if (urlCache.size >= MAX_CACHE_SIZE) {
+        // Evict the least recently used item (the first one in the map's iteration)
+        const oldestKey = urlCache.keys().next().value;
+        urlCache.delete(oldestKey);
+    }
+    urlCache.set(path, value);
+}
 
 export function useSignedUrl(path) {
   const [url, setUrl] = useState(null);
@@ -14,8 +36,7 @@ export function useSignedUrl(path) {
       return;
     }
 
-    // Check cache first
-    const cached = urlCache.get(path);
+    const cached = getFromCache(path);
     if (cached && cached.expires > Date.now()) {
       setUrl(cached.url);
       return;
@@ -27,7 +48,7 @@ export function useSignedUrl(path) {
       setError(null);
       try {
         const { data, error: funcError } = await supabase.functions.invoke('get-signed-urls', {
-          body: { paths: [path], expiresIn: 60 }, // 60 seconds for UI display
+          body: { paths: [path], expiresIn: 60 },
         });
 
         if (funcError) throw funcError;
@@ -37,8 +58,7 @@ export function useSignedUrl(path) {
         if (!signedUrl) throw new Error('Signed URL not returned for path.');
 
         if (!isCancelled) {
-          // Cache the URL with an expiry time (55 seconds to be safe)
-          urlCache.set(path, { url: signedUrl, expires: Date.now() + 55 * 1000 });
+          setInCache(path, { url: signedUrl, expires: Date.now() + 55 * 1000 });
           setUrl(signedUrl);
         }
       } catch (err) {
