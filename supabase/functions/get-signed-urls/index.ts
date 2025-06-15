@@ -3,7 +3,6 @@ import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { corsHeaders } from '../_shared/cors.ts';
 
-// Use the admin client to efficiently check ownership across tables.
 const supabaseAdmin: SupabaseClient = createClient(
   Deno.env.get('SUPABASE_URL')!,
   Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -31,18 +30,32 @@ serve(async (req: Request): Promise<Response> => {
       });
     }
 
-    // FIX: Verify ownership of the requested image paths.
-    // This query finds all messages that contain any of the requested image paths.
-    const { data: messages, error: msgError } = await supabaseAdmin
+    // --- FIX: Verify ownership of ALL requested paths ---
+    // This query counts how many of the requested paths are found within messages
+    // belonging to chats owned by the authenticated user.
+    const { count, error: countError } = await supabaseAdmin
       .from('messages')
-      .select('chat_id, content')
-      .filter('content', 'cs', `{"image_url":{"path":"${paths[0]}"}}`); // A simplified filter; a more robust solution might need a function.
-      // A truly robust check is complex with JSONB. A simpler, effective check is to verify the chat associated with the message.
-      // For this audit, we'll assume the client sends a chatId for verification, or we simplify the check.
-      // Let's assume for now we trust the client not to mix paths from different chats in one request,
-      // and we check the first one. A more robust solution is needed for a production system with higher security needs.
-      // For this fix, we will proceed with signing, but acknowledge this is a simplification.
-      // A proper fix would involve a database function or more complex query.
+      .select('id', { count: 'exact', head: true })
+      .eq('chats.user_id', user.id) // This assumes RLS on 'chats' or an inner join is implicitly handled. For clarity, let's be explicit.
+      .in('content->image_url->>path', paths);
+
+    // A more explicit join for clarity and correctness:
+    const { data: ownedMessages, error: ownedError } = await supabaseAdmin
+        .from('messages')
+        .select('content, chats!inner(user_id)')
+        .in('content->image_url->>path', paths)
+        .eq('chats.user_id', user.id);
+
+    if (ownedError) throw ownedError;
+
+    // The number of owned images found must exactly match the number of paths requested.
+    if (ownedMessages.length !== paths.length) {
+        return new Response(JSON.stringify({ error: 'Forbidden: You do not own one or more of the requested resources.' }), {
+            status: 403,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+    }
+    // --- END FIX ---
 
     const { data, error } = await supabaseAdmin.storage
       .from('images')

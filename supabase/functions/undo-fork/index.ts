@@ -29,21 +29,23 @@ serve(async (req: Request): Promise<Response> => {
       throw new Error('Missing required parameters for undo-fork.');
     }
 
-    // CRITICAL FIX: Verify that the chat belongs to the authenticated user before proceeding.
-    const { data: chat, error: ownerError } = await supabaseAdmin
-      .from('chats')
-      .select('user_id')
-      .eq('id', chatId)
+    // --- FIX: Verify that the message belongs to the user-owned chat ---
+    const { data: message, error: messageError } = await supabaseAdmin
+      .from('messages')
+      .select('chat_id, chats!inner(user_id)')
+      .eq('id', messageId)
       .single();
 
-    if (ownerError) throw ownerError;
-    if (chat?.user_id !== user.id) {
+    if (messageError) throw messageError;
+
+    // The message's chat must be owned by the user AND match the chatId from the request.
+    if (message?.chats?.user_id !== user.id || message?.chat_id !== chatId) {
       return new Response(JSON.stringify({ error: 'Forbidden' }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         status: 403,
       });
     }
-    // END FIX
+    // --- END FIX ---
 
     const { error: updateError } = await supabaseAdmin
       .from('messages')

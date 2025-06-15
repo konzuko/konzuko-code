@@ -1,23 +1,19 @@
+// file: src/api/supabaseApi.js
 /* src/api/supabaseApi.js */
 import { supabase } from '../lib/supabase.js';
-import { GEMINI_MODEL_NAME } from '../config.js'; // <-- IMPORT from config
+import { GEMINI_MODEL_NAME } from '../config.js';
 
-// REMOVE the constant from here
 export const CHATS_PAGE_LIMIT = 20;
 
 const isoNow = () => new Date().toISOString();
 
-let _cachedUser = null;
-export async function getCurrentUser({ forceRefresh = false } = {}) {
-  if (_cachedUser && !forceRefresh) return _cachedUser;
+export async function getCurrentUser() {
   const { data: { session }, error } = await supabase.auth.getSession();
   if (error) throw error;
   if (!session?.user) throw new Error('Not authenticated');
-  _cachedUser = session.user;
-  return _cachedUser;
+  return session.user;
 }
 
-// ... rest of the file is unchanged
 export async function fetchChats({ pageParam = 1 }) {
   const user = await getCurrentUser();
   const limit = CHATS_PAGE_LIMIT;

@@ -8,9 +8,8 @@ import {
   deleteMessage,
   undoDeleteMessage,
   archiveMessagesAfter,
-  performUndoFork,
-} from '../api/supabaseApi.js'; // <-- UPDATED PATH
-import { callApiForText } from '../api/geminiApi.js'; // <-- UPDATED PATH
+} from '../api/supabaseApi.js';
+import { callApiForText } from '../api/geminiApi.js';
 import Toast from '../components/Toast.jsx';
 
 export function useMessageManager(currentChatId, setHasLastSendFailed) {
@@ -22,7 +21,7 @@ export function useMessageManager(currentChatId, setHasLastSendFailed) {
     queryKey: ['messages', currentChatId],
     queryFn: () => fetchMessages(currentChatId),
     enabled: !!currentChatId,
-    staleTime: 1000 * 60 * 5, // Keep messages fresh for 5 minutes
+    staleTime: 1000 * 60 * 5,
   });
 
   const invalidateMessages = () => {
@@ -33,17 +32,14 @@ export function useMessageManager(currentChatId, setHasLastSendFailed) {
     mutationFn: async (payload) => {
       const { userMessageContentBlocks, existingMessages, apiKey } = payload;
       
-      // Create the user message first
       const userRow = await createMessage({
         chat_id: currentChatId,
         role: 'user',
         content: userMessageContentBlocks,
       });
 
-      // Immediately invalidate to show the user's message
       invalidateMessages();
 
-      // Then, call the AI and create the assistant message
       const messagesForApi = [...existingMessages, userRow];
       const { content: assistantContent } = await callApiForText({
         apiKey: apiKey,

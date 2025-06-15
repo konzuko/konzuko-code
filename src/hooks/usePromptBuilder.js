@@ -1,3 +1,4 @@
+// file: src/hooks/usePromptBuilder.js
 /* src/hooks/usePromptBuilder.js */
 import { useState, useEffect, useCallback, useMemo } from 'preact/hooks';
 import { useFormData } from './useFormData.js';

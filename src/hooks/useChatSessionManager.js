@@ -6,11 +6,10 @@ import {
   updateChatTitle as apiUpdateChatTitle,
   deleteChat as apiDeleteChat,
   undoDeleteChat,
-} from '../api/supabaseApi.js'; // <-- UPDATED PATH
-import { GEMINI_MODEL_NAME, LOCALSTORAGE_LAST_CHAT_ID_KEY } from '../config.js'; // <-- UPDATED PATH
+} from '../api/supabaseApi.js';
+import { GEMINI_MODEL_NAME, LOCALSTORAGE_LAST_CHAT_ID_KEY } from '../config.js';
 import Toast from '../components/Toast.jsx';
 
-// ... rest of the file is unchanged
 export function useChatSessionManager() {
   const queryClient = useQueryClient();
 

@@ -105,17 +105,15 @@ const ChatItem = memo(function ChatItem({ chat, isActive, onSelectChat, onTitleU
   );
 });
 
-// FIX: Optimized date grouping logic
 const groupChatsByDate = (chats) => {
   if (!chats || chats.length === 0) return [];
   
   const groups = [];
   const now = new Date();
   
-  // Calculate date boundaries ONCE at the start
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  const yesterdayStart = todayStart - 86400000; // 24 * 60 * 60 * 1000
-  const thisWeekStart = todayStart - ((now.getDay() + 6) % 7) * 86400000; // Monday is start of week
+  const yesterdayStart = todayStart - 86400000;
+  const thisWeekStart = todayStart - ((now.getDay() + 6) % 7) * 86400000;
   const lastWeekStart = thisWeekStart - 7 * 86400000;
   const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
   
@@ -123,21 +121,33 @@ const groupChatsByDate = (chats) => {
   let currentGroupKey = null;
 
   for (const chat of chats) {
-    const chatTime = chat.started ? Date.parse(chat.started) : 0;
+    const chatTime = Date.parse(chat.started);
     let groupTitle;
     let groupKey;
 
-    if (chatTime >= todayStart) { groupTitle = 'Today'; groupKey = 'today'; }
-    else if (chatTime >= yesterdayStart) { groupTitle = 'Yesterday'; groupKey = 'yesterday'; }
-    else if (chatTime >= thisWeekStart) { groupTitle = 'This Week'; groupKey = 'this-week'; }
-    else if (chatTime >= lastWeekStart) { groupTitle = 'Last Week'; groupKey = 'last-week'; }
-    else if (chatTime >= thisMonthStart) { groupTitle = 'This Month'; groupKey = 'this-month'; }
-    else if (chatTime > 0) {
+    // FIX: Add a check for isNaN to handle invalid or null dates gracefully
+    if (isNaN(chatTime)) {
+      groupTitle = 'Older';
+      groupKey = 'older';
+    } else if (chatTime >= todayStart) {
+      groupTitle = 'Today';
+      groupKey = 'today';
+    } else if (chatTime >= yesterdayStart) {
+      groupTitle = 'Yesterday';
+      groupKey = 'yesterday';
+    } else if (chatTime >= thisWeekStart) {
+      groupTitle = 'This Week';
+      groupKey = 'this-week';
+    } else if (chatTime >= lastWeekStart) {
+      groupTitle = 'Last Week';
+      groupKey = 'last-week';
+    } else if (chatTime >= thisMonthStart) {
+      groupTitle = 'This Month';
+      groupKey = 'this-month';
+    } else {
       const chatDateObj = new Date(chatTime);
       groupTitle = monthFormatter.format(chatDateObj);
       groupKey = `${chatDateObj.getFullYear()}-${String(chatDateObj.getMonth() + 1).padStart(2, '0')}`;
-    } else {
-      groupTitle = 'Older'; groupKey = 'older';
     }
 
     if (groupKey !== currentGroupKey) {
