@@ -1,5 +1,4 @@
 // file: src/hooks/usePromptBuilder.js
-/* src/hooks/usePromptBuilder.js */
 import { useState, useEffect, useCallback, useMemo } from 'preact/hooks';
 import { useFormData } from './useFormData.js';
 import { useMode } from './useMode.js';
@@ -81,7 +80,6 @@ function buildFilesSection(currentImportedCodeFiles) {
 
     for (const [rootName, files] of filesByRoot.entries()) {
         if (rootName !== 'INDIVIDUAL_FILES') {
-            // FIX: Use the correct property name 'path' instead of 'fullPath'
             const treePaths = files.map(f => f.path);
             out.push(`${rootName}/`);
             out.push(asciiTree(treePaths));
@@ -90,7 +88,6 @@ function buildFilesSection(currentImportedCodeFiles) {
         
         files.forEach(f => {
             out.push('```yaml');
-            // FIX: Use the correct property name 'path' instead of 'fullPath'
             out.push(`file: ${f.path}`);
             out.push('```');
             out.push('```');
@@ -142,6 +139,11 @@ export function usePromptBuilder(importedCodeFiles = []) {
   const resetPrompt = useCallback(() => {
     setPendingImages([]);
     setPendingPDFs([]);
+    // --- LOW SEVERITY FIX & CLARIFICATION ---
+    // This function resets the form to its initial state, BUT it intentionally
+    // preserves the user's preference for the 'developReturnFormat_autoIncludeDefault'
+    // toggle. This provides a better user experience, as they don't have to
+    // re-enable their preferred return format after every message.
     setForm(prevForm => ({
       ...INITIAL_FORM_DATA,
       developReturnFormat_autoIncludeDefault: prevForm.developReturnFormat_autoIncludeDefault,

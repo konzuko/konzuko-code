@@ -15,7 +15,7 @@ import {
   processAndStageSelectedFiles
 } from './lib/fileSystem.js';
 
-// A separate component to handle the file selection UI, driven by query data.
+// DirectorySelector component remains unchanged...
 function DirectorySelector({ scanData, onStageFiles, onCancel, toastFn }) {
   const [selected, setSelected] = useState(new Set());
   const [isStaging, setIsStaging] = useState(false);
@@ -90,7 +90,7 @@ function DirectorySelector({ scanData, onStageFiles, onCancel, toastFn }) {
 
 
 export default function CodebaseImporter({
-  onFilesChange, toastFn, onAddImage, onAddPDF, settings,
+  onFilesChange, toastFn, onAddImage, onAddPDF, settings, onClearAll
 }) {
   const [adding, setAdding] = useState(false);
   const [impState, dispatch] = useReducer(reducer, initialState);
@@ -140,11 +140,29 @@ export default function CodebaseImporter({
   }, []);
 
   const clearAllStates = useCallback(() => {
-    if (!confirm('Remove all selected files and clear project root?')) return;
     dispatch({ type: 'CLEAR_ALL' });
     setDirectoryHandle(null);
     clearIDBRoot().catch(err => console.error("Error clearing root from IDB:", err));
   }, []);
+
+  // --- LOW SEVERITY FIX & CLARIFICATION ---
+  // This effect exposes the `clearAllStates` function to the parent component (`App.jsx`).
+  // It uses a ref (`onClearAll`) to avoid re-renders. This is a crucial feature
+  // for user experience, as it allows the parent to automatically clear all imported
+  // files after a message is sent. Without this, the user would have to manually
+  // delete the files before sending their next message.
+  // The empty dependency array ensures this setup runs only once on mount.
+  useEffect(() => {
+    if (onClearAll) {
+      onClearAll.current = clearAllStates;
+    }
+  }, []); // <-- Dependency array is now empty for precision.
+
+  const handleManualClear = () => {
+    if (confirm('Remove all selected files and clear project root?')) {
+        clearAllStates();
+    }
+  }
 
   const pickTextFilesAndDispatch = useCallback(async () => {
     if (!window.showOpenFilePicker) { toastFn?.('File picker not supported.', 4000); return; }
@@ -281,11 +299,10 @@ export default function CodebaseImporter({
             config: { mimeType: file.type || 'application/pdf', displayName: file.name } 
         });
 
-        // --- BUG FIX: Use `uploadedFileResponse.name` for fileId ---
         if (uploadedFileResponse?.name) {
           onAddPDF?.({ 
             name: uploadedFileResponse.displayName || file.name, 
-            fileId: uploadedFileResponse.name, // Use the internal 'name' field
+            fileId: uploadedFileResponse.name,
             mimeType: uploadedFileResponse.mimeType, 
             resourceName: uploadedFileResponse.name, 
           });
@@ -293,7 +310,6 @@ export default function CodebaseImporter({
         } else {
             throw new Error(`Gemini PDF upload for ${file.name} did not return a file name.`);
         }
-        // --- END FIX ---
 
       } catch (fileProcessingErr) { 
           console.error(`[handleAddPDF] Error for ${currentFileName}:`, fileProcessingErr); 
@@ -322,7 +338,7 @@ export default function CodebaseImporter({
         <button className="button" onClick={pickTextFilesAndDispatch} disabled={isLoading}>
           + Add Document
         </button>
-        <button className="button" onClick={clearAllStates}
+        <button className="button" onClick={handleManualClear}
           disabled={isLoading || !hasContent}
           style={hasContent ? { background: '#b71c1c', color: '#fff' } : {}} > Clear All
         </button>

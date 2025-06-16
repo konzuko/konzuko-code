@@ -1,5 +1,5 @@
 // file: src/components/ChatArea.jsx
-import { useEffect, useRef, useState, useMemo } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks'; // <-- FIX: Removed useMemo
 import MessageItem from './MessageItem.jsx';
 import ConfirmationModal from './ConfirmationModal.jsx';
 import useCopyToClipboard from '../hooks/useCopyToClipboard.js';
@@ -12,7 +12,7 @@ const flatten = c =>
     ? c.filter(b => b.type === 'text').map(b => b.text).join('')
     : String(c ?? '');
 
-export default function ChatArea({ forceLoading, actionsDisabled }) {
+export default function ChatArea({ actionsDisabled }) { // <-- FIX: Removed forceLoading prop
   const {
     messages,
     isLoadingMessages,
@@ -61,29 +61,32 @@ export default function ChatArea({ forceLoading, actionsDisabled }) {
     return () => area.removeEventListener('konzuko:copy', handleCopyEvent);
   }, []);
 
-  if (forceLoading || isLoadingMessages) {
+  // --- FIX: Simplified loading check ---
+  if (isLoadingMessages) {
     return <div className="chat-loading-placeholder">Loading messages...</div>;
   }
+  // --- END FIX ---
 
   if (!messages || messages.length === 0) {
     return <div className="chat-empty-placeholder">No messages in this chat yet. Send one!</div>;
   }
 
-  const processedMessages = useMemo(() => {
-    let counter = 0;
-    return messages.map(m => ({
-      ...m,
-      assistantNumber: m.role === 'assistant' ? ++counter : 0,
-    }));
-  }, [messages]);
-
+  // --- FIX: Removed useMemo for processedMessages. Calculation is now done in the render loop. ---
   const lastUserMessageIndex = messages.map(m => m.role).lastIndexOf('user');
+  let assistantCounter = 0; // Counter for assistant messages
+  // --- END FIX ---
 
   return (
     <div ref={chatAreaRef}>
-      {processedMessages.map((m, idx) => {
+      {messages.map((m, idx) => { // Map over the original messages array
         const isUser = m.role === 'user';
         const isAsst = m.role === 'assistant';
+
+        // Increment counter for each assistant message
+        if (isAsst) {
+          assistantCounter++;
+        }
+        const assistantNumber = isAsst ? assistantCounter : 0;
 
         const isLastUserMessage = isUser && idx === lastUserMessageIndex;
         const doCopy = (e) => {
@@ -107,7 +110,7 @@ export default function ChatArea({ forceLoading, actionsDisabled }) {
             </div>
             <div className="message-header">
               <span className="message-role">
-                {isAsst ? ( <><span className="assistant-message-number">#{m.assistantNumber}</span> assistant</> ) : m.role }
+                {isAsst ? ( <><span className="assistant-message-number">#{assistantNumber}</span> assistant</> ) : m.role }
               </span>
               <div className="message-actions">
                 {currentMessageIsBeingEdited ? (

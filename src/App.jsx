@@ -7,7 +7,6 @@ import {
   useCallback
 } from 'preact/hooks';
 
-// HMR FIX: Changed import from "{ ChatProvider, useChat }" to "ChatProvider, { useChat }"
 import ChatProvider, { useChat } from './contexts/ChatContext.jsx';
 import ChatList from './ChatList.jsx';
 import PromptBuilder from './PromptBuilder.jsx';
@@ -67,6 +66,9 @@ function MainLayout() {
   const previousChatIdRef = useRef(null);
   
   const [stagedCodeFiles, setStagedCodeFiles] = useState([]);
+
+  // NEW: Create a ref to hold the clear function from the child component
+  const clearCodebaseImporterRef = useRef(null);
 
   const {
     form,
@@ -313,8 +315,14 @@ function MainLayout() {
     if (userMessageContentBlocks.length === 0) { Toast('Cannot send an empty message.', 3000); return; }
 
     sendMessage({ userMessageContentBlocks, existingMessages: messages, apiKey: apiKey });
-    resetPrompt();
-    setStagedCodeFiles([]);
+    
+    // --- FIX: Clear all inputs after sending ---
+    resetPrompt(); // Clears form text, pending images, and pending PDFs
+    if (clearCodebaseImporterRef.current) {
+        clearCodebaseImporterRef.current(); // Clears staged codebase files
+    }
+    // Note: setStagedCodeFiles([]) is now redundant because the above call handles it.
+    // --- END FIX ---
   }
 
   const handleCopyAll = () => {
@@ -429,6 +437,7 @@ function MainLayout() {
               hasLastSendFailed={hasLastSendFailed}
               importedCodeFiles={stagedCodeFiles}
               onCodeFilesChange={setStagedCodeFiles}
+              onClearCodebase={clearCodebaseImporterRef} // <-- PASS THE REF
               currentChatId={currentChatId}
             />
           </div>

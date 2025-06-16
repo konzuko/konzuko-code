@@ -185,13 +185,13 @@ export function useMessageManager(currentChatId, setHasLastSendFailed) {
     } else {
       forkConversationMutation.mutate({ messageId: editingId, newContentArray, apiKey });
     }
-  }, [editingId, editText, currentChatId, messages, forkConversationMutation, updateMessageMutation, handleCancelEdit]);
+  }, [editingId, editText, currentChatId, messages, forkConversationMutation, updateMessageMutation, handleCancelEdit, apiKey]); // <-- FIX: Added apiKey
 
   const handleResendMessage = useCallback((messageId, apiKey) => {
     if (!currentChatId || resendMessageMutation.isPending) return;
     if (!apiKey) { Toast("API Key not set.", 4000); return; }
     resendMessageMutation.mutate({ messageId, apiKey });
-  }, [currentChatId, resendMessageMutation]);
+  }, [currentChatId, resendMessageMutation, apiKey]); // <-- FIX: Added apiKey
 
   const handleDeleteMessage = useCallback((messageId) => {
     if (deleteMessageMutation.isPending || !currentChatId) return;
