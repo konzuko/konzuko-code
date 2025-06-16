@@ -6,6 +6,7 @@ import { supabase } from './lib/supabase.js';
 import { isTextLike, MAX_TEXT_FILE_SIZE, MAX_CHAR_LEN } from './lib/fileTypeGuards.js';
 import { FILE_LIMIT, MAX_CUMULATIVE_FILE_SIZE } from './config.js';
 import { compressImageToWebP } from './lib/imageUtils.js';
+import { imagePathFor } from './lib/pathUtils.js'; // <-- ADDED
 import { reducer, initialState, makeStagedFile } from './codeImporter/state.js';
 import { saveRoot, clearRoot as clearIDBRoot } from './lib/fsRoot.js';
 import {
@@ -189,12 +190,20 @@ export default function CodebaseImporter({
     let handles;
     try { handles = await window.showOpenFilePicker({ multiple: true, types: [{ description: 'Images', accept: {'image/*': ['.png','.jpg','.jpeg','.gif','.webp']}}] }); }
     catch(e){ if(e.name !== 'AbortError') toastFn?.(e.message); setAdding(false); return; }
+
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) {
+      toastFn?.('You must be signed in to upload images.', 4000);
+      setAdding(false);
+      return;
+    }
+
     let successCount = 0; let failCount = 0;
     for(const h of handles){
         try{
             const file = await h.getFile();
             const blob = await compressImageToWebP(file);
-            const path = `protected/${crypto.randomUUID()}.webp`;
+            const path = imagePathFor(session.user.id); // <-- REFACTORED
             const {error:upErr} = await supabase.storage.from('images').upload(path,blob,{contentType:'image/webp', upsert:false});
             if(upErr) throw upErr;
             
@@ -211,6 +220,14 @@ export default function CodebaseImporter({
   const handlePasteImage = useCallback(async () => {
     if(!navigator.clipboard?.read){ toastFn?.('Clipboard API not supported or permission denied.',4000); return; }
     setAdding(true);
+
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) {
+      toastFn?.('You must be signed in to paste images.', 4000);
+      setAdding(false);
+      return;
+    }
+
     try{
         const items = await navigator.clipboard.read();
         let pasted = false;
@@ -220,7 +237,7 @@ export default function CodebaseImporter({
             const raw = await it.getType(mime);
             const blob = await compressImageToWebP(raw);
             const name = `clipboard_${Date.now()}.webp`;
-            const path = `protected/${crypto.randomUUID()}.webp`;
+            const path = imagePathFor(session.user.id); // <-- REFACTORED
             const {error:upErr} = await supabase.storage.from('images').upload(path,blob,{contentType:'image/webp', upsert: false});
             if(upErr) throw upErr;
 
@@ -252,6 +269,12 @@ export default function CodebaseImporter({
       let currentFileName = "Unnamed PDF";
       try {
         const file = await h.getFile(); currentFileName = file.name;
+        // Stronger MIME type validation
+        if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+            toastFn?.(`Skipping "${file.name}": not a valid PDF file.`, 4000);
+            failCount++;
+            continue;
+        }
         const uploadedFileResponse = await genAI.files.upload({ file: file, config: { mimeType: file.type || 'application/pdf', displayName: file.name, } });
         if (uploadedFileResponse?.uri) {
           onAddPDF?.({ name: uploadedFileResponse.displayName || file.name, fileId: uploadedFileResponse.uri, mimeType: uploadedFileResponse.mimeType, resourceName: uploadedFileResponse.name, });
