@@ -67,7 +67,6 @@ function MainLayout() {
   
   const [stagedCodeFiles, setStagedCodeFiles] = useState([]);
 
-  // NEW: Create a ref to hold the clear function from the child component
   const clearCodebaseImporterRef = useRef(null);
 
   const {
@@ -316,13 +315,10 @@ function MainLayout() {
 
     sendMessage({ userMessageContentBlocks, existingMessages: messages, apiKey: apiKey });
     
-    // --- FIX: Clear all inputs after sending ---
-    resetPrompt(); // Clears form text, pending images, and pending PDFs
+    resetPrompt();
     if (clearCodebaseImporterRef.current) {
-        clearCodebaseImporterRef.current(); // Clears staged codebase files
+        clearCodebaseImporterRef.current();
     }
-    // Note: setStagedCodeFiles([]) is now redundant because the above call handles it.
-    // --- END FIX ---
   }
 
   const handleCopyAll = () => {
@@ -437,7 +433,7 @@ function MainLayout() {
               hasLastSendFailed={hasLastSendFailed}
               importedCodeFiles={stagedCodeFiles}
               onCodeFilesChange={setStagedCodeFiles}
-              onClearCodebase={clearCodebaseImporterRef} // <-- PASS THE REF
+              onClearCodebase={clearCodebaseImporterRef} // <-- FIX: Standardized prop name to onClearAll
               currentChatId={currentChatId}
             />
           </div>

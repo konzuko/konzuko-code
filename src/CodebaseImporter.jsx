@@ -145,18 +145,12 @@ export default function CodebaseImporter({
     clearIDBRoot().catch(err => console.error("Error clearing root from IDB:", err));
   }, []);
 
-  // --- LOW SEVERITY FIX & CLARIFICATION ---
-  // This effect exposes the `clearAllStates` function to the parent component (`App.jsx`).
-  // It uses a ref (`onClearAll`) to avoid re-renders. This is a crucial feature
-  // for user experience, as it allows the parent to automatically clear all imported
-  // files after a message is sent. Without this, the user would have to manually
-  // delete the files before sending their next message.
-  // The empty dependency array ensures this setup runs only once on mount.
   useEffect(() => {
+    // FIX: Standardized prop name to onClearAll
     if (onClearAll) {
       onClearAll.current = clearAllStates;
     }
-  }, []); // <-- Dependency array is now empty for precision.
+  }, []);
 
   const handleManualClear = () => {
     if (confirm('Remove all selected files and clear project root?')) {

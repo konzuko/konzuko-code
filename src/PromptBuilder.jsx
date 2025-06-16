@@ -45,7 +45,7 @@ export default function PromptBuilder({
   hasLastSendFailed,
   importedCodeFiles,
   onCodeFilesChange,
-  onClearCodebase, // <-- NEW PROP
+  onClearCodebase,
   currentChatId,
 }) {
   const formRef = useRef(form);
@@ -205,7 +205,7 @@ export default function PromptBuilder({
           onAddImage={onAddImage}
           onAddPDF={onAddPDF}
           settings={settings}
-          onClearAll={onClearCodebase} // <-- PASS THE REF
+          onClearAll={onClearCodebase} // <-- FIX: Standardized prop name to onClearAll
         />
       )}
 
