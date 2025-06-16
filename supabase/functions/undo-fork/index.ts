@@ -1,76 +1,74 @@
-// file: supabase/functions/undo-fork/index.ts
-import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
-import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { corsHeaders } from '../_shared/cors.ts';
+import { serve } from 'https://deno.land/std@0.177.0/http/server.ts'
+import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { corsHeaders } from '../_shared/cors.ts'
+import { isRateLimited } from '../_shared/ratelimit.ts'
 
-const supabaseAdmin: SupabaseClient = createClient(
-  Deno.env.get('SUPABASE_URL')!,
-  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-);
+const URL        = Deno.env.get('SUPABASE_URL')!
+const SRV_ROLE   = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+const ANON_KEY   = Deno.env.get('SUPABASE_ANON_KEY')!
+
+const supabaseAdmin: SupabaseClient = createClient(URL, SRV_ROLE)
 
 serve(async (req: Request): Promise<Response> => {
   if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders });
+    return new Response('ok', { headers: corsHeaders })
   }
 
   try {
-    const userClient = createClient(
-        Deno.env.get('SUPABASE_URL')!,
-        Deno.env.get('SUPABASE_ANON_KEY')!,
-        { global: { headers: { Authorization: req.headers.get('Authorization')! } } }
-    );
-    const { data: { user }, error: authError } = await userClient.auth.getUser();
-    if (authError) throw authError;
-    if (!user) throw new Error("User not authenticated");
+    const userClient = createClient(URL, ANON_KEY, {
+      global: { headers: { Authorization: req.headers.get('Authorization')! } }
+    })
+    const { data: { user }, error: authErr } = await userClient.auth.getUser()
+    if (authErr || !user) throw authErr
 
-    const { messageId, originalContent, chatId, anchorCreatedAt } = await req.json();
-
-    if (!messageId || !originalContent || !chatId || !anchorCreatedAt) {
-      throw new Error('Missing required parameters for undo-fork.');
+    /* rate-limit */
+    if (await isRateLimited(user.id, 'undo-fork')) {
+      return new Response(JSON.stringify({ error: 'Too Many Requests' }), {
+        status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      })
     }
 
-    // --- FIX: Verify that the message belongs to the user-owned chat ---
-    const { data: message, error: messageError } = await supabaseAdmin
+    const { messageId, originalContent, chatId, anchorCreatedAt } = await req.json()
+    if (!messageId || !originalContent || !chatId || !anchorCreatedAt) {
+      throw new Error('Missing required parameters')
+    }
+
+    /* ownership check */
+    const { data: msg, error: ownErr } = await supabaseAdmin
       .from('messages')
       .select('chat_id, chats!inner(user_id)')
       .eq('id', messageId)
-      .single();
-
-    if (messageError) throw messageError;
-
-    // The message's chat must be owned by the user AND match the chatId from the request.
-    if (message?.chats?.user_id !== user.id || message?.chat_id !== chatId) {
+      .single()
+    if (ownErr) throw ownErr
+    if (msg?.chats?.user_id !== user.id || msg?.chat_id !== chatId) {
       return new Response(JSON.stringify({ error: 'Forbidden' }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 403,
-      });
+        status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      })
     }
-    // --- END FIX ---
 
-    const { error: updateError } = await supabaseAdmin
+    /* restore anchor message */
+    const { error: updErr } = await supabaseAdmin
       .from('messages')
       .update({ content: originalContent, updated_at: new Date().toISOString() })
-      .eq('id', messageId);
+      .eq('id', messageId)
+    if (updErr) throw updErr
 
-    if (updateError) throw updateError;
-
-    const { error: unarchiveError } = await supabaseAdmin
+    /* un-archive subsequent messages */
+    const { error: unarcErr } = await supabaseAdmin
       .from('messages')
       .update({ deleted_at: null })
       .eq('chat_id', chatId)
-      .gt('created_at', anchorCreatedAt);
-
-    if (unarchiveError) throw unarchiveError;
+      .gt('created_at', anchorCreatedAt)
+    if (unarcErr) throw unarcErr
 
     return new Response(JSON.stringify({ success: true }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status: 200,
-    });
+      status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+    })
+
   } catch (err: any) {
-    console.error('[undo-fork] ', err);
-    return new Response(
-      JSON.stringify({ error: err.message ?? 'Unexpected error' }),
-      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
-    );
+    console.error('[undo-fork]', err)
+    return new Response(JSON.stringify({ error: err.message ?? 'Unexpected error' }), {
+      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+    })
   }
-});
+})
