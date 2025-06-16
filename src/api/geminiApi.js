@@ -60,7 +60,25 @@ async function buildApiPartsForMessage(msg, ai, urlMap, forceBase64 = false) {
         if (block.type === 'text') {
             parts.push({ text: block.text });
         } else if (block.type === 'file' && block.file?.file_id) {
-            parts.push({ fileData: { mimeType: block.file.mime_type, fileUri: block.file.file_id } });
+            // --- BUG FIX: Handle legacy URI format and use correct fileId ---
+            let fileUri = block.file.file_id;
+
+            // Backward-compatibility: if we previously stored the public `uri`,
+            // convert it to the internal `name` format (e.g., "files/file-...")
+            if (fileUri.startsWith('https://')) {
+                const idx = fileUri.indexOf('/files/');
+                if (idx !== -1) {
+                    fileUri = fileUri.slice(idx + 1); // Keep "files/..."
+                }
+            }
+
+            parts.push({ 
+                fileData: { 
+                    mimeType: block.file.mime_type, 
+                    fileUri: fileUri 
+                } 
+            });
+            // --- END FIX ---
         } else if (block.type === 'image_url' && block.image_url) {
             const useCachedFile = block.image_url.file_id && !forceBase64;
 
@@ -81,8 +99,8 @@ async function buildApiPartsForMessage(msg, ai, urlMap, forceBase64 = false) {
                                     file: blob,
                                     config: { mimeType: 'image/webp', displayName: block.image_url.original_name }
                                 });
-                                if (uploadResult?.uri) {
-                                    const newFileId = uploadResult.name;
+                                if (uploadResult?.name) { // Check for 'name'
+                                    const newFileId = uploadResult.name; // Use 'name'
                                     const updatedContent = msg.content.map(b =>
                                         b.type === 'image_url' && b.image_url.path === block.image_url.path
                                             ? { ...b, image_url: { ...b.image_url, file_id: newFileId } }

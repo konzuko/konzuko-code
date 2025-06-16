@@ -6,7 +6,7 @@ import { supabase } from './lib/supabase.js';
 import { isTextLike, MAX_TEXT_FILE_SIZE, MAX_CHAR_LEN } from './lib/fileTypeGuards.js';
 import { FILE_LIMIT, MAX_CUMULATIVE_FILE_SIZE } from './config.js';
 import { compressImageToWebP } from './lib/imageUtils.js';
-import { imagePathFor } from './lib/pathUtils.js'; // <-- ADDED
+import { imagePathFor } from './lib/pathUtils.js';
 import { reducer, initialState, makeStagedFile } from './codeImporter/state.js';
 import { saveRoot, clearRoot as clearIDBRoot } from './lib/fsRoot.js';
 import {
@@ -203,7 +203,7 @@ export default function CodebaseImporter({
         try{
             const file = await h.getFile();
             const blob = await compressImageToWebP(file);
-            const path = imagePathFor(session.user.id); // <-- REFACTORED
+            const path = imagePathFor(session.user.id);
             const {error:upErr} = await supabase.storage.from('images').upload(path,blob,{contentType:'image/webp', upsert:false});
             if(upErr) throw upErr;
             
@@ -237,7 +237,7 @@ export default function CodebaseImporter({
             const raw = await it.getType(mime);
             const blob = await compressImageToWebP(raw);
             const name = `clipboard_${Date.now()}.webp`;
-            const path = imagePathFor(session.user.id); // <-- REFACTORED
+            const path = imagePathFor(session.user.id);
             const {error:upErr} = await supabase.storage.from('images').upload(path,blob,{contentType:'image/webp', upsert: false});
             if(upErr) throw upErr;
 
@@ -260,27 +260,46 @@ export default function CodebaseImporter({
     let handles;
     try { handles = await window.showOpenFilePicker({ multiple: true, types: [{ description: 'PDF', accept: { 'application/pdf': ['.pdf'] } }] }); }
     catch (e) { if (e.name !== 'AbortError') toastFn?.('PDF picker error: ' + e.message, 4000); setAdding(false); return; }
-    let successCount = 0; let failCount = 0;
+    
     let genAI;
     try { genAI = new GoogleGenAI({ apiKey: settings.apiKey });
     } catch (sdkInitError) { console.error('[handleAddPDF] SDK Init Error:', sdkInitError); toastFn?.('Gemini SDK init failed: ' + sdkInitError.message, 5000); setAdding(false); return; }
 
+    let successCount = 0; let failCount = 0;
     for (const h of handles) {
       let currentFileName = "Unnamed PDF";
       try {
         const file = await h.getFile(); currentFileName = file.name;
-        // Stronger MIME type validation
         if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
             toastFn?.(`Skipping "${file.name}": not a valid PDF file.`, 4000);
             failCount++;
             continue;
         }
-        const uploadedFileResponse = await genAI.files.upload({ file: file, config: { mimeType: file.type || 'application/pdf', displayName: file.name, } });
-        if (uploadedFileResponse?.uri) {
-          onAddPDF?.({ name: uploadedFileResponse.displayName || file.name, fileId: uploadedFileResponse.uri, mimeType: uploadedFileResponse.mimeType, resourceName: uploadedFileResponse.name, });
+        
+        const uploadedFileResponse = await genAI.files.upload({ 
+            file: file, 
+            config: { mimeType: file.type || 'application/pdf', displayName: file.name } 
+        });
+
+        // --- BUG FIX: Use `uploadedFileResponse.name` for fileId ---
+        if (uploadedFileResponse?.name) {
+          onAddPDF?.({ 
+            name: uploadedFileResponse.displayName || file.name, 
+            fileId: uploadedFileResponse.name, // Use the internal 'name' field
+            mimeType: uploadedFileResponse.mimeType, 
+            resourceName: uploadedFileResponse.name, 
+          });
           successCount++;
-        } else throw new Error(`Gemini PDF upload for ${file.name} missing URI.`);
-      } catch (fileProcessingErr) { console.error(`[handleAddPDF] Error for ${currentFileName}:`, fileProcessingErr); toastFn?.(`PDF ${currentFileName} failed: ${fileProcessingErr.message}`, 6000); failCount++; }
+        } else {
+            throw new Error(`Gemini PDF upload for ${file.name} did not return a file name.`);
+        }
+        // --- END FIX ---
+
+      } catch (fileProcessingErr) { 
+          console.error(`[handleAddPDF] Error for ${currentFileName}:`, fileProcessingErr); 
+          toastFn?.(`PDF ${currentFileName} failed: ${fileProcessingErr.message}`, 6000); 
+          failCount++; 
+      }
     }
     if (successCount > 0 && failCount === 0) toastFn?.(`${successCount} PDF(s) uploaded.`, 3000);
     else if (successCount > 0 && failCount > 0) toastFn?.(`${successCount} PDF(s) uploaded, ${failCount} failed.`, 5000);

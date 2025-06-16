@@ -7,13 +7,14 @@ import {
   useCallback
 } from 'preact/hooks';
 
-import { ChatProvider, useChat } from './contexts/ChatContext.jsx';
+// HMR FIX: Changed import from "{ ChatProvider, useChat }" to "ChatProvider, { useChat }"
+import ChatProvider, { useChat } from './contexts/ChatContext.jsx';
 import ChatList from './ChatList.jsx';
 import PromptBuilder from './PromptBuilder.jsx';
 import ChatArea from './components/ChatArea.jsx';
 import Toast from './components/Toast.jsx';
 import { supabase } from './lib/supabase.js';
-import { debounce } from './lib/utils.js'; // Import from shared utility
+import { debounce } from './lib/utils.js';
 
 import {
     IMAGE_TOKEN_ESTIMATE,

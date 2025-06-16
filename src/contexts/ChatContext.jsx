@@ -8,7 +8,9 @@ import { useSettings } from './SettingsContext.jsx';
 const ChatContext = createContext(null);
 ChatContext.displayName = 'ChatContext';
 
-export const ChatProvider = ({ children }) => {
+// HMR FIX: Changed from "export const ChatProvider" to "export default function ChatProvider"
+// This makes ChatProvider the default export, allowing the named export `useChat` to coexist.
+export default function ChatProvider({ children }) {
   const [hasLastSendFailed, setHasLastSendFailed] = useState(false);
   const { isApiKeyLoading } = useSettings();
 
