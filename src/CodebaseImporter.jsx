@@ -146,7 +146,6 @@ export default function CodebaseImporter({
   }, []);
 
   useEffect(() => {
-    // FIX: Standardized prop name to onClearAll
     if (onClearAll) {
       onClearAll.current = clearAllStates;
     }
@@ -196,6 +195,7 @@ export default function CodebaseImporter({
     finally { setAdding(false); }
   }, [toastFn, impState.files.length]);
 
+  // --- SIMPLIFIED: Only uploads to Supabase Storage ---
   const handleAddImages = useCallback(async () => {
     if (!window.showOpenFilePicker) { toastFn?.('File picker not supported.', 4000); return; }
     setAdding(true);
@@ -229,6 +229,7 @@ export default function CodebaseImporter({
     setAdding(false);
   }, [onAddImage, toastFn]);
 
+  // --- SIMPLIFIED: Only uploads to Supabase Storage ---
   const handlePasteImage = useCallback(async () => {
     if(!navigator.clipboard?.read){ toastFn?.('Clipboard API not supported or permission denied.',4000); return; }
     setAdding(true);
@@ -265,6 +266,7 @@ export default function CodebaseImporter({
     setAdding(false);
   }, [onAddImage, toastFn]);
 
+  // --- SIMPLIFIED: PDF upload now only interacts with Gemini Files API ---
   const handleAddPDF = useCallback(async () => {
     if (!settings?.apiKey || String(settings.apiKey).trim() === "") { toastFn?.('Gemini API Key not set.', 5000); return; }
     if (!window.showOpenFilePicker) { toastFn?.('File picker not supported.', 4000); return; }
