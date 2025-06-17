@@ -1,5 +1,6 @@
 // ────────────────────────────────────────────────────────────────
-// file: src/api/geminiApi.js               (robust, race-safe)
+// src/api/geminiApi.js
+// Robust Gemini bridge – image upload, retry, optimism-lock safe
 // ────────────────────────────────────────────────────────────────
 import { supabase } from '../lib/supabase.js';
 import {
@@ -9,10 +10,10 @@ import {
 import HARDCODED_GEMINI_SYSTEM_PROMPT from '../system-prompt.md?raw';
 import { GoogleGenAI } from '@google/genai';
 
-/*=================================================================
-  Error helper
-=================================================================*/
-class ApiError extends Error {
+/* =================================================================
+   1. Error class
+   ===============================================================*/
+export class ApiError extends Error {
   constructor(code = 'UNKNOWN', message = 'Unspecified error', cause) {
     super(message);
     this.code = code;
@@ -20,23 +21,21 @@ class ApiError extends Error {
   }
 }
 
-/*=================================================================
-  Validation helpers
-=================================================================*/
+/* =================================================================
+   2. Helpers – validation & retries
+   ===============================================================*/
 function validateKey(raw = '') {
   const key = raw ? raw.trim() : '';
+  // allow future console keys with “:” as separator
   if (!/^[A-Za-z0-9_\-:]{30,70}$/.test(key)) {
     throw new ApiError(
       'BAD_KEY',
-      'Gemini API key missing or malformed – copy a fresh key from Google AI Studio.'
+      'Gemini API key missing or malformed – copy a fresh key from Google AI Studio'
     );
   }
   return key;
 }
 
-/*=================================================================
-  Retry helpers
-=================================================================*/
 function isRetryable(err) {
   if (!err) return false;
   const code = err.code ?? err.status ?? '';
@@ -71,9 +70,9 @@ async function withRetries(fn, wait = [0, 500, 1000, 2000, 4000]) {
   throw lastErr;
 }
 
-/*=================================================================
-  Storage helper – signed URL (15-min)
-=================================================================*/
+/* =================================================================
+   3. Storage – signed URL (15 min)
+   ===============================================================*/
 async function getSignedUrl(path) {
   const { data, error } = await supabase.functions.invoke(
     'get-signed-urls',
@@ -86,41 +85,53 @@ async function getSignedUrl(path) {
   return data.urlMap?.[path] ?? null;
 }
 
-/*=================================================================
-  Optimistic-concurrency safe message updater
-=================================================================*/
-async function updateMessageSafely(id, newContent) {
-  //  pull updated_at so we can guard the update
-  const { data: orig, error: selErr } = await supabase
+/* =================================================================
+   4. Optimistic concurrency safe update
+   ===============================================================*/
+async function updateMessageSafely(id, newContent, attempt = 0) {
+  if (attempt > 2) {
+    throw new ApiError(
+      'DB',
+      'Could not update message after 3 concurrent attempts'
+    );
+  }
+
+  const { data: row, error: selErr } = await supabase
     .from('messages')
     .select('updated_at')
     .eq('id', id)
     .single();
+
   if (selErr) throw new ApiError('DB', selErr.message, selErr);
 
-  const origStamp = orig.updated_at;
-  const nextStamp = new Date().toISOString();
-
-  const { data: upd, error: updErr } = await supabase
+  const baseQuery = supabase
     .from('messages')
-    .update({ content: newContent, updated_at: nextStamp })
-    .eq('id', id)
-    .eq('updated_at', origStamp)
+    .update({
+      content: newContent,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', id);
+
+  // only guard when column is NOT null
+  const guardedQuery =
+    row && row.updated_at !== null
+      ? baseQuery.eq('updated_at', row.updated_at)
+      : baseQuery;
+
+  const { data: upRow, error: updErr } = await guardedQuery
     .select()
     .maybeSingle();
 
-  if (updErr) throw new ApiError('DB', updErr.message, updErrErr);
+  if (updErr) throw new ApiError('DB', updErr.message, updErr);
 
-  if (!upd) {
-    // someone else modified the row – re-run once
-    return updateMessageSafely(id, newContent);
-  }
-  return upd;
+  // concurrent modification → retry once
+  if (!upRow) return updateMessageSafely(id, newContent, attempt + 1);
+  return upRow;
 }
 
-/*=================================================================
-  Image upload  (Supabase → Gemini Files API)
-=================================================================*/
+/* =================================================================
+   5. Upload image to Gemini Files API
+   ===============================================================*/
 async function uploadAndCacheFileUri({
   apiKey,
   messageId,
@@ -128,45 +139,45 @@ async function uploadAndCacheFileUri({
   imageUrlBlock,
 }) {
   const path = imageUrlBlock.image_url?.path;
-  if (!path) throw new ApiError('NO_PATH', 'Image block missing storage path');
+  if (!path) {
+    throw new ApiError('NO_PATH', 'Image block missing storage path');
+  }
 
-  // ── download from Supabase storage
+  // download blob from Supabase
   const blob = await withRetries(async () => {
     const url = await getSignedUrl(path);
-    if (!url) throw new ApiError('SIGNED_URL', 'Signed URL not returned');
+    if (!url)
+      throw new ApiError('SIGNED_URL', 'Signed URL not returned by function');
     const res = await fetch(url);
     if (!res.ok)
       throw new ApiError(
         'FETCH_BLOB',
         `HTTP ${res.status} while downloading image`
       );
-    return await res.blob();
+    return res.blob();
   });
 
-  // ── upload to Gemini Files  (single attempt ‑ avoid duplicates)
+  // single-try upload (avoid duplicates)
   const genAI = new GoogleGenAI({ apiKey });
   let uploaded;
   try {
     uploaded = await genAI.files.upload({
-      file: blob,
+      file: await blob,
       config: {
-        mimeType: blob.type || 'image/webp',
-        displayName: imageUrlBlock.image_url.original_name || 'upload.webp',
+        mimeType: (await blob).type || 'image/webp',
+        displayName:
+          imageUrlBlock.image_url.original_name || 'upload.webp',
       },
     });
   } catch (e) {
     throw new ApiError('UPLOAD', e.message, e);
-  } finally {
-    // release memory sooner
-    /* eslint-disable no-param-reassign */
-    //  (allow GC – a micro-optimisation)
   }
 
   const { name: file_id, uri: file_uri, mimeType } = uploaded;
   if (!file_uri)
     throw new ApiError('UPLOAD', 'Files API response missing "uri"');
 
-  /*── persist to DB so we never upload again ────────────────────*/
+  // persist file_id + file_uri
   const { data: msgRow, error } = await supabase
     .from('messages')
     .select('content')
@@ -184,14 +195,14 @@ async function uploadAndCacheFileUri({
       mime_type: mimeType,
     },
   };
-  await updateMessageSafely(messageId, newContent);
 
+  await updateMessageSafely(messageId, newContent);
   return { file_uri, mimeType };
 }
 
-/*=================================================================
-  Public – callApiForText
-=================================================================*/
+/* =================================================================
+   6. Public helper
+   ===============================================================*/
 export async function callApiForText({
   messages = [],
   apiKey = '',
@@ -203,7 +214,6 @@ export async function callApiForText({
   const contents = [];
   let extraSystem = '';
 
-  /*── Build parts array ─────────────────────────────────────────*/
   for (const msg of messages) {
     const blocks = Array.isArray(msg.content)
       ? msg.content
@@ -212,11 +222,13 @@ export async function callApiForText({
     const parts = [];
 
     for (const [i, block] of blocks.entries()) {
+      // TEXT
       if (block.type === 'text') {
         if (block.text?.trim()) parts.push({ text: block.text });
         continue;
       }
 
+      // IMAGE
       if (block.type === 'image_url' && block.image_url) {
         let fileUri = block.image_url.file_uri;
         let mimeType = block.image_url.mime_type || 'image/webp';
@@ -235,18 +247,24 @@ export async function callApiForText({
         continue;
       }
 
+      // OTHER GEMINI-COMPATIBLE FILE
       if (block.type === 'file' && block.file?.file_id) {
         let fileUri = block.file.file_id;
         if (!fileUri.startsWith('files/')) fileUri = `files/${fileUri}`;
-        parts.push({ fileData: { mimeType: block.file.mime_type, fileUri } });
+        parts.push({
+          fileData: {
+            mimeType: block.file.mime_type,
+            fileUri,
+          },
+        });
       }
     }
 
     if (!parts.length) continue;
 
     if (msg.role === 'system') {
-      const t = parts.find((p) => p.text)?.text;
-      if (t) extraSystem += (extraSystem ? '\n' : '') + t;
+      const firstText = parts.find((p) => p.text)?.text;
+      if (firstText) extraSystem += (extraSystem ? '\n' : '') + firstText;
     } else {
       contents.push({
         role: msg.role === 'assistant' ? 'model' : msg.role,
@@ -255,7 +273,6 @@ export async function callApiForText({
     }
   }
 
-  /*── System instruction ───────────────────────────────────────*/
   const systemInstruction = [
     HARDCODED_GEMINI_SYSTEM_PROMPT,
     extraSystem.trim(),
@@ -263,7 +280,6 @@ export async function callApiForText({
     .filter(Boolean)
     .join('\n\n');
 
-  /*── Request object ───────────────────────────────────────────*/
   const payload = {
     model: GEMINI_MODEL_NAME,
     contents,
@@ -280,7 +296,7 @@ export async function callApiForText({
     },
   };
 
-  /*── Timeout + abort chaining ─────────────────────────────────*/
+  // timeout + abort chaining
   const ctrl = new AbortController();
   if (signal) signal.addEventListener('abort', () => ctrl.abort());
 
@@ -290,13 +306,13 @@ export async function callApiForText({
   );
 
   try {
-    const response = await withRetries(() =>
+    const resp = await withRetries(() =>
       ai.models.generateContent(payload, { signal: ctrl.signal })
     );
 
     clearTimeout(t);
 
-    const cand = response?.candidates?.[0];
+    const cand = resp?.candidates?.[0];
     if (!cand)
       throw new ApiError('NO_RESPONSE', 'Model returned no candidates');
 
@@ -309,12 +325,15 @@ export async function callApiForText({
 
     const text = cand.content?.parts?.map((p) => p.text).join('');
     if (!text) throw new ApiError('EMPTY', 'Model returned empty text');
-
     return { content: text };
   } catch (err) {
     clearTimeout(t);
     if (!(err instanceof ApiError)) {
-      throw new ApiError(err.code ?? 'ERROR', err.message ?? String(err), err);
+      throw new ApiError(
+        err.code ?? 'ERROR',
+        err.message ?? String(err),
+        err
+      );
     }
     throw err;
   }
