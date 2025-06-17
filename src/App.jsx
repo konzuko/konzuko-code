@@ -29,6 +29,26 @@ import { useScrollNavigation } from './hooks/useScrollNavigation.js';
 import { useTokenizableContent } from './hooks/useTokenizableContent.js';
 import { countTokensWithGemini, initTokenWorker } from './lib/tokenWorkerClient.js';
 
+// FIX: Add a component to handle post-checkout redirects.
+function CheckoutStatusHandler() {
+  useEffect(() => {
+    const query = new URLSearchParams(window.location.search);
+    if (query.has('checkout')) {
+      const status = query.get('checkout');
+      if (status === 'success') {
+        Toast('Payment successful! Welcome to Konzuko Pro.', 5000);
+      } else if (status === 'cancel') {
+        Toast('Your order was cancelled. You can try again anytime.', 5000);
+      }
+      // Clean the URL to prevent the toast from showing on refresh.
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+  }, []);
+
+  return null; // This component renders nothing.
+}
+
+
 function MainLayout() {
   const { 
     collapsed, 
@@ -40,6 +60,7 @@ function MainLayout() {
     apiKey,
     isApiKeyLoading,
     handleApiKeyChangeAndSave,
+    handleManageSubscription,
     model,
   } = useSettings();
 
@@ -328,6 +349,7 @@ function MainLayout() {
 
   return (
     <div className="app-container" ref={appContainerRef}>
+      <CheckoutStatusHandler />
       <ChatList appDisabled={isBusy} />
       <div className="main-content">
         <div className="top-bar">
@@ -386,34 +408,39 @@ function MainLayout() {
 
         {displaySettings.showSettings && (
           <div className="settings-panel">
-            <div style={{ marginBottom: 'var(--space-md)' }}>
-              <a
-                href="https://aistudio.google.com/app/apikey"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="button button-accent"
-              >
-                Get your Key
-              </a>
-            </div>
-            <div style={{ maxWidth: '50%' }}>
-              <div className="form-group">
-                <label htmlFor="apiKeyInputApp" style={{ display: 'block', marginBottom: 'var(--space-sm)' }}>
-                  Gemini API Key (Google AI Studio):
-                </label>
-                <input
-                  id="apiKeyInputApp"
-                  className="form-input"
-                  type="password"
-                  value={apiKey}
-                  onInput={(e) => handleApiKeyChangeAndSave(e.target.value)}
-                  placeholder={isApiKeyLoading ? "Loading API Key..." : "Enter your Gemini API Key"}
-                  disabled={isApiKeyLoading}
-                />
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div style={{ maxWidth: '50%' }}>
+                <div className="form-group">
+                  <label htmlFor="apiKeyInputApp" style={{ display: 'block', marginBottom: 'var(--space-sm)' }}>
+                    Gemini API Key (Google AI Studio):
+                  </label>
+                  <input
+                    id="apiKeyInputApp"
+                    className="form-input"
+                    type="password"
+                    value={apiKey}
+                    onInput={(e) => handleApiKeyChangeAndSave(e.target.value)}
+                    placeholder={isApiKeyLoading ? "Loading API Key..." : "Enter your Gemini API Key"}
+                    disabled={isApiKeyLoading}
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="modelInputApp">Model:</label>
+                  <input id="modelInputApp" className="form-input" value={model} readOnly />
+                </div>
+                 <a
+                  href="https://aistudio.google.com/app/apikey"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="button button-accent"
+                >
+                  Get your Key
+                </a>
               </div>
-              <div className="form-group">
-                <label htmlFor="modelInputApp">Model:</label>
-                <input id="modelInputApp" className="form-input" value={model} readOnly />
+              <div style={{ textAlign: 'right' }}>
+                <h3 style={{ marginBottom: 'var(--space-sm)' }}>Account</h3>
+                <button className="button" onClick={handleManageSubscription}>Manage Subscription</button>
+                <button className="button" style={{ marginLeft: 'var(--space-sm)' }} onClick={() => supabase.auth.signOut()}>Sign Out</button>
               </div>
             </div>
           </div>

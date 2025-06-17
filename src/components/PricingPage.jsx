@@ -2,75 +2,116 @@
 import { useState } from 'preact/hooks';
 import { loadStripe } from '@stripe/stripe-js';
 import { supabase } from '../lib/supabase.js';
-import { STRIPE_PUBLISHABLE_KEY, STRIPE_PRICE_ID } from '../config.js';
+import { STRIPE_PUBLISHABLE_KEY } from '../config.js';
 import Toast from './Toast.jsx';
 
-// FIX: Add a check to ensure environment variables are loaded.
-const areStripeKeysMissing = !STRIPE_PUBLISHABLE_KEY || !STRIPE_PRICE_ID;
+const areStripeKeysMissing = !STRIPE_PUBLISHABLE_KEY;
 const stripePromise = areStripeKeysMissing ? null : loadStripe(STRIPE_PUBLISHABLE_KEY);
 
-if (areStripeKeysMissing) {
-  console.error("Stripe configuration is missing. Ensure VITE_STRIPE_PUBLISHABLE_KEY and VITE_STRIPE_PRICE_ID are set in your .env file and the dev server is restarted.");
-}
+// ─────────────────────────────────────────────────────────────
+// All available plans.  Replace the price IDs with your own.
+// ─────────────────────────────────────────────────────────────
+const plans = [
+  {
+    id: 'price_1Rb2d72RqNQ49lAwemcIcuUE',   // £35 / month
+    name: 'Pro',
+    price: '£35',
+    period: '/mo',
+    features: ['Unlimited Tasks', 'Full Context Window', 'Priority Support'],
+  },
+  {
+    id: 'price_1Rb2d72RqNQ49lAwpG0LllTn',   // £50 / month
+    name: 'Team',
+    price: '£50',
+    period: '/mo',
+    features: ['All Pro Features', 'Team Collaboration', 'Centralised Billing'],
+    isFeatured: true,
+  },
+];
 
 export default function PricingPage() {
-  const [loading, setLoading] = useState(false);
+  const [loadingId, setLoadingId] = useState(null);
 
-  const handleCheckout = async () => {
+  async function handleCheckout(priceId) {
     if (areStripeKeysMissing) {
-      Toast('Stripe is not configured correctly. Please contact support.', 6000);
+      Toast('Stripe is not configured in this environment.', 5000);
       return;
     }
-    setLoading(true);
+
+    setLoadingId(priceId);
+
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      if (!session) throw new Error('Not authenticated');
+      if (!session?.access_token) throw new Error('User not authenticated');
 
-      const { data, error } = await supabase.functions.invoke('create-checkout-session', {
-        body: { priceId: STRIPE_PRICE_ID },
+      // ---- CUSTOM FETCH (no "apikey" header) ----
+      const res = await fetch('/functions/v1/create-checkout-session', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ priceId }),
       });
 
-      if (error) throw error;
-      if (data.error) throw new Error(data.error);
+      if (!res.ok) {
+        const { error } = await res.json().catch(() => ({ error: res.statusText }));
+        throw new Error(error || `HTTP ${res.status}`);
+      }
+
+      const { sessionId } = await res.json();
 
       const stripe = await stripePromise;
-      const { error: stripeError } = await stripe.redirectToCheckout({ sessionId: data.sessionId });
-
-      if (stripeError) {
-        throw stripeError;
-      }
+      const { error: stripeErr } = await stripe.redirectToCheckout({ sessionId });
+      if (stripeErr) throw stripeErr;
     } catch (err) {
-      Toast(`Checkout failed: ${err.message}`, 5000);
-      setLoading(false);
+      console.error(err);
+      Toast(`Checkout failed: ${err.message}`, 6000);
+      setLoadingId(null);
     }
-  };
+  }
 
   return (
     <div className="full-page-center">
-      <h1 className="pricing-page-title">Unlock Konzuko Code</h1>
-      <p className="pricing-page-subtitle">
-        Subscribe to get full access to all features, unlimited tasks, and priority support.
-      </p>
-      <div className="pricing-card">
-        <h2 className="pricing-card-title">Pro Plan</h2>
-        <p className="pricing-card-price">
-          $10<span className="pricing-card-price-period">/mo</span>
-        </p>
-        <button
-          className="button pricing-subscribe-button"
-          onClick={handleCheckout}
-          disabled={loading || areStripeKeysMissing}
-          title={areStripeKeysMissing ? "Stripe configuration is missing." : ""}
-        >
-          {loading ? 'Redirecting...' : 'Subscribe Now'}
-        </button>
+      <h1 className="pricing-page-title">Choose Your Plan</h1>
+
+      <div className="pricing-grid">
+        {plans.map((plan) => (
+          <div
+            key={plan.id}
+            className={`pricing-card ${plan.isFeatured ? 'featured' : ''}`}
+          >
+            <h2 className="pricing-card-title">{plan.name}</h2>
+            <p className="pricing-card-price">
+              {plan.price}
+              <span className="pricing-card-price-period">{plan.period}</span>
+            </p>
+
+            <ul className="pricing-features-list">
+              {plan.features.map((f) => (
+                <li key={f}>{f}</li>
+              ))}
+            </ul>
+
+            <button
+              className={`button pricing-subscribe-button ${
+                plan.isFeatured ? 'featured' : ''
+              }`}
+              disabled={loadingId === plan.id}
+              onClick={() => handleCheckout(plan.id)}
+            >
+              {loadingId === plan.id ? 'Redirecting…' : 'Subscribe'}
+            </button>
+          </div>
+        ))}
       </div>
-       <button
-          className="button pricing-signout-button"
-          onClick={() => supabase.auth.signOut()}
-        >
-          Sign Out
-        </button>
+
+      <button
+        className="button pricing-signout-button"
+        onClick={() => supabase.auth.signOut()}
+      >
+        Sign Out
+      </button>
     </div>
   );
 }
