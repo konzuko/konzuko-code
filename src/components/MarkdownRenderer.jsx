@@ -8,15 +8,24 @@ import rehypeSanitize, { defaultSchema as githubSchema } from 'rehype-sanitize'
 import CodeBlock from './CodeBlock.jsx'
 
 export default function MarkdownRenderer({ children }) {
-  // create one memoized schema: start from GitHub's rules,
-  // then allow `class` on span/code/pre for syntax highlighting
+  // FIX: Extend the default GitHub schema to allow table-related elements.
+  // This is the secure way to enable tables, as it keeps the sanitizer
+  // active but teaches it to permit the necessary tags and attributes.
   const schema = useMemo(() => ({
     ...githubSchema,
+    tagNames: [
+      ...(githubSchema.tagNames || []),
+      'table', 'thead', 'tbody', 'tr', 'th', 'td'
+    ],
     attributes: {
       ...githubSchema.attributes,
+      // Allow class for syntax highlighting on these tags
       span: [...(githubSchema.attributes?.span || []), 'class'],
       code: [...(githubSchema.attributes?.code || []), 'class'],
       pre: [...(githubSchema.attributes?.pre || []), 'class'],
+      // Allow the 'align' attribute on table header and data cells
+      th: [...(githubSchema.attributes?.th || []), 'align'],
+      td: [...(githubSchema.attributes?.td || []), 'align'],
     },
   }), [])
 
@@ -25,7 +34,7 @@ export default function MarkdownRenderer({ children }) {
       remarkPlugins={[remarkGfm]}
       rehypePlugins={[
         rehypeRaw,                // parse any embedded HTML
-        [rehypeSanitize, schema], // sanitize it using GitHub's rules + our tweaks
+        [rehypeSanitize, schema], // sanitize it using our extended schema
         rehypeHighlight           // syntax‐highlight code blocks
       ]}
       components={{

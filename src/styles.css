@@ -737,6 +737,29 @@ html, body {
   padding-left: 24px;
 }
 
+/* NEW: Table styles for Markdown */
+.message-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1em 0;
+  border: 1px solid var(--border);
+  font-size: 0.9em;
+}
+.message-content th,
+.message-content td {
+  border: 1px solid var(--border);
+  padding: var(--space-sm);
+  text-align: left;
+}
+.message-content th {
+  background-color: var(--bg-tertiary);
+  font-weight: bold;
+}
+.message-content tr:nth-child(even) {
+  background-color: var(--bg-secondary);
+}
+
+
 .code-wrapper {
   position: relative;
   margin: 1em 0;
@@ -923,12 +946,13 @@ html, body {
 .send-button:hover:not(:disabled) {
   background-color: var(--accent-hover);
 }
-.send-button.send-button--error {
+.send-button.send-button--error,
+.resend-button-bottom.send-button--error {
   background-color: var(--error);
   color: white;
-  /* border-color: var(--error-hover); REMOVED */
 }
-.send-button.send-button--error:hover:not(:disabled) {
+.send-button.send-button--error:hover:not(:disabled),
+.resend-button-bottom.send-button--error:hover:not(:disabled) {
   background-color: var(--error-hover);
 }
 
