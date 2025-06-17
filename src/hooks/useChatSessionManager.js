@@ -65,17 +65,10 @@ export function useChatSessionManager() {
       }
       Toast('Task deleted.', 15000, () => undoDeleteChatMutation.mutate(chatId));
     },
-    onSettled: async (data, error) => {
+    // FIX: Removed the onSettled logic that created a new chat.
+    // This responsibility is now solely handled by ChatList.jsx to prevent race conditions.
+    onSettled: async () => {
       await queryClient.invalidateQueries({ queryKey: ['chats'] });
-
-      if (!error) {
-        const chatsData = queryClient.getQueryData(['chats']);
-        const totalChats = chatsData?.pages?.reduce((acc, page) => acc + (page.chats?.length || 0), 0) ?? 0;
-        
-        if (totalChats === 0 && !createChatMutation.isPending) {
-          createChatMutation.mutate({ title: 'First Task', model: GEMINI_MODEL_NAME });
-        }
-      }
     },
     onError: (err) => {
       Toast('Failed to delete task: ' + err.message, 5000);

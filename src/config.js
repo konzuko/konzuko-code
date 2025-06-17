@@ -3,6 +3,12 @@
 // 🛠  Centralised tuning knobs & feature flags
 // ---------------------------------------------------------------------------
 
+// Stripe Configuration
+// FIX: Added the missing export statements for Stripe variables.
+// These read from the .env file and make the values available to the app.
+export const STRIPE_PUBLISHABLE_KEY = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY;
+export const STRIPE_PRICE_ID = import.meta.env.VITE_STRIPE_PRICE_ID;
+
 // ‼️ TIME-OUTS (ms) ----------------------------------------------------------
 // Use env-var override in production → VITE_GEMINI_TIMEOUT_MS (ms)
 const DEFAULT_GEMINI_TIMEOUT = 400_000;               // 6 min 40 sec

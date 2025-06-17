@@ -1,4 +1,3 @@
-
 -- Enforce per-user isolation on the 'images' storage bucket.
 -- This ensures that even if application logic fails, a user
 -- cannot access another user's files.

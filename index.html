@@ -5,13 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="Konzuko Code - AI-powered coding assistant" />
 
-    <!-- STAGE 2 FIX: Final, corrected Content Security Policy -->
+    <!-- FIX: Updated Content Security Policy to allow scripts from Stripe -->
     <meta http-equiv="Content-Security-Policy" content="
       default-src 'self';
-      script-src 'self' 'unsafe-inline';
+      script-src 'self' 'unsafe-inline' https://js.stripe.com;
       style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
       font-src 'self' https://fonts.gstatic.com;
-      connect-src 'self' wss: ws: https://*.supabase.co https://generativelanguage.googleapis.com;
+      connect-src 'self' wss: ws: https://*.supabase.co https://generativelanguage.googleapis.com https://api.stripe.com;
+      frame-src https://js.stripe.com;
       img-src 'self' data: https://*.supabase.co;
       object-src 'none';
       base-uri 'self';
@@ -30,6 +31,8 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
       rel="stylesheet"
     />
+    <!-- Stripe.js -->
+    <script src="https://js.stripe.com/v3/" async></script>
   </head>
 
   <body>
