@@ -386,35 +386,35 @@ function MainLayout() {
 
         {displaySettings.showSettings && (
           <div className="settings-panel">
-            <div className="form-group">
-              <label htmlFor="apiKeyInputApp" style={{ display: 'block', marginBottom: 'var(--space-sm)' }}>
-                Gemini API Key (Google AI Studio):
-              </label>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-md)' }}>
+            <div style={{ marginBottom: 'var(--space-md)' }}>
+              <a
+                href="https://aistudio.google.com/app/apikey"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="button button-accent"
+              >
+                Get your Key
+              </a>
+            </div>
+            <div style={{ maxWidth: '50%' }}>
+              <div className="form-group">
+                <label htmlFor="apiKeyInputApp" style={{ display: 'block', marginBottom: 'var(--space-sm)' }}>
+                  Gemini API Key (Google AI Studio):
+                </label>
                 <input
                   id="apiKeyInputApp"
                   className="form-input"
-                  style={{ flex: '1 1 auto', width: 'auto' }}
                   type="password"
                   value={apiKey}
                   onInput={(e) => handleApiKeyChangeAndSave(e.target.value)}
                   placeholder={isApiKeyLoading ? "Loading API Key..." : "Enter your Gemini API Key"}
                   disabled={isApiKeyLoading}
                 />
-                <a
-                  href="https://aistudio.google.com/app/apikey"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="button"
-                  style={{ flexShrink: 0 }}
-                >
-                  Get your Key
-                </a>
               </div>
-            </div>
-            <div className="form-group">
-              <label htmlFor="modelInputApp">Model:</label>
-              <input id="modelInputApp" className="form-input" value={model} readOnly />
+              <div className="form-group">
+                <label htmlFor="modelInputApp">Model:</label>
+                <input id="modelInputApp" className="form-input" value={model} readOnly />
+              </div>
             </div>
           </div>
         )}
