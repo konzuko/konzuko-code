@@ -1,5 +1,5 @@
 // file: src/hooks/useMessageManager.js
-import { useState, useCallback } from 'preact/hooks';
+import { useState, useCallback, useRef } from 'preact/hooks';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   fetchMessages,
@@ -8,6 +8,7 @@ import {
   deleteMessage,
   undoDeleteMessage,
   archiveMessagesAfter,
+  performUndoFork, // Import the undo fork API
 } from '../api/supabaseApi.js';
 import { callApiForText } from '../api/geminiApi.js';
 import Toast from '../components/Toast.jsx';
@@ -16,6 +17,7 @@ export function useMessageManager(currentChatId, setHasLastSendFailed) {
   const queryClient = useQueryClient();
   const [editingId, setEditingId] = useState(null);
   const [editText, setEditText] = useState('');
+  const forkUndoDataRef = useRef(null); // Ref to hold data for the undo action
 
   /* ───────── Fetch messages ───────── */
   const { data: messages = [], isLoading: isLoadingMessages } = useQuery({
@@ -73,10 +75,32 @@ export function useMessageManager(currentChatId, setHasLastSendFailed) {
     onError: (err) => Toast(`Failed to update message: ${err.message}`, 5000),
   });
 
+  // FIX: New mutation to handle the undo fork action
+  const undoForkMutation = useMutation({
+    mutationFn: (undoData) => performUndoFork(undoData),
+    onSuccess: () => {
+      invalidateMessages();
+      Toast('Fork undone.', 3000);
+    },
+    onError: (err) => Toast(`Failed to undo fork: ${err.message}`, 5000),
+  });
+
   const forkConversationMutation = useMutation({
     mutationFn: async ({ messageId, newContentArray, apiKey }) => {
       const originalMessages =
         queryClient.getQueryData(['messages', currentChatId]) || [];
+
+      // FIX: Capture original content for the undo action
+      const originalMessage = originalMessages.find(m => m.id === messageId);
+      if (originalMessage) {
+        forkUndoDataRef.current = {
+          messageId: originalMessage.id,
+          originalContent: originalMessage.content,
+          chatId: currentChatId,
+          anchorCreatedAt: originalMessage.created_at,
+        };
+      }
+      // END FIX
 
       const editedMessage   = await updateMessage(messageId, newContentArray);
       await archiveMessagesAfter(currentChatId, editedMessage.created_at);
@@ -102,7 +126,12 @@ export function useMessageManager(currentChatId, setHasLastSendFailed) {
       invalidateMessages();
       setEditingId(null);
       setEditText('');
-      Toast('Fork successful. All subsequent messages removed.', 3000);
+      // FIX: Show toast with undo action
+      Toast('Fork successful. Subsequent messages removed.', 15000, () => {
+        if (forkUndoDataRef.current) {
+          undoForkMutation.mutate(forkUndoDataRef.current);
+        }
+      });
     },
     onError: (error) => {
       Toast('Failed to fork: ' + error.message, 5000);
@@ -279,7 +308,8 @@ export function useMessageManager(currentChatId, setHasLastSendFailed) {
     updateMessageMutation.isPending ||
     resendMessageMutation.isPending ||
     deleteMessageMutation.isPending ||
-    undoDeleteMessageMutation.isPending;
+    undoDeleteMessageMutation.isPending ||
+    undoForkMutation.isPending; // Add new mutation to busy state
 
   /* ───────── Public API ───────── */
   return {
