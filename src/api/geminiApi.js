@@ -157,6 +157,19 @@ export async function callApiForText({
     const response = await Promise.race([generatePromise, timeoutPromise]);
     clearTimeout(timeoutId);
     
+    // ADDED: Log implicit cache usage
+    if (response?.usageMetadata) {
+      const { cachedContentTokenCount, totalTokenCount } = response.usageMetadata;
+      if (cachedContentTokenCount && cachedContentTokenCount > 0) {
+        console.log(
+          `%c[Gemini Cache] IMPLICIT HIT. Cached Tokens: ${cachedContentTokenCount.toLocaleString()}, Total: ${totalTokenCount.toLocaleString()}`,
+          'color: #4caf50; font-weight: bold;'
+        );
+      } else {
+        console.log(`[Gemini Cache] IMPLICIT MISS. Total Tokens: ${totalTokenCount?.toLocaleString() ?? 'N/A'}`);
+      }
+    }
+
     const candidate = response?.candidates?.[0];
     if (candidate?.finishReason === "SAFETY") throw new Error('Content generation stopped due to safety reasons.');
     

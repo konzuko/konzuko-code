@@ -1,5 +1,5 @@
 // file: src/components/ChatArea.jsx
-import { useEffect, useRef, useState } from 'preact/hooks'; // <-- FIX: Removed useMemo
+import { useEffect, useRef, useState } from 'preact/hooks';
 import MessageItem from './MessageItem.jsx';
 import ConfirmationModal from './ConfirmationModal.jsx';
 import useCopyToClipboard from '../hooks/useCopyToClipboard.js';
@@ -12,7 +12,7 @@ const flatten = c =>
     ? c.filter(b => b.type === 'text').map(b => b.text).join('')
     : String(c ?? '');
 
-export default function ChatArea({ actionsDisabled }) { // <-- FIX: Removed forceLoading prop
+export default function ChatArea({ actionsDisabled }) {
   const {
     messages,
     isLoadingMessages,
@@ -25,6 +25,7 @@ export default function ChatArea({ actionsDisabled }) { // <-- FIX: Removed forc
     resendMessage,
     deleteMessage,
     isSendingMessage,
+    hasLastSendFailed,
     isForking,
   } = useChat();
   
@@ -33,6 +34,7 @@ export default function ChatArea({ actionsDisabled }) { // <-- FIX: Removed forc
   const [copyMessage] = useCopyToClipboard();
   const editingTextareaRef = useRef(null);
   const [forkingMessage, setForkingMessage] = useState(null);
+  const [visualForkAnchor, setVisualForkAnchor] = useState(null);
   const [highlightedId, setHighlightedId] = useState(null);
   const chatAreaRef = useRef(null);
 
@@ -44,6 +46,17 @@ export default function ChatArea({ actionsDisabled }) { // <-- FIX: Removed forc
       autoResizeTextarea(editingTextareaRef.current, MAX_EDIT_TEXTAREA_HEIGHT);
     }
   }, [editingId, editText]);
+
+  // When the underlying message list changes (e.g., after a successful fork),
+  // reset the visual anchor to show the new, correct state.
+  useEffect(() => {
+    setVisualForkAnchor(null);
+  }, [messages]);
+
+  const handleCancelEdit = () => {
+    cancelEdit();
+    setVisualForkAnchor(null); // Also reset visual state on cancel
+  };
 
   useEffect(() => {
     const area = chatAreaRef.current;
@@ -61,24 +74,25 @@ export default function ChatArea({ actionsDisabled }) { // <-- FIX: Removed forc
     return () => area.removeEventListener('konzuko:copy', handleCopyEvent);
   }, []);
 
-  // --- FIX: Simplified loading check ---
   if (isLoadingMessages) {
     return <div className="chat-loading-placeholder">Loading messages...</div>;
   }
-  // --- END FIX ---
 
   if (!messages || messages.length === 0) {
     return <div className="chat-empty-placeholder">No messages in this chat yet. Send one!</div>;
   }
 
-  // --- FIX: Removed useMemo for processedMessages. Calculation is now done in the render loop. ---
   const lastUserMessageIndex = messages.map(m => m.role).lastIndexOf('user');
   let assistantCounter = 0; // Counter for assistant messages
-  // --- END FIX ---
 
   return (
     <div ref={chatAreaRef}>
-      {messages.map((m, idx) => { // Map over the original messages array
+      {messages.map((m, idx) => {
+        // When forking, visually hide all messages after the fork point.
+        if (visualForkAnchor && new Date(m.created_at) > new Date(visualForkAnchor.created_at)) {
+          return null;
+        }
+
         const isUser = m.role === 'user';
         const isAsst = m.role === 'assistant';
 
@@ -125,7 +139,7 @@ export default function ChatArea({ actionsDisabled }) { // <-- FIX: Removed forc
                     <button
                       className="button"
                       disabled={actionsDisabled}
-                      onClick={cancelEdit}
+                      onClick={handleCancelEdit}
                     >
                       Cancel
                     </button>
@@ -203,7 +217,7 @@ export default function ChatArea({ actionsDisabled }) { // <-- FIX: Removed forc
             {isLastUserMessage && !currentMessageIsBeingEdited && (
               <div className="message-bottom-actions">
                 <button
-                  className="button icon-button resend-button-bottom"
+                  className={`button icon-button resend-button-bottom ${hasLastSendFailed && !isSendingMessage ? 'send-button--error' : ''}`}
                   disabled={isSendingMessage || actionsDisabled}
                   onClick={() => resendMessage(m.id, apiKey)}
                   title="Resend message"
@@ -215,6 +229,17 @@ export default function ChatArea({ actionsDisabled }) { // <-- FIX: Removed forc
           </div>
         );
       })}
+      {visualForkAnchor && (
+        <div className="message message-assistant message-thinking">
+          <div className="message-content-inner">
+            <div className="thinking-spinner">
+              <span></span>
+              <span></span>
+              <span></span>
+            </div>
+          </div>
+        </div>
+      )}
       {showThinkingSpinner && (
         <div className="message message-assistant message-thinking">
           <div className="message-content-inner">
@@ -229,7 +254,11 @@ export default function ChatArea({ actionsDisabled }) { // <-- FIX: Removed forc
       <ConfirmationModal
         isOpen={!!forkingMessage}
         onClose={() => setForkingMessage(null)}
-        onConfirm={() => startEdit(forkingMessage)}
+        onConfirm={() => {
+          setVisualForkAnchor(forkingMessage);
+          startEdit(forkingMessage);
+          setForkingMessage(null);
+        }}
         title="Fork Conversation?"
         confirmationText="fork"
         confirmButtonText="Fork"
