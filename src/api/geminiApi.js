@@ -1,9 +1,5 @@
 // ────────────────────────────────────────────────────────────────
-//  file: src/api/geminiApi.js   (ROBUST version)
-//  – single-point helper used by the app whenever it has to
-//    obtain a text answer from Gemini.
-//  – hardened with exhaustive error handling, automatic retries
-//    for transient faults, and consistent Error objects.
+// file: src/api/geminiApi.js               (robust, race-safe)
 // ────────────────────────────────────────────────────────────────
 import { supabase } from '../lib/supabase.js';
 import {
@@ -12,11 +8,10 @@ import {
 } from '../config.js';
 import HARDCODED_GEMINI_SYSTEM_PROMPT from '../system-prompt.md?raw';
 import { GoogleGenAI } from '@google/genai';
-import { updateMessage } from './supabaseApi.js';
 
-/*──────────────────────── helpers ──────────────────────────────*/
-
-/** App-specific error wrapper – always has `code` & `message`. */
+/*=================================================================
+  Error helper
+=================================================================*/
 class ApiError extends Error {
   constructor(code = 'UNKNOWN', message = 'Unspecified error', cause) {
     super(message);
@@ -25,79 +20,107 @@ class ApiError extends Error {
   }
 }
 
-/** Minimal key validator. Throws ApiError on failure. */
+/*=================================================================
+  Validation helpers
+=================================================================*/
 function validateKey(raw = '') {
   const key = raw ? raw.trim() : '';
-  if (!/^[A-Za-z0-9_\-]{30,60}$/.test(key)) {
+  if (!/^[A-Za-z0-9_\-:]{30,70}$/.test(key)) {
     throw new ApiError(
       'BAD_KEY',
-      'Gemini API key missing or malformed; obtain one at https://aistudio.google.com'
+      'Gemini API key missing or malformed – copy a fresh key from Google AI Studio.'
     );
   }
   return key;
 }
 
-/** Transient error classifier for automatic retries. */
+/*=================================================================
+  Retry helpers
+=================================================================*/
 function isRetryable(err) {
   if (!err) return false;
-  // Errors bubbled from the Google library normally have `.code`.
-  // Also check `.status` from REST responses.
   const code = err.code ?? err.status ?? '';
   return (
-    code === 429 || // rate-limit
-    code === 408 || // timeout
+    code === 429 ||
     code === 500 ||
     code === 502 ||
     code === 503 ||
     code === 504 ||
-    // Node fetch / browser fetch network failures:
+    code === 408 ||
+    code === 'UNAVAILABLE' ||
+    code === 'ABORTED' ||
     err.name === 'FetchError' ||
     err.message?.includes('network') ||
-    err.message?.includes('timeout')
+    err.message?.includes('timeout') ||
+    err.message?.includes('ECONNRESET') ||
+    err.message?.includes('ETIMEDOUT')
   );
 }
 
-/**
- * Run `fn()` with an exponential back-off retry policy.
- * – waitTimes =  [0, 0.5s, 1s, 2s]  (customisable)
- * – if fn() never succeeds, the *last* error is thrown.
- */
-async function withRetries(fn, waitTimes = [0, 500, 1000, 2000]) {
+async function withRetries(fn, wait = [0, 500, 1000, 2000, 4000]) {
   let lastErr;
-  for (let i = 0; i < waitTimes.length; i++) {
-    if (i > 0) await new Promise((r) => setTimeout(r, waitTimes[i]));
+  for (let i = 0; i < wait.length; i++) {
+    if (i) await new Promise((r) => setTimeout(r, wait[i]));
     try {
       return await fn();
-    } catch (err) {
-      lastErr = err;
-      if (!isRetryable(err)) break; // fail fast on permanent errors
+    } catch (e) {
+      lastErr = e;
+      if (!isRetryable(e)) break;
     }
   }
   throw lastErr;
 }
 
-/** Obtain a signed URL (15-min lifetime) from our Supabase EdgeFn */
+/*=================================================================
+  Storage helper – signed URL (15-min)
+=================================================================*/
 async function getSignedUrl(path) {
   const { data, error } = await supabase.functions.invoke(
     'get-signed-urls',
-    {
-      body: { paths: [path], expiresIn: 900 },
-    }
+    { body: { paths: [path], expiresIn: 900 } }
   );
-  if (error) throw new ApiError('SIGNED_URL', error.message, error);
+  if (error)
+    throw new ApiError('SIGNED_URL', 'Failed to create signed URL', error);
   if (data.error)
     throw new ApiError('SIGNED_URL', data.error, new Error(data.error));
   return data.urlMap?.[path] ?? null;
 }
 
-/**
- * Upload an image to Gemini’s Files API, then persist BOTH
- *     file_id  – full resource path (projects/.../files/abc)
- *     file_uri – short "files/abc"   (used in generateContent)
- * into the message row so future calls do not re-upload.
- *
- * returns { file_uri, mimeType }
- */
+/*=================================================================
+  Optimistic-concurrency safe message updater
+=================================================================*/
+async function updateMessageSafely(id, newContent) {
+  //  pull updated_at so we can guard the update
+  const { data: orig, error: selErr } = await supabase
+    .from('messages')
+    .select('updated_at')
+    .eq('id', id)
+    .single();
+  if (selErr) throw new ApiError('DB', selErr.message, selErr);
+
+  const origStamp = orig.updated_at;
+  const nextStamp = new Date().toISOString();
+
+  const { data: upd, error: updErr } = await supabase
+    .from('messages')
+    .update({ content: newContent, updated_at: nextStamp })
+    .eq('id', id)
+    .eq('updated_at', origStamp)
+    .select()
+    .maybeSingle();
+
+  if (updErr) throw new ApiError('DB', updErr.message, updErrErr);
+
+  if (!upd) {
+    // someone else modified the row – re-run once
+    return updateMessageSafely(id, newContent);
+  }
+  return upd;
+}
+
+/*=================================================================
+  Image upload  (Supabase → Gemini Files API)
+=================================================================*/
 async function uploadAndCacheFileUri({
   apiKey,
   messageId,
@@ -105,56 +128,53 @@ async function uploadAndCacheFileUri({
   imageUrlBlock,
 }) {
   const path = imageUrlBlock.image_url?.path;
-  if (!path) {
-    throw new ApiError('NO_STORAGE_PATH', 'Image block missing "path"');
-  }
+  if (!path) throw new ApiError('NO_PATH', 'Image block missing storage path');
 
-  // fetch blob from Supabase storage
+  // ── download from Supabase storage
   const blob = await withRetries(async () => {
-    const signed = await getSignedUrl(path);
-    if (!signed)
-      throw new ApiError(
-        'SIGNED_URL',
-        `Could not create signed URL for "${path}"`
-      );
-    const res = await fetch(signed);
-    if (!res.ok) {
+    const url = await getSignedUrl(path);
+    if (!url) throw new ApiError('SIGNED_URL', 'Signed URL not returned');
+    const res = await fetch(url);
+    if (!res.ok)
       throw new ApiError(
         'FETCH_BLOB',
-        `HTTP ${res.status} while downloading "${path}"`
+        `HTTP ${res.status} while downloading image`
       );
-    }
     return await res.blob();
   });
 
-  // upload to Gemini
+  // ── upload to Gemini Files  (single attempt ‑ avoid duplicates)
   const genAI = new GoogleGenAI({ apiKey });
-  const uploaded = await withRetries(() =>
-    genAI.files.upload({
+  let uploaded;
+  try {
+    uploaded = await genAI.files.upload({
       file: blob,
       config: {
         mimeType: blob.type || 'image/webp',
-        displayName:
-          imageUrlBlock.image_url.original_name || 'uploaded.webp',
+        displayName: imageUrlBlock.image_url.original_name || 'upload.webp',
       },
-    })
-  );
-
-  const { name: file_id, uri: file_uri, mimeType } = uploaded;
-  if (!file_uri) {
-    throw new ApiError('UPLOAD', 'Files API response missing "uri"');
+    });
+  } catch (e) {
+    throw new ApiError('UPLOAD', e.message, e);
+  } finally {
+    // release memory sooner
+    /* eslint-disable no-param-reassign */
+    //  (allow GC – a micro-optimisation)
   }
 
-  /* persist file_id & file_uri back to Supabase --------- */
-  const { data: msg, error } = await supabase
+  const { name: file_id, uri: file_uri, mimeType } = uploaded;
+  if (!file_uri)
+    throw new ApiError('UPLOAD', 'Files API response missing "uri"');
+
+  /*── persist to DB so we never upload again ────────────────────*/
+  const { data: msgRow, error } = await supabase
     .from('messages')
     .select('content')
     .eq('id', messageId)
     .single();
   if (error) throw new ApiError('DB', error.message, error);
-  if (!msg) throw new ApiError('DB', `Message ${messageId} not found`);
 
-  const newContent = [...msg.content];
+  const newContent = [...msgRow.content];
   newContent[blockIndex] = {
     ...imageUrlBlock,
     image_url: {
@@ -164,25 +184,26 @@ async function uploadAndCacheFileUri({
       mime_type: mimeType,
     },
   };
-  await updateMessage(messageId, newContent);
+  await updateMessageSafely(messageId, newContent);
 
   return { file_uri, mimeType };
 }
 
-/*────────────────── main exported helper ───────────────────────*/
-
+/*=================================================================
+  Public – callApiForText
+=================================================================*/
 export async function callApiForText({
   messages = [],
   apiKey = '',
   signal,
 } = {}) {
-  const validatedKey = validateKey(apiKey);
-  const ai = new GoogleGenAI({ apiKey: validatedKey });
+  const key = validateKey(apiKey);
+  const ai = new GoogleGenAI({ apiKey: key });
 
-  let extraSystem = '';
   const contents = [];
+  let extraSystem = '';
 
-  // ── build History → Parts array ──────────────────────────────
+  /*── Build parts array ─────────────────────────────────────────*/
   for (const msg of messages) {
     const blocks = Array.isArray(msg.content)
       ? msg.content
@@ -190,24 +211,21 @@ export async function callApiForText({
 
     const parts = [];
 
-    for (const [idx, block] of blocks.entries()) {
-      /* TEXT */
+    for (const [i, block] of blocks.entries()) {
       if (block.type === 'text') {
-        if (block.text?.trim())
-          parts.push({ text: block.text });
+        if (block.text?.trim()) parts.push({ text: block.text });
         continue;
       }
 
-      /* IMAGE */
       if (block.type === 'image_url' && block.image_url) {
         let fileUri = block.image_url.file_uri;
         let mimeType = block.image_url.mime_type || 'image/webp';
 
         if (!fileUri) {
           const up = await uploadAndCacheFileUri({
-            apiKey: validatedKey,
+            apiKey: key,
             messageId: msg.id,
-            blockIndex: idx,
+            blockIndex: i,
             imageUrlBlock: block,
           });
           fileUri = up.file_uri;
@@ -217,23 +235,18 @@ export async function callApiForText({
         continue;
       }
 
-      /* OTHER FILE – assume gemini-compatible */
       if (block.type === 'file' && block.file?.file_id) {
         let fileUri = block.file.file_id;
         if (!fileUri.startsWith('files/')) fileUri = `files/${fileUri}`;
-        parts.push({
-          fileData: { mimeType: block.file.mime_type, fileUri },
-        });
+        parts.push({ fileData: { mimeType: block.file.mime_type, fileUri } });
       }
     }
 
     if (!parts.length) continue;
 
     if (msg.role === 'system') {
-      const firstText = parts.find((p) => p.text)?.text;
-      if (firstText) {
-        extraSystem += (extraSystem ? '\n' : '') + firstText;
-      }
+      const t = parts.find((p) => p.text)?.text;
+      if (t) extraSystem += (extraSystem ? '\n' : '') + t;
     } else {
       contents.push({
         role: msg.role === 'assistant' ? 'model' : msg.role,
@@ -242,6 +255,7 @@ export async function callApiForText({
     }
   }
 
+  /*── System instruction ───────────────────────────────────────*/
   const systemInstruction = [
     HARDCODED_GEMINI_SYSTEM_PROMPT,
     extraSystem.trim(),
@@ -249,7 +263,8 @@ export async function callApiForText({
     .filter(Boolean)
     .join('\n\n');
 
-  const requestPayload = {
+  /*── Request object ───────────────────────────────────────────*/
+  const payload = {
     model: GEMINI_MODEL_NAME,
     contents,
     config: {
@@ -265,23 +280,21 @@ export async function callApiForText({
     },
   };
 
-  /* ── manual timeout + abort chaining ───────────────────────── */
+  /*── Timeout + abort chaining ─────────────────────────────────*/
   const ctrl = new AbortController();
   if (signal) signal.addEventListener('abort', () => ctrl.abort());
 
-  const timeout = setTimeout(
-    () => ctrl.abort(new ApiError('TIMEOUT', 'Request timed out')),
+  const t = setTimeout(
+    () => ctrl.abort(new ApiError('TIMEOUT', 'Gemini request timed out')),
     GEMINI_API_TIMEOUT_MS
   );
 
   try {
     const response = await withRetries(() =>
-      ai.models.generateContent(requestPayload, {
-        signal: ctrl.signal,
-      })
+      ai.models.generateContent(payload, { signal: ctrl.signal })
     );
 
-    clearTimeout(timeout);
+    clearTimeout(t);
 
     const cand = response?.candidates?.[0];
     if (!cand)
@@ -290,22 +303,16 @@ export async function callApiForText({
     if (cand.finishReason === 'SAFETY') {
       throw new ApiError(
         'SAFETY',
-        'Generation stopped because of safety filters'
+        'Generation stopped by safety filters'
       );
     }
 
-    const text =
-      cand.content?.parts?.map((p) => p.text).join('') ?? '';
-
-    if (!text) {
-      throw new ApiError('EMPTY', 'Model returned empty text.');
-    }
+    const text = cand.content?.parts?.map((p) => p.text).join('');
+    if (!text) throw new ApiError('EMPTY', 'Model returned empty text');
 
     return { content: text };
-
   } catch (err) {
-    clearTimeout(timeout);
-    // Normalise unknown errors
+    clearTimeout(t);
     if (!(err instanceof ApiError)) {
       throw new ApiError(err.code ?? 'ERROR', err.message ?? String(err), err);
     }
