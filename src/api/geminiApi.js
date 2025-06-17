@@ -3,8 +3,7 @@ import { supabase } from '../lib/supabase.js';
 import { GEMINI_API_TIMEOUT_MS, GEMINI_MODEL_NAME } from '../config.js';
 import HARDCODED_GEMINI_SYSTEM_PROMPT from '../system-prompt.md?raw';
 import { GoogleGenAI } from "@google/genai";
-// We no longer need updateMessage here as we aren't caching file_ids
-// import { updateMessage } from './supabaseApi.js';
+import { updateMessage } from './supabaseApi.js';
 
 function validateKey(raw = '') {
   const key = raw ? raw.trim() : '';
@@ -16,44 +15,44 @@ function validateKey(raw = '') {
   return key;
 }
 
-async function getSignedUrlsForPaths(paths) {
-  if (paths.size === 0) return {};
-  const { data, error } = await supabase.functions.invoke('get-signed-urls', {
-    body: { paths: Array.from(paths), expiresIn: 900 } // 15 minutes
-  });
-  if (error || data.error) {
-    throw new Error(`Failed to get signed URLs for API call: ${error?.message || data.error}`);
-  }
-  return data.urlMap || {};
+async function getSignedUrl(path) {
+    if (!path) return null;
+    const { data, error } = await supabase.functions.invoke('get-signed-urls', {
+        body: { paths: [path], expiresIn: 900 }, // 15 min
+    });
+    if (error || data.error) throw new Error(`getSignedUrl failed: ${error?.message || data.error}`);
+    return data.urlMap?.[path] || null;
 }
 
-async function convertImageUrlToPart(imageUrlBlock, urlMap) {
+async function uploadAndGetFileId(apiKey, messageId, blockIndex, imageUrlBlock) {
     const path = imageUrlBlock.image_url?.path;
-    if (!path) return { text: `[Invalid image_url block: no path]` };
+    if (!path) throw new Error('Missing path in imageUrlBlock for upload');
 
-    const signedUrl = urlMap[path];
-    if (!signedUrl) return { text: `[Could not get URL for image: ${imageUrlBlock.image_url.original_name}]` };
+    const signedUrl = await getSignedUrl(path);
+    if (!signedUrl) throw new Error(`Could not get signed URL for ${path}`);
 
-    try {
-        const res = await fetch(signedUrl);
-        if (!res.ok) throw new Error(`Fetch ${res.status} from signed URL for ${path}`);
-        const blob = await res.blob();
-        const base64 = await new Promise((resolve, reject) => {
-            const fr = new FileReader();
-            fr.onloadend = () => resolve(fr.result.split(',')[1]);
-            fr.onerror = reject;
-            fr.readAsDataURL(blob);
-        });
-        return {
-            inlineData: {
-                mimeType: blob.type || 'image/webp',
-                data: base64,
-            },
-        };
-    } catch (e) {
-        console.error(`[API - convertImageUrlToPart] Error for ${path}:`, e);
-        return { text: `[⚠ could not fetch image: ${imageUrlBlock.image_url.original_name}]` };
-    }
+    const genAI = new GoogleGenAI({ apiKey });
+    const res = await fetch(signedUrl);
+    if (!res.ok) throw new Error(`Fetch failed for ${path} with status ${res.status}`);
+    const blob = await res.blob();
+
+    const uploadedFileResponse = await genAI.files.upload({
+        file: blob,
+        config: { mimeType: blob.type || 'image/webp', displayName: imageUrlBlock.image_url.original_name || 'uploaded_image.webp' }
+    });
+
+    const fileId = uploadedFileResponse?.name;
+    if (!fileId) throw new Error('Gemini file upload did not return a file name.');
+
+    // Cache the file_id back to the message in Supabase
+    const { data: originalMessage, error } = await supabase.from('messages').select('content').eq('id', messageId).single();
+    if (error || !originalMessage) throw new Error(`Could not fetch original message ${messageId} to cache file_id.`);
+
+    const updatedContent = [...originalMessage.content];
+    updatedContent[blockIndex] = { ...imageUrlBlock, image_url: { ...imageUrlBlock.image_url, file_id: fileId } };
+    await updateMessage(messageId, updatedContent);
+
+    return fileId;
 }
 
 export async function callApiForText({
@@ -69,22 +68,6 @@ export async function callApiForText({
 
   const ai = new GoogleGenAI({ apiKey: validatedKey });
 
-  // --- SIMPLIFIED LOGIC: Always use permanent storage ---
-  // 1. Collect all unique image paths from the entire conversation history.
-  const pathsToSign = new Set();
-  messages.forEach(msg => {
-    const content = Array.isArray(msg.content) ? msg.content : [];
-    content.forEach(block => {
-        if (block.type === 'image_url' && block.image_url?.path) {
-            pathsToSign.add(block.image_url.path);
-        }
-    });
-  });
-
-  // 2. Get fresh signed URLs for all of them.
-  const urlMap = await getSignedUrlsForPaths(pathsToSign);
-
-  // 3. Build the API payload, converting every image to Base64.
   let systemInstructionText = "";
   const historyContents = [];
 
@@ -92,19 +75,26 @@ export async function callApiForText({
     const contentBlocks = Array.isArray(msg.content) ? msg.content : [{ type: 'text', text: String(msg.content ?? '') }];
     const parts = [];
 
-    for (const block of contentBlocks) {
+    for (const [blockIndex, block] of contentBlocks.entries()) {
         if (block.type === 'text') {
             parts.push({ text: block.text });
         } else if (block.type === 'image_url' && block.image_url) {
-            const imagePart = await convertImageUrlToPart(block, urlMap);
-            parts.push(imagePart);
-        } else if (block.type === 'file' && block.file?.file_id) {
-            // PDF/File logic remains the same, as it relies on the Gemini Files API
-            let fileUri = block.file.file_id;
-            if (fileUri.startsWith('https://')) {
-                const idx = fileUri.indexOf('/files/');
-                if (idx !== -1) fileUri = fileUri.slice(idx + 1);
+            let fileId = block.image_url.file_id;
+            if (!fileId) {
+                try {
+                    fileId = await uploadAndGetFileId(validatedKey, msg.id, blockIndex, block);
+                } catch (uploadError) {
+                    console.error(`[API] Failed to upload/process image for message ${msg.id}:`, uploadError);
+                    parts.push({ text: `[System: Image '${block.image_url.original_name}' failed to load]` });
+                    continue;
+                }
             }
+            let fileUri = fileId.startsWith('files/') ? fileId : `files/${fileId}`;
+            parts.push({ fileData: { mimeType: block.image_url.mime_type || 'image/webp', fileUri } });
+
+        } else if (block.type === 'file' && block.file?.file_id) {
+            let fileUri = block.file.file_id;
+            if (!fileUri.startsWith('files/')) fileUri = `files/${fileUri}`;
             parts.push({ fileData: { mimeType: block.file.mime_type, fileUri } });
         }
     }
@@ -118,7 +108,6 @@ export async function callApiForText({
       }
     }
   }
-  // --- END SIMPLIFIED LOGIC ---
 
   let finalSystemInstruction = HARDCODED_GEMINI_SYSTEM_PROMPT;
   if (systemInstructionText.trim()) {
@@ -132,21 +121,21 @@ export async function callApiForText({
       temperature: 0.0,
       topP: 0.95,
       safetySettings: [
-        { category: "HARM_CATEGORY_HARASSMENT", threshold: "OFF" },
-        { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "OFF" },
-        { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "OFF" },
-        { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "OFF" },
+        { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+        { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+        { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+        { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
       ],
     },
     ...(finalSystemInstruction && { systemInstruction: finalSystemInstruction }),
   };
 
   let timeoutId;
-  try {
+  const attemptApiCall = async (payload) => {
     const controller = new AbortController();
     if (signal) signal.addEventListener('abort', () => controller.abort());
-    
-    const generatePromise = ai.models.generateContent(requestPayload, { signal: controller.signal });
+
+    const generatePromise = ai.models.generateContent(payload, { signal: controller.signal });
     const timeoutPromise = new Promise((_, rej) => {
       timeoutId = setTimeout(() => {
         controller.abort();
@@ -156,18 +145,15 @@ export async function callApiForText({
 
     const response = await Promise.race([generatePromise, timeoutPromise]);
     clearTimeout(timeoutId);
-    
-    // ADDED: Log implicit cache usage
+    return response;
+  };
+
+  try {
+    let response = await attemptApiCall(requestPayload);
+
     if (response?.usageMetadata) {
       const { cachedContentTokenCount, totalTokenCount } = response.usageMetadata;
-      if (cachedContentTokenCount && cachedContentTokenCount > 0) {
-        console.log(
-          `%c[Gemini Cache] IMPLICIT HIT. Cached Tokens: ${cachedContentTokenCount.toLocaleString()}, Total: ${totalTokenCount.toLocaleString()}`,
-          'color: #4caf50; font-weight: bold;'
-        );
-      } else {
-        console.log(`[Gemini Cache] IMPLICIT MISS. Total Tokens: ${totalTokenCount?.toLocaleString() ?? 'N/A'}`);
-      }
+      if (cachedContentTokenCount > 0) console.log(`%c[Gemini Cache] IMPLICIT HIT. Cached: ${cachedContentTokenCount}, Total: ${totalTokenCount}`, 'color: #4caf50; font-weight: bold;');
     }
 
     const candidate = response?.candidates?.[0];
@@ -180,9 +166,39 @@ export async function callApiForText({
 
   } catch (err) {
     clearTimeout(timeoutId);
-    
-    // Retry logic is no longer needed as we don't depend on expiring file_ids for images.
-    
+    // Retry logic for expired file IDs
+    if (err.message?.includes('INVALID_ARGUMENT') && err.message?.includes('File not found')) {
+        console.warn('[API] Detected potential expired file ID. Forcing re-upload of all images...');
+        // Re-build the payload, but force re-upload by removing file_id from image blocks
+        const retryHistoryContents = [];
+        for (const msg of messages) {
+            const contentBlocks = Array.isArray(msg.content) ? msg.content : [{ type: 'text', text: String(msg.content ?? '') }];
+            const parts = [];
+            for (const [blockIndex, block] of contentBlocks.entries()) {
+                if (block.type === 'image_url' && block.image_url) {
+                    const { file_id, ...restOfImageUrl } = block.image_url; // strip file_id
+                    const newBlock = { ...block, image_url: restOfImageUrl };
+                    const newFileId = await uploadAndGetFileId(validatedKey, msg.id, blockIndex, newBlock);
+                    let fileUri = newFileId.startsWith('files/') ? newFileId : `files/${newFileId}`;
+                    parts.push({ fileData: { mimeType: block.image_url.mime_type || 'image/webp', fileUri } });
+                } else {
+                    // Non-image blocks are added as-is
+                    const originalPart = requestPayload.contents.find(c => c.role === (msg.role === 'assistant' ? 'model' : msg.role))?.parts[blockIndex];
+                    if (originalPart) parts.push(originalPart);
+                }
+            }
+            if (parts.length > 0) {
+                retryHistoryContents.push({ role: msg.role === 'assistant' ? 'model' : msg.role, parts });
+            }
+        }
+        const retryPayload = { ...requestPayload, contents: retryHistoryContents };
+        const retryResponse = await attemptApiCall(retryPayload);
+        const retryCandidate = retryResponse?.candidates?.[0];
+        const retryTextContent = retryCandidate?.content?.parts?.map(p => p.text).join('') ?? '';
+        if (retryTextContent) return { content: retryTextContent };
+        throw new Error(`Retry failed. No text content. Finish reason: ${retryCandidate?.finishReason || 'N/A'}.`);
+    }
+
     if (err.name === 'AbortError' && !signal?.aborted) {
         throw new Error(`Request timed out after ${GEMINI_API_TIMEOUT_MS / 1000}s`);
     }

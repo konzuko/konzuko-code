@@ -1,3 +1,4 @@
+// file: src/components/MarkdownRenderer.jsx
 import { useMemo } from 'preact/hooks'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -20,9 +21,9 @@ export default function MarkdownRenderer({ children }) {
     attributes: {
       ...githubSchema.attributes,
       // Allow class for syntax highlighting on these tags
-      span: [...(githubSchema.attributes?.span || []), 'class'],
-      code: [...(githubSchema.attributes?.code || []), 'class'],
-      pre: [...(githubSchema.attributes?.pre || []), 'class'],
+      span: [...(githubSchema.attributes?.span || []), ['className']],
+      code: [...(githubSchema.attributes?.code || []), ['className']],
+      pre: [...(githubSchema.attributes?.pre || []), ['className']],
       // Allow the 'align' attribute on table header and data cells
       th: [...(githubSchema.attributes?.th || []), 'align'],
       td: [...(githubSchema.attributes?.td || []), 'align'],

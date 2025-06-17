@@ -433,7 +433,7 @@ function MainLayout() {
               hasLastSendFailed={hasLastSendFailed}
               importedCodeFiles={stagedCodeFiles}
               onCodeFilesChange={setStagedCodeFiles}
-              onClearCodebase={clearCodebaseImporterRef} // <-- FIX: Standardized prop name to onClearAll
+              onClearCodebase={clearCodebaseImporterRef}
               currentChatId={currentChatId}
             />
           </div>

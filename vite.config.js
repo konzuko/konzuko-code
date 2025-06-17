@@ -8,17 +8,16 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   const SUPABASE_URL = env.VITE_SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 
-  // STAGE 2 FIX: Harden the proxy configuration.
+  // FIX: Harden the proxy configuration.
   // It now validates that the URL is present and correctly formatted
   // before attempting to create the proxy, preventing server startup errors.
   const proxyConfig =
     SUPABASE_URL && /^https?:\/\//.test(SUPABASE_URL)
       ? {
-          '/functions': {
+          '/functions/v1': {
             target: SUPABASE_URL,
             changeOrigin: true,
             secure: true,
-            rewrite: (p) => p.replace(/^\/functions/, '/functions'),
           },
         }
       : undefined;
@@ -31,8 +30,6 @@ export default defineConfig(({ mode }) => {
   }
 
   return {
-    // We are sticking with the react plugin and aliases as it is stable
-    // in your current environment.
     plugins: [react()],
     resolve: {
       alias: {

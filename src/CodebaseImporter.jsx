@@ -1,5 +1,5 @@
 // file: src/CodebaseImporter.jsx
-import { useState, useCallback, useEffect, useReducer } from 'preact/hooks';
+import { useState, useCallback, useEffect, useReducer, useRef } from 'preact/hooks';
 import { useQuery } from '@tanstack/react-query';
 import { GoogleGenAI } from '@google/genai';
 import { supabase } from './lib/supabase.js';
@@ -15,7 +15,6 @@ import {
   processAndStageSelectedFiles
 } from './lib/fileSystem.js';
 
-// DirectorySelector component remains unchanged...
 function DirectorySelector({ scanData, onStageFiles, onCancel, toastFn }) {
   const [selected, setSelected] = useState(new Set());
   const [isStaging, setIsStaging] = useState(false);
@@ -145,11 +144,13 @@ export default function CodebaseImporter({
     clearIDBRoot().catch(err => console.error("Error clearing root from IDB:", err));
   }, []);
 
+  // FIX: Pass the clear function up to the parent (App.jsx)
+  // so it can be called when a message is sent.
   useEffect(() => {
     if (onClearAll) {
       onClearAll.current = clearAllStates;
     }
-  }, []);
+  }, [onClearAll, clearAllStates]);
 
   const handleManualClear = () => {
     if (confirm('Remove all selected files and clear project root?')) {
@@ -195,7 +196,6 @@ export default function CodebaseImporter({
     finally { setAdding(false); }
   }, [toastFn, impState.files.length]);
 
-  // --- SIMPLIFIED: Only uploads to Supabase Storage ---
   const handleAddImages = useCallback(async () => {
     if (!window.showOpenFilePicker) { toastFn?.('File picker not supported.', 4000); return; }
     setAdding(true);
@@ -229,7 +229,6 @@ export default function CodebaseImporter({
     setAdding(false);
   }, [onAddImage, toastFn]);
 
-  // --- SIMPLIFIED: Only uploads to Supabase Storage ---
   const handlePasteImage = useCallback(async () => {
     if(!navigator.clipboard?.read){ toastFn?.('Clipboard API not supported or permission denied.',4000); return; }
     setAdding(true);
@@ -266,7 +265,6 @@ export default function CodebaseImporter({
     setAdding(false);
   }, [onAddImage, toastFn]);
 
-  // --- SIMPLIFIED: PDF upload now only interacts with Gemini Files API ---
   const handleAddPDF = useCallback(async () => {
     if (!settings?.apiKey || String(settings.apiKey).trim() === "") { toastFn?.('Gemini API Key not set.', 5000); return; }
     if (!window.showOpenFilePicker) { toastFn?.('File picker not supported.', 4000); return; }

@@ -1,7 +1,7 @@
 // file: src/hooks/useAuth.js
 import { useState, useEffect } from 'preact/hooks';
 import { supabase } from '../lib/supabase.js';
-import Toast from '../components/Toast.jsx'; // <-- FIX: Import Toast
+import Toast from '../components/Toast.jsx';
 
 export function useAuth() {
   const [user, setUser] = useState(null);
@@ -9,16 +9,18 @@ export function useAuth() {
 
   useEffect(() => {
     async function init() {
-      const { data: { session }, error } = await supabase.auth.getSession();
-      if (error) {
+      try {
+        const { data: { session }, error } = await supabase.auth.getSession();
+        if (error) throw error;
+        setUser(session?.user ?? null);
+      } catch (error) {
         // --- FIX: Add user-facing notification on session fetch failure ---
-        console.warn('getSession error:', error.message);
+        console.error('getSession error:', error.message);
         Toast(`Could not verify session: ${error.message}. Please check your connection.`, 6000);
         // --- END FIX ---
+      } finally {
+        setLoading(false);
       }
-
-      setUser(session?.user ?? null);
-      setLoading(false);
     }
     init();
 

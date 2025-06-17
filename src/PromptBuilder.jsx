@@ -205,7 +205,7 @@ export default function PromptBuilder({
           onAddImage={onAddImage}
           onAddPDF={onAddPDF}
           settings={settings}
-          onClearAll={onClearCodebase} // <-- FIX: Standardized prop name to onClearAll
+          onClearAll={onClearCodebase}
         />
       )}
 
