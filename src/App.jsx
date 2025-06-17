@@ -344,7 +344,7 @@ function MainLayout() {
             className={`top-bar-loading-indicator ${isAwaitingApiResponse ? 'active' : ''}`} 
           />
           <button className="button" onClick={() => setDisplaySettings((s) => ({ ...s, showSettings: !s.showSettings }))} disabled={isBusy} >
-            {displaySettings.showSettings ? 'Close Settings' : 'Open Settings'}
+            {displaySettings.showSettings ? 'Close Settings' : 'Settings'}
           </button>
           <span style={{ margin: '0 1em', fontWeight: 'bold' }}>
             KonzukoCode {isAwaitingApiResponse && "Processing..."}
@@ -387,16 +387,30 @@ function MainLayout() {
         {displaySettings.showSettings && (
           <div className="settings-panel">
             <div className="form-group">
-              <label htmlFor="apiKeyInputApp"> Gemini API Key (Google AI Studio): </label>
-              <input 
-                id="apiKeyInputApp" 
-                className="form-input" 
-                type="password" 
-                value={apiKey}
-                onInput={(e) => handleApiKeyChangeAndSave(e.target.value)}
-                placeholder={isApiKeyLoading ? "Loading API Key..." : "Enter your Gemini API Key"}
-                disabled={isApiKeyLoading}
-              />
+              <label htmlFor="apiKeyInputApp" style={{ display: 'block', marginBottom: 'var(--space-sm)' }}>
+                Gemini API Key (Google AI Studio):
+              </label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-md)' }}>
+                <input
+                  id="apiKeyInputApp"
+                  className="form-input"
+                  style={{ flex: '1 1 auto', width: 'auto' }}
+                  type="password"
+                  value={apiKey}
+                  onInput={(e) => handleApiKeyChangeAndSave(e.target.value)}
+                  placeholder={isApiKeyLoading ? "Loading API Key..." : "Enter your Gemini API Key"}
+                  disabled={isApiKeyLoading}
+                />
+                <a
+                  href="https://aistudio.google.com/app/apikey"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="button"
+                  style={{ flexShrink: 0 }}
+                >
+                  Get your Key
+                </a>
+              </div>
             </div>
             <div className="form-group">
               <label htmlFor="modelInputApp">Model:</label>
