@@ -1,6 +1,0 @@
-{
-    "allowedOrigins": ["http://localhost:3001"],
-    "allowedMethods": ["GET","POST","OPTIONS","PUT","DELETE"],
-    "allowedHeaders": ["Authorization","apikey","content-type","x-client-info"]
-  }
-  

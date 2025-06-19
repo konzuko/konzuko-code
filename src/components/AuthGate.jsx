@@ -1,53 +1,67 @@
 // src/components/AuthGate.jsx
-import { useState } from 'preact/hooks'
-import { supabase } from '../lib/supabase.js'
-import { useAuth } from '../hooks/useAuth.js'
-import SubscriptionGate from './SubscriptionGate.jsx'
-import Toast from './Toast.jsx'
+import { useState, useCallback } from 'preact/hooks';
+import { supabase } from '../lib/supabase.js';
+import { useAuth } from '../hooks/useAuth.js';
+import SubscriptionGate from './SubscriptionGate.jsx';
+import Toast from './Toast.jsx';
+
+// A simple regex for email validation.
+const EMAIL_VALIDATION_PATTERN = ".+@.+\\..+";
 
 export default function AuthGate({ children }) {
-  const { user, loading } = useAuth()
-  const [email, setEmail] = useState('')
+  const { user, loading } = useAuth();
+  const [email, setEmail] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleMagicLink = async () => {
-    if (!email) {
-      Toast('Please enter your email address.', 3000);
-      return;
-    }
+  const handleMagicLink = useCallback(async (event) => {
+    // Prevent default form submission which reloads the page.
+    event.preventDefault();
+
+    // The 'required' attribute on the input handles the empty case.
+    if (!email) return;
+
     setIsSubmitting(true);
     try {
       const { error } = await supabase.auth.signInWithOtp({
         email,
-        options: { emailRedirectTo: window.location.origin }
+        options: { emailRedirectTo: window.location.origin },
       });
       if (error) throw error;
       Toast('Magic link sent to ' + email, 5000);
-    } catch (error) { // FIX: Removed the incorrect '=>' from the catch block.
+    } catch (error) {
       Toast('Error: ' + error.message, 5000);
     } finally {
       setIsSubmitting(false);
     }
-  };
+  }, [email]);
 
-  const handleGoogleAuth = async () => {
+  const handleGoogleAuth = useCallback(async () => {
     setIsSubmitting(true);
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: { redirectTo: window.location.origin }
-    });
-    if (error) {
-      if (error.message.includes('already exists')) {
-        Toast(`An account with this email already exists. Please sign in with the original method.`, 6000);
-      } else {
-        Toast(`Error signing in with Google: ${error.message}`, 5000);
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: { redirectTo: window.location.origin },
+      });
+      // If there's an error, the user stays on the page, so we need to handle it.
+      // If successful, Supabase handles the redirect, so no 'finally' is needed here.
+      if (error) {
+        // This string matching is fragile but a common pattern for this specific Supabase error.
+        if (error.message.includes('already exists')) {
+          Toast(`An account with this email already exists. Please sign in with the original method.`, 6000);
+        } else {
+          Toast(`Error signing in with Google: ${error.message}`, 5000);
+        }
+        setIsSubmitting(false);
       }
+    } catch (error) {
+      // Catch any unexpected errors during the setup of the OAuth call.
+      Toast(`An unexpected error occurred: ${error.message}`, 5000);
       setIsSubmitting(false);
     }
-  };
+  }, []);
 
   if (loading) {
-    return <div className="full-page-center">Authenticating…</div>
+    return <div className="full-page-center">Authenticating…</div>;
   }
 
   if (!user) {
@@ -55,9 +69,11 @@ export default function AuthGate({ children }) {
       <div className="full-page-center">
         <div className="auth-form-container">
           <h2 className="auth-form-title">Sign In to Konzuko</h2>
-          
+
           <div className="auth-oauth-buttons">
-            <button className="button" onClick={handleGoogleAuth} disabled={isSubmitting}>Sign in with Google</button>
+            <button className="button" onClick={handleGoogleAuth} disabled={isSubmitting}>
+              Sign in with Google
+            </button>
           </div>
 
           <div className="auth-divider">
@@ -66,25 +82,30 @@ export default function AuthGate({ children }) {
             <hr className="auth-divider-line" />
           </div>
 
-          <input
-            type="email"
-            placeholder="you@example.com"
-            value={email}
-            onKeyPress={e => e.key === 'Enter' && handleMagicLink()}
-            className="form-input auth-email-input"
-            disabled={isSubmitting}
-          />
-          <button
-            className="button auth-submit-button"
-            onClick={handleMagicLink}
-            disabled={isSubmitting}
-          >
-            {isSubmitting ? 'Sending...' : 'Send Magic Link'}
-          </button>
+          <form onSubmit={handleMagicLink}>
+            <fieldset disabled={isSubmitting} style={{ border: 'none', padding: 0, margin: 0 }}>
+              <input
+                type="email"
+                placeholder="you@example.com"
+                value={email}
+                onInput={e => setEmail(e.target.value)}
+                className="form-input auth-email-input"
+                required
+                pattern={EMAIL_VALIDATION_PATTERN}
+                title="Please enter a valid email address."
+              />
+              <button
+                type="submit"
+                className="button auth-submit-button"
+              >
+                {isSubmitting ? 'Sending...' : 'Send Magic Link'}
+              </button>
+            </fieldset>
+          </form>
         </div>
       </div>
-    )
+    );
   }
 
-  return <SubscriptionGate>{children}</SubscriptionGate>
+  return <SubscriptionGate>{children}</SubscriptionGate>;
 }

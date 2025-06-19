@@ -1,33 +1,46 @@
-// src/components/PricingPage.jsx
+// ─────────────────────────────────────────────
+// file: src/components/PricingPage.jsx
+// ─────────────────────────────────────────────
 import { useState } from 'preact/hooks';
 import { loadStripe } from '@stripe/stripe-js';
 import { supabase } from '../lib/supabase.js';
 import { STRIPE_PUBLISHABLE_KEY } from '../config.js';
 import Toast from './Toast.jsx';
 
+/* ───────── Stripe initialisation ───────── */
 const areStripeKeysMissing = !STRIPE_PUBLISHABLE_KEY;
-const stripePromise = areStripeKeysMissing ? null : loadStripe(STRIPE_PUBLISHABLE_KEY);
+const stripePromise = areStripeKeysMissing
+  ? null
+  : loadStripe(STRIPE_PUBLISHABLE_KEY);
 
-// ─────────────────────────────────────────────────────────────
-// All available plans.  Replace the price IDs with your own.
-// ─────────────────────────────────────────────────────────────
+/* ───────── Plans (replace IDs with yours) ───────── */
 const plans = [
   {
     id: 'price_1Rb2d72RqNQ49lAwemcIcuUE',   // £35 / month
     name: 'Pro',
     price: '£35',
     period: '/mo',
-    features: ['Unlimited Tasks', 'Full Context Window', 'Priority Support'],
+    features: [
+      'Unlimited Tasks',
+      'Full Context Window',
+      'Priority Support',
+    ],
   },
   {
     id: 'price_1Rb2d72RqNQ49lAwpG0LllTn',   // £50 / month
     name: 'Team',
     price: '£50',
     period: '/mo',
-    features: ['All Pro Features', 'Team Collaboration', 'Centralised Billing'],
+    features: [
+      'All Pro Features',
+      'Team Collaboration',
+      'Centralised Billing',
+    ],
     isFeatured: true,
   },
 ];
+
+/* ────────────────────────────────────────── */
 
 export default function PricingPage() {
   const [loadingId, setLoadingId] = useState(null);
@@ -41,17 +54,24 @@ export default function PricingPage() {
     setLoadingId(priceId);
 
     try {
+      /* ----- Get Supabase session for JWT ----- */
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.access_token) throw new Error('User not authenticated');
 
-      // ---- CUSTOM FETCH (no "apikey" header) ----
+      /* ----- Build payload (ADD siteUrl) ------ */
+      const payload = {
+        priceId,
+        siteUrl: window.location.origin,   /*  ⇦ NEW  */
+      };
+
+      /* ----- Call Edge Function --------------- */
       const res = await fetch('/functions/v1/create-checkout-session', {
-        method: 'POST',
+        method : 'POST',
         headers: {
-          Authorization: `Bearer ${session.access_token}`,
+          Authorization : `Bearer ${session.access_token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ priceId }),
+        body: JSON.stringify(payload),
       });
 
       if (!res.ok) {
@@ -61,16 +81,19 @@ export default function PricingPage() {
 
       const { sessionId } = await res.json();
 
+      /* ----- Redirect user to Stripe ---------- */
       const stripe = await stripePromise;
       const { error: stripeErr } = await stripe.redirectToCheckout({ sessionId });
       if (stripeErr) throw stripeErr;
+
     } catch (err) {
-      console.error(err);
+      console.error('[PricingPage] Checkout error:', err);
       Toast(`Checkout failed: ${err.message}`, 6000);
       setLoadingId(null);
     }
   }
 
+  /* ───────── JSX ───────── */
   return (
     <div className="full-page-center">
       <h1 className="pricing-page-title">Choose Your Plan</h1>
@@ -82,9 +105,12 @@ export default function PricingPage() {
             className={`pricing-card ${plan.isFeatured ? 'featured' : ''}`}
           >
             <h2 className="pricing-card-title">{plan.name}</h2>
+
             <p className="pricing-card-price">
               {plan.price}
-              <span className="pricing-card-price-period">{plan.period}</span>
+              <span className="pricing-card-price-period">
+                {plan.period}
+              </span>
             </p>
 
             <ul className="pricing-features-list">

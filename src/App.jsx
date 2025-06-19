@@ -6,6 +6,7 @@ import {
   useRef,
   useCallback
 } from 'preact/hooks';
+import { useQueryClient } from '@tanstack/react-query'; // Import useQueryClient
 
 import ChatProvider, { useChat } from './contexts/ChatContext.jsx';
 import ChatList from './ChatList.jsx';
@@ -29,21 +30,25 @@ import { useScrollNavigation } from './hooks/useScrollNavigation.js';
 import { useTokenizableContent } from './hooks/useTokenizableContent.js';
 import { countTokensWithGemini, initTokenWorker } from './lib/tokenWorkerClient.js';
 
-// FIX: Add a component to handle post-checkout redirects.
+// FIX: Add a component to handle post-checkout redirects and proactively refetch subscription status.
 function CheckoutStatusHandler() {
+  const queryClient = useQueryClient();
+
   useEffect(() => {
     const query = new URLSearchParams(window.location.search);
     if (query.has('checkout')) {
       const status = query.get('checkout');
       if (status === 'success') {
         Toast('Payment successful! Welcome to Konzuko Pro.', 5000);
+        // Proactively refetch the subscription status to update the UI faster than the webhook.
+        queryClient.invalidateQueries({ queryKey: ['subscription'] });
       } else if (status === 'cancel') {
         Toast('Your order was cancelled. You can try again anytime.', 5000);
       }
       // Clean the URL to prevent the toast from showing on refresh.
       window.history.replaceState({}, document.title, window.location.pathname);
     }
-  }, []);
+  }, [queryClient]);
 
   return null; // This component renders nothing.
 }
